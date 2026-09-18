@@ -1,0 +1,18 @@
+# 构建产物
+bin/
+obj/
+*.user
+*.suo
+.vs/
+
+# 发布输出
+publish/
+artifacts/
+
+# 测试
+TestResults/
+*.trx
+*.coverage
+
+# 运行时数据（曲库放在 exe 旁边，不进仓库）
+songs/
