@@ -9,10 +9,11 @@
   <!--
     窗口一：编辑器外壳（docs/wireframe.html 那一块 .toolbar / .lanes / .nav / .readout / .transport）。
 
-    这是**整个窗口一的外壳**，主协调者合并时要在这上面接两处：
-      · 右上角「演奏器…」→ 06/04 那个独立窗口（本切片置灰）
-      · 工具栏「导出」→ 11（本切片置灰）
-    接法就是给那几个 Button 挂 Click，别改这层结构。
+    切片到这儿已经合齐了，工具栏四条命令的着落：
+      · 导入 MIDI… → 本窗口直接读（SongProject.Read）
+      · 保存 / 另存为… → **仍然置灰**，它们要的是曲库，归 10
+      · 导出 → 本窗口写回（SongProject.Write），装了曲子才亮
+      · 演奏器… → 组装点给的工厂，另开一个独立窗口（04）
 
     样式全部写在这儿的 Window.Styles 里：Styles/Controls.axaml 归 03，本切片不动它，
     而新增的容器（工具栏 / 导航条 / 读数条 / 走带条）总得有长相。
@@ -94,6 +95,21 @@
       <Setter Property="Foreground" Value="{DynamicResource TokenWarn}" />
       <Setter Property="FontSize" Value="11.5" />
     </Style>
+
+    <!-- 做成了那件事的回执。和 errorbox 同形不同色：这里取 accent（蓝），不取 warn（黄）——
+         颜色是「好 / 坏」的唯一区分，形状一样才不会让工具栏跳一下 -->
+    <Style Selector="Border.noticebox">
+      <Setter Property="Background" Value="{DynamicResource TokenAccentSoft}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource TokenAccentLine}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="{DynamicResource TokenRadiusControl}" />
+      <Setter Property="Padding" Value="9,6" />
+    </Style>
+
+    <Style Selector="Border.noticebox TextBlock">
+      <Setter Property="Foreground" Value="{DynamicResource TokenAccent}" />
+      <Setter Property="FontSize" Value="11.5" />
+    </Style>
   </Window.Styles>
 
   <Grid RowDefinitions="Auto,*,Auto,Auto,Auto">
@@ -104,13 +120,15 @@
         <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,*">
           <Button Grid.Column="0" x:Name="ImportButton" Classes="primary" Content="导入 MIDI…"
                   Click="OnImportClick" />
-          <!-- 这三条本切片不接线，置灰 + 说清归谁。灰着的按钮比空按钮诚实 -->
+          <!-- 保存 / 另存为要等曲库，置灰 + 说清归谁。灰着的按钮比空按钮诚实 -->
           <Button Grid.Column="1" x:Name="SaveButton" Content="保存" IsEnabled="False"
                   Margin="8,0,0,0" ToolTip.Tip="存进曲库归 10" />
           <Button Grid.Column="2" x:Name="SaveAsButton" Content="另存为…" IsEnabled="False"
                   Margin="8,0,0,0" ToolTip.Tip="存进曲库归 10" />
+          <!-- 导出：没装曲子时置灰，装了才亮（在 LoadSong 里开） -->
           <Button Grid.Column="3" x:Name="ExportButton" Content="导出" IsEnabled="False"
-                  Margin="8,0,0,0" ToolTip.Tip="导出 MIDI 归 11" />
+                  Margin="8,0,0,0" Click="OnExportClick"
+                  ToolTip.Tip="把这时的谱面写回一个标准 MIDI 文件" />
 
           <StackPanel Grid.Column="4" Orientation="Horizontal" Spacing="6" Margin="12,0,0,0">
             <TextBlock Classes="label" Text="歌曲名" />
@@ -120,13 +138,18 @@
           </StackPanel>
 
           <Button Grid.Column="5" x:Name="PerformerButton" Classes="launch" Content="演奏器…"
-                  IsEnabled="False" HorizontalAlignment="Right"
-                  ToolTip.Tip="独立演奏窗口归 06/04，合并时接上" />
+                  HorizontalAlignment="Right" Click="OnPerformerClick"
+                  ToolTip.Tip="另开一个窗口，把选中的轨弹到别的程序里去" />
         </Grid>
 
-        <!-- 导入失败时在这儿说一句，没事时不占地方 -->
+        <!-- 导入失败、导出失败都在这儿说一句，没事时不占地方 -->
         <Border x:Name="ErrorBox" Classes="errorbox" IsVisible="False">
           <TextBlock x:Name="ErrorText" TextWrapping="Wrap" />
+        </Border>
+
+        <!-- 做成了一件事的回报。导出成功要是只把报错行藏起来，用户没法知道盘上到底有没有东西 -->
+        <Border x:Name="NoticeBox" Classes="noticebox" IsVisible="False">
+          <TextBlock x:Name="NoticeText" TextWrapping="Wrap" />
         </Border>
       </StackPanel>
     </Border>

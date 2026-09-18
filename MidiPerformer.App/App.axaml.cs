@@ -1,9 +1,11 @@
 using Avalonia;
+using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using MidiPerformer.Adapters.Gateways;
 using MidiPerformer.App.Theme;
 using MidiPerformer.App.Views;
+using MidiPerformer.Core.Ports.Outbound;
 
 namespace MidiPerformer.App;
 
@@ -26,8 +28,8 @@ public partial class App : Application
     /// <summary>
     /// 组装点。全程序唯一允许 new 具体实现的地方。
     ///
-    /// 窗口一要三样东西：取色桥（自绘层用）、墙上钟（试听的时间积分）、
-    /// 出声的出口（winmm → GS 软波表）。三样都在这儿建好，构造器注入下去 ——
+    /// 窗口一要三样东西：取色桥（自绘层用）、墙上钟（试听与演奏共用的时间原点）、
+    /// 出声的出口（winmm → GS 软波表）。演奏器还要键鼠出口。全在这儿建好，构造器注入下去 ——
     /// 别处谁也不 new 它们，不然「换一个实现」就得改一片。
     /// </summary>
     public override void OnFrameworkInitializationCompleted()
@@ -40,15 +42,45 @@ public partial class App : Application
             }
             else
             {
+                var clock = new SystemClock();
                 var sink = new WinmmPreview();
-                desktop.MainWindow = new MainWindow(Tokens, new SystemClock(), sink);
+                var sender = new InputSender();
 
-                // 退出时关掉 MIDI 设备。窗口只负责松开按着的音，设备的开关是组装点的活
-                desktop.Exit += (_, _) => sink.Dispose();
+                desktop.MainWindow = new MainWindow(Tokens, clock, sink, PerformerFactory(clock, sender));
+
+                // 退出时收尾。窗口自己会松开按着的音，但那要窗口正常关掉才算数 ——
+                // 进程被别处带走时，还按着的键就留在游戏里了。多松一次是幂等的，代价为零。
+                desktop.Exit += (_, _) =>
+                {
+                    sender.ReleaseAll();
+                    sink.Dispose();
+                };
             }
         }
 
         base.OnFrameworkInitializationCompleted();
+    }
+
+    /// <summary>
+    /// 「演奏器…」的入口工厂：<b>同一个时刻只允许存在一个演奏器窗口</b>。
+    ///
+    /// 这不是省内存，是安全：F6 急停靠的是低层键盘钩子，两个窗口就是两个钩子，
+    /// 按一下两边同时响应，各自去松各自的键 —— 而它们管的是同一块键盘。
+    /// 所以窗口复用；窗口被关掉（用户关的，或它自己的 owner 关的）之后才允许再开一个。
+    /// </summary>
+    private static Func<Window> PerformerFactory(IClock clock, InputSender sender)
+    {
+        Window? live = null;
+
+        return () =>
+        {
+            if (live is not null) return live;
+
+            var window = new PerformerWindow(clock, sender);
+            live = window;
+            window.Closed += (_, _) => live = null;
+            return window;
+        };
     }
 
     /// <summary>

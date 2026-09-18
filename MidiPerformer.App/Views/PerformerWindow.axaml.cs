@@ -55,8 +55,8 @@ public partial class PerformerWindow : Window
     private bool _running;
     private string _hotkeyNote = "";
 
-    /// <summary>给可视化设计器用的空构造。真跑起来走下面那个。</summary>
-    public PerformerWindow() : this(new SystemClock(), new InputSender()) { }
+    /// <summary>给可视化设计器用的空构造。真跑起来走下面那个 —— 网关只由组装点建。</summary>
+    public PerformerWindow() : this(null!, null!) { }
 
     /// <param name="clock">墙上钟。真跑用 <see cref="SystemClock"/>，注入是为了不把测试逼到真时间上。</param>
     /// <param name="sender">键鼠出口。同一个对象既是 <see cref="IEventSink"/>，也直接提供 <c>ReleaseAll</c>。</param>

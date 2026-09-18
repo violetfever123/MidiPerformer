@@ -21,15 +21,15 @@ namespace MidiPerformer.App.Views;
 /// 所以这里没有 ViewModel 类 —— 那会是个只做转发的空壳（见 spec 的「Controller」那节）。
 ///
 /// 这一张是**只读**的：卷帘不响应点击、不改任何音符，键盘也只定位不移动。
-/// 接线规则：只有**当时已经存在**的命令才接（导入）；保存 / 另存为 / 导出 / 演奏器
-/// 四条都置灰并注明归谁，合并时由主协调者接上。
+/// 工具栏四条命令里，导入和导出这台窗口自己就做得了（都是 <see cref="SongProject"/> 的一层薄转发），
+/// 保存 / 另存为要的是曲库，还留给 10；演奏器那条走组装点给的工厂，本窗口不 new 那个窗。
 /// </summary>
 public partial class MainWindow : Window
 {
     /// <summary>播放时把播放头放在屏幕的哪个位置：偏左约三分之一，右边留出前瞻（wireframe 标注 4）。</summary>
     private const double FollowFraction = 0.32;
 
-    /// <summary>认得出的文件类型。midi 和 mid 都收 —— 导出工具两种后缀都写。</summary>
+    /// <summary>认得出的文件类型。midi 和 mid 都收 —— 导入导出两侧共用同一份，免得只改一边。</summary>
     private static readonly FilePickerFileType MidiFileType = new("MIDI 文件")
     {
         Patterns = new[] { "*.mid", "*.midi" }
@@ -37,6 +37,7 @@ public partial class MainWindow : Window
 
     private readonly TokenSource _tokens;
     private readonly PreviewPlayback _playback;
+    private readonly Func<Window>? _performerFactory;
     private readonly List<TrackLaneView> _lanes = new();
 
     private PianoRollController? _controller;
@@ -45,16 +46,22 @@ public partial class MainWindow : Window
     private bool _draggingNav;
 
     /// <summary>给可视化设计器用的空构造。真跑起来走下面那个。</summary>
-    public MainWindow() : this(null!, null!, null!) { }
+    public MainWindow() : this(null!, null!, null!, null) { }
 
     /// <param name="tokens">自绘取色桥（卷帘和导航条不在 XAML 里，拿不到 DynamicResource）。</param>
     /// <param name="clock">墙上钟，喂给试听的时间积分。</param>
     /// <param name="sink">出声的出口（winmm）。</param>
-    public MainWindow(TokenSource tokens, IClock clock, IAudioSink sink)
+    /// <param name="performerFactory">
+    /// 「演奏器…」按下时去要那个独立窗口。给的是工厂不是现成的窗口：
+    /// 演奏器一建出来就装低层键盘钩子，所以它必须到用户真要用的那一刻才存在。
+    /// 复用与单例都在组装点里管，本窗口只管要、然后 Show。
+    /// </param>
+    public MainWindow(TokenSource tokens, IClock clock, IAudioSink sink, Func<Window>? performerFactory)
     {
         InitializeComponent();
 
         _tokens = tokens;
+        _performerFactory = performerFactory;
         _playback = new PreviewPlayback(sink, clock);
 
         NavStrip.Tokens = _tokens;
@@ -89,10 +96,9 @@ public partial class MainWindow : Window
     // ==================== 导入 ====================
 
     /// <summary>
-    /// 「导入 MIDI…」—— 本切片**唯一**接上线的按钮。
+    /// 「导入 MIDI…」—— 选文件 → 读 → 显示。
     ///
-    /// 只做「选文件 → 读 → 显示」三件事：曲库、命名、导入历史归 10。
-    /// 没有它这一张根本没法验收（卷帘上一片空），所以它必须接。
+    /// 只做这三件事：曲库、命名、导入历史归 10。
     /// </summary>
     private async void OnImportClick(object? sender, RoutedEventArgs e)
     {
@@ -127,7 +133,7 @@ public partial class MainWindow : Window
     /// <summary>装一首曲子：重建卷帘、把事件表交给试听、把界面复位。</summary>
     private void LoadSong(Song song, string title)
     {
-        ErrorBox.IsVisible = false;
+        HideMessages();
 
         _controller = new PianoRollController(song);
         _playback.Load(song);
@@ -148,6 +154,9 @@ public partial class MainWindow : Window
 
         PlayButton.IsEnabled = song.Tracks.Count > 0;
         JumpBox.IsEnabled = true;
+        // 有谱面就写得出，哪怕一个音都没有 —— 速度表和分辨率也值得留下来，
+        // 所以这条的判据是「装上了曲子」，不是「有轨」
+        ExportButton.IsEnabled = true;
 
         ShowHover(null);
         ShowSelection();
@@ -156,10 +165,82 @@ public partial class MainWindow : Window
         RefreshView();
     }
 
+    // ==================== 导出 / 演奏器 ====================
+
+    /// <summary>
+    /// 「导出」—— 把此刻手上的谱面写回一个标准 MIDI 文件。
+    ///
+    /// 写出去的是**模型**，不是屏幕：<c>Track.Transpose</c>、卷帘视口、播放头都不进文件
+    /// （spec 里那条「Transpose 是轨的属性，不写进音符」的同一个道理）。
+    /// 一句「导出成功」也不说就太安静了 —— 用户没法知道盘上到底有没有落下一个文件。
+    /// </summary>
+    private async void OnExportClick(object? sender, RoutedEventArgs e)
+    {
+        if (_controller is not { } controller) return;
+
+        var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+        {
+            Title = "导出 MIDI",
+            SuggestedFileName = SongNameBox.Text ?? "未命名",
+            DefaultExtension = "mid",
+            FileTypeChoices = new[] { MidiFileType }
+        });
+
+        if (file?.TryGetLocalPath() is not { } path)
+        {
+            // 用户取消了。取消不是失败，什么都不用说
+            return;
+        }
+
+        try
+        {
+            SongProject.Write(controller.Song, path);
+            ShowNotice($"已导出到 {path}");
+        }
+        catch (Exception ex) when (ex is IOException or InvalidDataException
+            or UnauthorizedAccessException or NotSupportedException or InvalidOperationException)
+        {
+            // 和导入同一条规矩：SongProject 抛的是中文消息，原样报出来
+            ShowError(ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// 「演奏器…」—— 另开一个独立窗口，把选中的轨弹到别的程序里去。
+    ///
+    /// 本窗口不 new 它、也不知道它要什么（钟和键鼠出口都在组装点手里）：
+    /// 要一个过来、挂到自己名下、Show。挂了 owner 之后主窗口一关它就跟着关 ——
+    /// 一个还在发按键的窗口不该在主窗口没了以后留在屏幕上。
+    /// </summary>
+    private void OnPerformerClick(object? sender, RoutedEventArgs e)
+    {
+        if (_performerFactory?.Invoke() is not { } window) return;
+
+        // 组装点复用的那个窗口可能已经显示着了，再 Show 一次会抛
+        if (!window.IsVisible) window.Show(this);
+        else window.Activate();
+    }
+
+    // ==================== 提示行 ====================
+
     private void ShowError(string message)
     {
+        NoticeBox.IsVisible = false;
         ErrorText.Text = message;
         ErrorBox.IsVisible = true;
+    }
+
+    private void ShowNotice(string message)
+    {
+        ErrorBox.IsVisible = false;
+        NoticeText.Text = message;
+        NoticeBox.IsVisible = true;
+    }
+
+    private void HideMessages()
+    {
+        ErrorBox.IsVisible = false;
+        NoticeBox.IsVisible = false;
     }
 
     // ==================== 播放 ====================
