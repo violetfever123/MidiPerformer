@@ -14,13 +14,25 @@
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] 全项目 `.axaml` 与自绘代码里**没有字面颜色值**（令牌是唯一来源）
-- [ ] `Tokens.axaml` 的 25 个令牌与 `docs/wireframe.html` 的 `:root` 逐条对应，明暗各一套
-- [ ] 令牌只在 `Tokens.axaml` 里定义一次，别处一律引用
-- [ ] 切换主题时，XAML 控件与自绘层**同时**变
-- [ ] 控件外观齐全：按钮（主 / 普通 / 启动）、输入框、下拉框、滑块、列表、滚动条、标签片
-- [ ] 数字位置用等宽 + `tabular-nums`
-- [ ] 样板窗口可见，与 wireframe 的对应部分逐块对照
-- [ ] 窗口用系统标题栏，没有自绘边框
+- [x] 全项目 `.axaml` 与自绘代码里**没有字面颜色值**（令牌是唯一来源）
+- [x] `Tokens.axaml` 的 25 个令牌与 `docs/wireframe.html` 的 `:root` 逐条对应，明暗各一套
+- [x] 令牌只在 `Tokens.axaml` 里定义一次，别处一律引用
+- [x] 切换主题时，XAML 控件与自绘层**同时**变
+- [x] 控件外观齐全：按钮（主 / 普通 / 启动）、输入框、下拉框、滑块、列表、滚动条、标签片
+- [x] 数字位置用等宽 + `tabular-nums`
+- [x] 样板窗口可见，与 wireframe 的对应部分逐块对照
+- [x] 窗口用系统标题栏，没有自绘边框
+
+**落地时的三处偏离**（都是「Avalonia 没有 wireframe 那个能力」，写在 `Controls.axaml` 头部）：
+
+1. 「主」按钮 hover 在 wireframe 里是 `filter:brightness(1.08)`，Avalonia 没有亮度滤镜 —— 改成边框换 `accent-line`，不新造令牌。
+2. 焦点圈 wireframe 是 `outline:2px + offset 1px`，Avalonia 没有 outline-offset —— 改成 2px 边框（内容让 1px）。
+3. 「主」按钮前景取 `TokenSurface` 而不是 wireframe 写的 `#fff`：暗色下 accent 是浅蓝 `#74ABDD`，白字压上去对比度只有 2.4:1 读不清；`TokenSurface` 在明亮下正好就是 `#FFFFFF`（与 wireframe 一致），暗色下变深色，两边都读得清。
+
+**两处不写进代码就一定会踩回去的坑**（都有测试守着）：
+
+- Fluent 把滑块圆点、滚动条滑块的颜色**内联写在模板子元素上**，那是局部值，压过一切 `Style`。`Slider /template/ Thumb` 那种写法写多少条都是死的 —— 只能覆盖它引用的**资源键**。这也正是令牌要声明成 `Color` 而不是 `SolidColorBrush` 的原因（`SolidColorBrush.Color` 只收 `Color`）。
+- `ScrollBarThumbBackgroundColor` 在 Fluent 里是 `Color`，我们只能用画刷覆盖它：令牌拼不出 `Color` 资源（`<Color x:Key="x">{DynamicResource TokenY}</Color>` 报 AVLN2005），而画刷喂给 `Color=` 属性会崩。它安全是因为 `ScrollBar.xaml:288` 拿它当 `Background` 用。这类键登记在 `TokenParityTests.BrushOverridesColorKey` 里，新加的要先去 Fluent 源码确认消费方。
+

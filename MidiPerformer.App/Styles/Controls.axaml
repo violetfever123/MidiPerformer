@@ -1,0 +1,426 @@
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+  <!--
+    控件长相 —— 准绳还是 docs/wireframe.html，颜色一律取 Tokens.axaml 的令牌。
+    这个文件里没有一个颜色字面值，字体名也不写死。
+
+    Fluent 留着（它在 App.axaml 里排在前面），因为控件模板、键盘导航、Popup 定位都是它提供的；
+    我们只覆盖**长相**。覆盖点分两种：
+
+    - 直接设控件自己的属性（Background / BorderBrush / CornerRadius …）：
+      模板里的 ContentPresenter 会 TemplateBinding 过去，基础态就够了。
+    - 模板内部元素（`/template/ ContentPresenter#PART_ContentPresenter` 之类）：
+      Fluent 的 hover / pressed / selected 直接在**那个元素上**设色，绕过了 TemplateBinding，
+      所以这些状态必须打到同一层，只设控件属性是盖不住的。零件名取自 Avalonia 11.3 的 Fluent 源码。
+
+    两条有意的偏离，写在这里免得日后当 bug 找：
+    1. 「主」按钮 hover 在 wireframe 里是 `filter:brightness(1.08)`，Avalonia 没有亮度滤镜。
+       改成边框换成 accent-line —— 能看见状态变了，不去新造一个 accent 的亮色令牌。
+    2. 焦点圈在 wireframe 里是 2px outline + offset 1px，这里改成 2px 边框（内容让 1px）。
+       Avalonia 没有 outline-offset，凑一个不用新令牌的做法。
+  -->
+
+  <Styles.Resources>
+    <!--
+      滑块圆点和滚动条滑块的颜色，Fluent 是**内联写在模板子元素上**的：
+        <Thumb Name="thumb" Background="{DynamicResource SliderThumbBackground}" .../>
+        <Thumb Theme="{StaticResource FluentScrollBarThumb}" .../>
+      内联值就是局部值，优先级压过一切 Style —— 所以 `Slider /template/ Thumb` 那种写法
+      写多少条都没用（改之前这里就有三条，全是死的，圆点一直是系统强调色）。
+      能动的只有它引用的**资源键**：把键换掉，模板拿去的就是令牌。
+      这就是令牌声明成 Color 而不是画刷的原因 —— SolidColorBrush 的 Color 只能收 Color。
+    -->
+    <!--
+      圆点取 accent，和 Fluent 原本的结构一致（原本就是 accent，只不过取的是**系统**强调色）。
+      别取 TokenSurface —— 滑块坐在卡片上，卡片底就是 TokenSurface，圆点会整个看不见。
+    -->
+    <SolidColorBrush x:Key="SliderThumbBackground" Color="{DynamicResource TokenAccent}" />
+    <SolidColorBrush x:Key="SliderThumbBackgroundPointerOver" Color="{DynamicResource TokenAccentLine}" />
+    <SolidColorBrush x:Key="SliderThumbBackgroundPressed" Color="{DynamicResource TokenAccentLine}" />
+    <!--
+      禁用态的圆点不能取 TokenLine —— 那正是**没走过的那半截轨道**的颜色（Slider.Background），
+      圆点会化在轨道里整个看不见，看着像根进度条，还看不出是个能拖的滑块。
+      和上面「别取 TokenSurface」是同一类碰撞：圆点必须和它坐着的那块底色不一样。
+    -->
+    <SolidColorBrush x:Key="SliderThumbBackgroundDisabled" Color="{DynamicResource TokenInkFaint}" />
+    <!--
+      滚动条。wireframe 没画它（浏览器自带），这里只压到最轻：轨道透明，滑块取 ink-faint。
+      基色在 ScrollBarPanningThumbBackground 上 —— **没有** ScrollBarThumbFill 这个键，
+      Fluent 的 FluentScrollBarThumb 主题里写的就是 Panning 那个。
+      悬停/按下/禁用那三条打的是滑块内部的 Border（不是 Thumb），但一样是换键就生效。
+    -->
+    <SolidColorBrush x:Key="ScrollBarPanningThumbBackground" Color="{DynamicResource TokenInkFaint}" />
+    <SolidColorBrush x:Key="ScrollBarThumbFillPointerOver" Color="{DynamicResource TokenInkMuted}" />
+    <SolidColorBrush x:Key="ScrollBarThumbFillPressed" Color="{DynamicResource TokenInk}" />
+    <SolidColorBrush x:Key="ScrollBarThumbFillDisabled" Color="{DynamicResource TokenLine}" />
+    <!--
+      展开态走的是这个键（上面那几条是悬停/按下用的）。
+      Fluent 把它声明成 **Color**（名字就以 Color 结尾），这里却是画刷 —— 是有意的：
+      Color 资源没法从令牌拼出来，<Color x:Key="x">{DynamicResource TokenY}</Color> 直接报
+      AVLN2005「Unable to parse ... as a color」，它只会把花括号里的当成颜色字面值。
+      所以令牌驱动的 Color 资源在 Avalonia 里根本写不出来，画刷是唯一能表达的形态。
+      之所以安全：ScrollBar.xaml:288 把它当 Background 用（吃的就是画刷），
+      不是 Color= —— 「画刷塞进 Color」那个崩过的形状，这里走不到。
+    -->
+    <SolidColorBrush x:Key="ScrollBarThumbBackgroundColor" Color="{DynamicResource TokenInkMuted}" />
+    <SolidColorBrush x:Key="ScrollBarTrackFill" Color="Transparent" />
+    <SolidColorBrush x:Key="ScrollBarTrackFillPointerOver" Color="Transparent" />
+  </Styles.Resources>
+
+  <!-- ==================== 窗口 ==================== -->
+  <!-- 字体字号挂在窗口上靠继承往下走，不用每个 TextBlock 各写一遍 -->
+  <Style Selector="Window">
+    <Setter Property="FontFamily" Value="{DynamicResource TokenFontUi}" />
+    <Setter Property="FontSize" Value="14" />
+    <Setter Property="Background" Value="{DynamicResource TokenGround}" />
+    <Setter Property="Foreground" Value="{DynamicResource TokenInk}" />
+  </Style>
+
+  <!-- ==================== 文字 ==================== -->
+  <!-- wireframe 的 .mono 同时管等宽和 tabular-nums：刻度、BPM、小节号要能上下对齐 -->
+  <Style Selector="TextBlock.mono">
+    <Setter Property="FontFamily" Value="{DynamicResource TokenFontMono}" />
+    <Setter Property="FontFeatures" Value="+tnum" />
+  </Style>
+
+  <!-- wireframe 的 .sect > h2 -->
+  <Style Selector="TextBlock.sect-title">
+    <Setter Property="FontSize" Value="12" />
+    <Setter Property="FontWeight" Value="Bold" />
+    <Setter Property="Foreground" Value="{DynamicResource TokenInkFaint}" />
+  </Style>
+
+  <!-- ==================== 按钮 ==================== -->
+  <Style Selector="Button">
+    <Setter Property="Background" Value="{DynamicResource TokenSurface}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource TokenLine}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="{DynamicResource TokenRadiusButton}" />
+    <Setter Property="Foreground" Value="{DynamicResource TokenInk}" />
+    <Setter Property="FontSize" Value="12.5" />
+    <Setter Property="Padding" Value="11,5" />
+    <Setter Property="MinHeight" Value="0" />
+    <Setter Property="Cursor" Value="Hand" />
+  </Style>
+
+  <Style Selector="Button:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource TokenAccentSoft}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource TokenAccentLine}" />
+    <Setter Property="Foreground" Value="{DynamicResource TokenInk}" />
+  </Style>
+
+  <Style Selector="Button:pressed /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource TokenAccentSoft}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource TokenAccent}" />
+    <Setter Property="Foreground" Value="{DynamicResource TokenInk}" />
+  </Style>
+
+  <Style Selector="Button:focus-visible /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="BorderBrush" Value="{DynamicResource TokenAccent}" />
+    <Setter Property="BorderThickness" Value="2" />
+  </Style>
+
+  <!-- 主：导入 / 保存这类真正干事的 -->
+  <!--
+    前景取 TokenSurface 而不是 wireframe 写的 #fff。理由是暗色那一套：
+    accent 是浅蓝 #74ABDD，白字压上去对比度只有 2.4:1，读不清；
+    TokenSurface 在明亮下正好就是 #FFFFFF（和 wireframe 一模一样），暗色下是深色，两边都读得清。
+  -->
+  <Style Selector="Button.primary">
+    <Setter Property="Background" Value="{DynamicResource TokenAccent}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource TokenAccent}" />
+    <Setter Property="Foreground" Value="{DynamicResource TokenSurface}" />
+  </Style>
+
+  <Style Selector="Button.primary /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource TokenAccent}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource TokenAccent}" />
+    <Setter Property="Foreground" Value="{DynamicResource TokenSurface}" />
+  </Style>
+
+  <Style Selector="Button.primary:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="BorderBrush" Value="{DynamicResource TokenAccentLine}" />
+  </Style>
+
+  <Style Selector="Button.primary:pressed /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="BorderBrush" Value="{DynamicResource TokenAccentLine}" />
+  </Style>
+
+  <!-- 启动：打开另一个窗口 / 把东西送出去那种，「主」的弱化版 -->
+  <Style Selector="Button.launch">
+    <Setter Property="Background" Value="{DynamicResource TokenSurface}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource TokenAccentLine}" />
+    <Setter Property="Foreground" Value="{DynamicResource TokenAccent}" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+  </Style>
+
+  <Style Selector="Button.launch /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource TokenSurface}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource TokenAccentLine}" />
+    <Setter Property="Foreground" Value="{DynamicResource TokenAccent}" />
+  </Style>
+
+  <Style Selector="Button.launch:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource TokenAccentSoft}" />
+  </Style>
+
+  <Style Selector="Button.launch:pressed /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource TokenAccentSoft}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource TokenAccent}" />
+  </Style>
+
+  <!-- 危险：删轨 / 删曲子 -->
+  <Style Selector="Button.danger">
+    <Setter Property="BorderBrush" Value="{DynamicResource TokenLine}" />
+  </Style>
+
+  <Style Selector="Button.danger:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource TokenWarnSoft}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource TokenWarnLine}" />
+    <Setter Property="Foreground" Value="{DynamicResource TokenWarn}" />
+  </Style>
+
+  <!-- ==================== 标签片 ==================== -->
+  <!-- wireframe 的 .chip：浮在卷帘上的那条「这一段 8 个音 删除」 -->
+  <Style Selector="Border.chip">
+    <Setter Property="Background" Value="{DynamicResource TokenSurface}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource TokenAccentLine}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="{DynamicResource TokenRadiusButton}" />
+    <Setter Property="Padding" Value="8,3,4,3" />
+    <Setter Property="BoxShadow" Value="{DynamicResource TokenShadow}" />
+  </Style>
+
+  <!-- 标签片里那个「删除」，wireframe 的 .chip button -->
+  <Style Selector="Button.chip-action">
+    <Setter Property="Background" Value="{DynamicResource TokenWarnSoft}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource TokenWarnLine}" />
+    <Setter Property="Foreground" Value="{DynamicResource TokenWarn}" />
+    <Setter Property="CornerRadius" Value="{DynamicResource TokenRadiusControl}" />
+    <Setter Property="FontSize" Value="11.5" />
+    <Setter Property="Padding" Value="7,2" />
+    <Setter Property="MinHeight" Value="0" />
+  </Style>
+
+  <Style Selector="Button.chip-action /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource TokenWarnSoft}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource TokenWarnLine}" />
+    <Setter Property="Foreground" Value="{DynamicResource TokenWarn}" />
+  </Style>
+
+  <Style Selector="Button.chip-action:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource TokenWarn}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource TokenWarn}" />
+    <Setter Property="Foreground" Value="{DynamicResource TokenWarnSoft}" />
+  </Style>
+
+  <Style Selector="Button.chip-action:pressed /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource TokenWarn}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource TokenWarn}" />
+    <Setter Property="Foreground" Value="{DynamicResource TokenWarnSoft}" />
+  </Style>
+
+  <!--
+    禁用态排在**每一条**按钮类规则之后：同优先级的 setter 谁后写谁赢，
+    排在前面就会被 .primary / .launch / .chip-action 的 setter 盖回去，按钮看着还能点。
+    「一个音都弹不了的时候按钮变灰」是 05 要的反馈，这里放最后就不必每加一个类再补一条。
+  -->
+  <Style Selector="Button:disabled /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource TokenLine}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource TokenLine}" />
+    <Setter Property="Foreground" Value="{DynamicResource TokenInkFaint}" />
+  </Style>
+
+  <!-- ==================== 输入框 ==================== -->
+  <Style Selector="TextBox">
+    <Setter Property="Background" Value="{DynamicResource TokenSurface}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource TokenLine}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="{DynamicResource TokenRadiusButton}" />
+    <Setter Property="Foreground" Value="{DynamicResource TokenInk}" />
+    <Setter Property="FontSize" Value="13" />
+    <Setter Property="Padding" Value="9,5" />
+    <Setter Property="MinHeight" Value="0" />
+    <Setter Property="CaretBrush" Value="{DynamicResource TokenAccent}" />
+    <Setter Property="SelectionBrush" Value="{DynamicResource TokenAccent}" />
+    <Setter Property="SelectionForegroundBrush" Value="{DynamicResource TokenSurface}" />
+  </Style>
+
+  <Style Selector="TextBox:pointerover /template/ Border#PART_BorderElement">
+    <Setter Property="Background" Value="{DynamicResource TokenSurface}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource TokenAccentLine}" />
+  </Style>
+
+  <!-- Fluent 聚焦时会把边框加粗，这里按回 1px —— 加粗会让整行文字跳一下 -->
+  <Style Selector="TextBox:focus /template/ Border#PART_BorderElement">
+    <Setter Property="Background" Value="{DynamicResource TokenSurface}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource TokenAccent}" />
+    <Setter Property="BorderThickness" Value="1" />
+  </Style>
+
+  <!-- 数字框：wireframe 的 .bpm input / .jump input，等宽 + 右对齐 + tabular-nums -->
+  <Style Selector="TextBox.numeric">
+    <Setter Property="FontFamily" Value="{DynamicResource TokenFontMono}" />
+    <Setter Property="FontFeatures" Value="+tnum" />
+    <Setter Property="TextAlignment" Value="Right" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="FontSize" Value="15" />
+  </Style>
+
+  <!-- ==================== 下拉框 ==================== -->
+  <Style Selector="ComboBox">
+    <Setter Property="Background" Value="{DynamicResource TokenSurface}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource TokenLine}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="{DynamicResource TokenRadiusButton}" />
+    <Setter Property="Foreground" Value="{DynamicResource TokenInk}" />
+    <Setter Property="FontSize" Value="12.5" />
+    <Setter Property="Padding" Value="7,5" />
+    <Setter Property="MinHeight" Value="0" />
+  </Style>
+
+  <Style Selector="ComboBox /template/ Border#Background">
+    <Setter Property="Background" Value="{DynamicResource TokenSurface}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource TokenLine}" />
+  </Style>
+
+  <Style Selector="ComboBox:pointerover /template/ Border#Background">
+    <Setter Property="Background" Value="{DynamicResource TokenSurface}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource TokenAccentLine}" />
+  </Style>
+
+  <Style Selector="ComboBox:focus /template/ Border#Background">
+    <Setter Property="BorderBrush" Value="{DynamicResource TokenAccent}" />
+  </Style>
+
+  <Style Selector="ComboBox /template/ ContentControl#ContentPresenter">
+    <Setter Property="Foreground" Value="{DynamicResource TokenInk}" />
+  </Style>
+
+  <Style Selector="ComboBox /template/ PathIcon#DropDownGlyph">
+    <Setter Property="Foreground" Value="{DynamicResource TokenInkMuted}" />
+  </Style>
+
+  <!-- 弹出的那个列表 -->
+  <Style Selector="ComboBox /template/ Border#PopupBorder">
+    <Setter Property="Background" Value="{DynamicResource TokenSurface}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource TokenLine}" />
+  </Style>
+
+  <!--
+    禁用态。上面那几条把模板零件设死了，而它们排在 Fluent 的 ^:disabled 之前、
+    又比控件主题高一级 —— 不补这几条，「锁死」的下拉框和能点的长得一模一样。
+  -->
+  <Style Selector="ComboBox:disabled /template/ Border#Background">
+    <Setter Property="Background" Value="{DynamicResource TokenSurface2}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource TokenLineSoft}" />
+  </Style>
+
+  <Style Selector="ComboBox:disabled /template/ ContentControl#ContentPresenter">
+    <Setter Property="Foreground" Value="{DynamicResource TokenInkFaint}" />
+  </Style>
+
+  <Style Selector="ComboBox:disabled /template/ PathIcon#DropDownGlyph">
+    <Setter Property="Foreground" Value="{DynamicResource TokenInkFaint}" />
+  </Style>
+
+  <Style Selector="ComboBoxItem">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Foreground" Value="{DynamicResource TokenInk}" />
+    <Setter Property="FontSize" Value="12.5" />
+    <Setter Property="Padding" Value="8,5" />
+    <Setter Property="MinHeight" Value="0" />
+  </Style>
+
+  <Style Selector="ComboBoxItem:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource TokenSurface3}" />
+    <Setter Property="Foreground" Value="{DynamicResource TokenInk}" />
+  </Style>
+
+  <Style Selector="ComboBoxItem:selected /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource TokenAccentSoft}" />
+    <Setter Property="Foreground" Value="{DynamicResource TokenInk}" />
+  </Style>
+
+  <!-- ==================== 列表 ==================== -->
+  <Style Selector="ListBox">
+    <Setter Property="Background" Value="{DynamicResource TokenSurface2}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource TokenLine}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="{DynamicResource TokenRadiusButton}" />
+    <Setter Property="Padding" Value="4" />
+  </Style>
+
+  <Style Selector="ListBoxItem">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Foreground" Value="{DynamicResource TokenInk}" />
+    <Setter Property="CornerRadius" Value="{DynamicResource TokenRadiusButton}" />
+    <Setter Property="FontSize" Value="12.5" />
+    <Setter Property="Padding" Value="8,6" />
+    <Setter Property="MinHeight" Value="0" />
+    <Setter Property="Cursor" Value="Hand" />
+    <!--
+      边框常驻 1px、平时透明（wireframe 的 .song 也是 `border:1px solid transparent`）。
+      选中态只是把边框**换色**，不是把边框加上去 —— 加上去内容要让出 1px，
+      点中的那一瞬间整行会往右下跳一格，和下面 TextBox 聚焦那条一个毛病。
+    -->
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="BorderBrush" Value="Transparent" />
+  </Style>
+
+  <!-- 选中态：wireframe 的 .song[aria-current=true] —— 底色 + 边框 + 加粗 -->
+  <Style Selector="ListBoxItem:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource TokenSurface3}" />
+    <Setter Property="Foreground" Value="{DynamicResource TokenInk}" />
+  </Style>
+
+  <Style Selector="ListBoxItem:selected /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource TokenAccentSoft}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource TokenAccentLine}" />
+    <Setter Property="Foreground" Value="{DynamicResource TokenInk}" />
+    <!-- 加粗：wireframe 的 .song[aria-current=true] 就是 font-weight:600，靠它继承到里面的文字 -->
+    <Setter Property="FontWeight" Value="SemiBold" />
+  </Style>
+
+  <Style Selector="ListBoxItem:selected:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource TokenAccentSoft}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource TokenAccentLine}" />
+    <Setter Property="Foreground" Value="{DynamicResource TokenInk}" />
+  </Style>
+
+  <!-- ==================== 滑块 ==================== -->
+  <!--
+    Fluent 的轨道是两个 RepeatButton 拼的：左边那个绑定 Slider.Foreground（已走过的一段），
+    右边那个绑定 Slider.Background（还没走的一段），走的是 TemplateBinding，所以直接设就行。
+    圆点不是 —— 它的颜色内联在模板子元素上，只能换资源键，见上面的 Styles.Resources。
+  -->
+  <Style Selector="Slider">
+    <Setter Property="Foreground" Value="{DynamicResource TokenAccent}" />
+    <Setter Property="Background" Value="{DynamicResource TokenLine}" />
+  </Style>
+
+  <!-- ==================== 滚动条 ==================== -->
+  <!--
+    wireframe 没画滚动条（那是浏览器自带的），这里只把它压到最轻：轨道透明，滑块取 ink-faint。
+    颜色同样只能换资源键（Fluent 把 Theme 内联写在 Thumb 上），见上面的 Styles.Resources。
+    曾经在这里写过 `ScrollBar /template/ Thumb { Theme = ... }` 和 TrackRect 的 Fill —— 全是死的。
+  -->
+
+  <!-- ==================== 容器 ==================== -->
+  <!-- wireframe 的 .win / .perf：面板底色 + 细边 + 卡片阴影 -->
+  <Style Selector="Border.card">
+    <Setter Property="Background" Value="{DynamicResource TokenSurface}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource TokenLine}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="{DynamicResource TokenRadiusCard}" />
+    <Setter Property="BoxShadow" Value="{DynamicResource TokenShadow}" />
+  </Style>
+
+  <!-- 分组之间的那根细线 -->
+  <Style Selector="Border.rule">
+    <Setter Property="Background" Value="{DynamicResource TokenLineSoft}" />
+    <Setter Property="Height" Value="1" />
+  </Style>
+
+</Styles>

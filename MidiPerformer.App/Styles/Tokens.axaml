@@ -1,0 +1,101 @@
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+  <!--
+    视觉令牌 —— **全程序唯一的外观来源**。
+    别的 .axaml 和自绘代码里一律不许出现字面颜色值，只能引用这里的键。
+
+    准绳是 docs/wireframe.html 的 :root，逐条对应，明暗各一套（走 ThemeVariant）。
+    wireframe 里 28 条，减掉 annot / annot-soft / annot-line 三条 ——
+    那三条是紫色圆形标注点专用的，属于线框说明层，不进软件。
+    剩下的 25 条就是下面 ThemeDictionaries 里的全部内容，一条不多一条不少。
+
+    自绘那一层（卷帘、悬浮层）拿不到 DynamicResource，走 Theme/TokenPalette + TokenSource。
+
+    对账由 Tests/Visual/TokenParityTests 强制：键名、明暗两套的值都和 wireframe 逐条比。
+  -->
+
+  <!--
+    令牌声明成 Color 而不是 SolidColorBrush，是有原因的，别改回去：
+    给控件当 Background / Foreground 用，Avalonia 会把 Color 自动转成画刷，两种写法都行；
+    但反过来不行 —— 画刷塞不进 SolidColorBrush 的 Color 属性。
+    而 Fluent 有几处把颜色**内联写在模板子元素上**（滑块圆点、滚动条滑块，见 Controls.axaml），
+    只能靠覆盖它引用的**资源键**去改，那些键的值必须是 Color 才拼得出来。
+  -->
+
+  <!--
+    字体、圆角不随主题变，放在 ThemeDictionaries 外面 —— 这样 ThemeDictionaries 里
+    正好就是那 25 个颜色/阴影令牌，对账时不用再挑拣。
+  -->
+  <FontFamily x:Key="TokenFontUi">Segoe UI, Microsoft YaHei, PingFang SC</FontFamily>
+  <FontFamily x:Key="TokenFontMono">Cascadia Mono, Consolas</FontFamily>
+
+  <!-- wireframe 里出现过 3 / 4 / 5 / 6 / 8 五种圆角，按用途命名而不是按数字 -->
+  <CornerRadius x:Key="TokenRadiusSmall">3</CornerRadius>
+  <CornerRadius x:Key="TokenRadiusControl">4</CornerRadius>
+  <CornerRadius x:Key="TokenRadiusButton">5</CornerRadius>
+  <CornerRadius x:Key="TokenRadiusPanel">6</CornerRadius>
+  <CornerRadius x:Key="TokenRadiusCard">8</CornerRadius>
+
+  <ResourceDictionary.ThemeDictionaries>
+
+    <!-- ============ 明亮（wireframe :root） ============ -->
+    <ResourceDictionary x:Key="Light">
+      <Color x:Key="TokenGround">#EEF1F5</Color>
+      <Color x:Key="TokenSurface">#FFFFFF</Color>
+      <Color x:Key="TokenSurface2">#F7F9FB</Color>
+      <Color x:Key="TokenSurface3">#EAEEF3</Color>
+      <Color x:Key="TokenInk">#171C23</Color>
+      <Color x:Key="TokenInkMuted">#5C6673</Color>
+      <Color x:Key="TokenInkFaint">#8A94A1</Color>
+      <Color x:Key="TokenLine">#CDD5DE</Color>
+      <Color x:Key="TokenLineSoft">#E3E8EE</Color>
+      <Color x:Key="TokenAccent">#2C6BA8</Color>
+      <Color x:Key="TokenAccentSoft">#DCEAF7</Color>
+      <Color x:Key="TokenAccentLine">#9CC2E4</Color>
+      <Color x:Key="TokenWarn">#A85A1E</Color>
+      <Color x:Key="TokenWarnSoft">#F8EADC</Color>
+      <Color x:Key="TokenWarnLine">#DDB183</Color>
+      <Color x:Key="TokenStop">#A83232</Color>
+      <Color x:Key="TokenStopSoft">#F8E2E2</Color>
+      <Color x:Key="TokenStopLine">#DFA8A8</Color>
+      <Color x:Key="TokenNote">#4A5563</Color>
+      <Color x:Key="TokenNoteEdge">#333C47</Color>
+      <Color x:Key="TokenGridBar">#B9C4D0</Color>
+      <Color x:Key="TokenGridBeat">#DDE3EA</Color>
+      <Color x:Key="TokenLaneA">#FBFCFD</Color>
+      <Color x:Key="TokenLaneB">#F3F6F9</Color>
+      <BoxShadows x:Key="TokenShadow">0 1 2 0 #0F171C23, 0 8 24 0 #0F171C23</BoxShadows>
+    </ResourceDictionary>
+
+    <!-- ============ 暗色（wireframe :root[data-theme="dark"]） ============ -->
+    <ResourceDictionary x:Key="Dark">
+      <Color x:Key="TokenGround">#13171C</Color>
+      <Color x:Key="TokenSurface">#1A1F26</Color>
+      <Color x:Key="TokenSurface2">#1F252D</Color>
+      <Color x:Key="TokenSurface3">#262D36</Color>
+      <Color x:Key="TokenInk">#E7EBF1</Color>
+      <Color x:Key="TokenInkMuted">#9BA6B3</Color>
+      <Color x:Key="TokenInkFaint">#6E7987</Color>
+      <Color x:Key="TokenLine">#333C46</Color>
+      <Color x:Key="TokenLineSoft">#272E37</Color>
+      <Color x:Key="TokenAccent">#74ABDD</Color>
+      <Color x:Key="TokenAccentSoft">#1C2E42</Color>
+      <Color x:Key="TokenAccentLine">#3A5F85</Color>
+      <Color x:Key="TokenWarn">#D89B60</Color>
+      <Color x:Key="TokenWarnSoft">#33261A</Color>
+      <Color x:Key="TokenWarnLine">#6B4E2E</Color>
+      <Color x:Key="TokenStop">#E08080</Color>
+      <Color x:Key="TokenStopSoft">#33201F</Color>
+      <Color x:Key="TokenStopLine">#6E3B38</Color>
+      <Color x:Key="TokenNote">#5E6B7A</Color>
+      <Color x:Key="TokenNoteEdge">#48535F</Color>
+      <Color x:Key="TokenGridBar">#4A5563</Color>
+      <Color x:Key="TokenGridBeat">#2C343D</Color>
+      <Color x:Key="TokenLaneA">#1D232B</Color>
+      <Color x:Key="TokenLaneB">#20272F</Color>
+      <BoxShadows x:Key="TokenShadow">0 1 2 0 #4D000000, 0 8 24 0 #40000000</BoxShadows>
+    </ResourceDictionary>
+
+  </ResourceDictionary.ThemeDictionaries>
+</ResourceDictionary>

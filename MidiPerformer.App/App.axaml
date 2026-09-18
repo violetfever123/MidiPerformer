@@ -2,7 +2,23 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              x:Class="MidiPerformer.App.App"
              RequestedThemeVariant="Dark">
+
+  <!--
+    令牌住在这里，是 Application 级的资源 —— 窗口、控件、自绘层都从这里取，没有第二份。
+    ThemeDictionaries 让明暗两套跟着 ActualThemeVariant 走，XAML 这边不用管切换。
+  -->
+  <Application.Resources>
+    <ResourceDictionary>
+      <ResourceDictionary.MergedDictionaries>
+        <ResourceInclude Source="avares://MidiPerformer/Styles/Tokens.axaml" />
+      </ResourceDictionary.MergedDictionaries>
+    </ResourceDictionary>
+  </Application.Resources>
+
   <Application.Styles>
+    <!-- Fluent 留着：它提供控件模板（键盘导航、Popup 定位那些），我们只覆盖长相 -->
     <FluentTheme />
+    <StyleInclude Source="avares://MidiPerformer/Styles/Controls.axaml" />
   </Application.Styles>
+
 </Application>

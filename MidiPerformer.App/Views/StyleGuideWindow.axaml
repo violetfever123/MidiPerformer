@@ -1,0 +1,247 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:views="using:MidiPerformer.App.Views"
+        x:Class="MidiPerformer.App.Views.StyleGuideWindow"
+        Title="视觉令牌样板（dev）"
+        Width="1200" Height="900">
+
+  <!--
+    dev-only 样板窗口。把令牌、圆角、阴影、字体、控件平铺出来，
+    和 docs/wireframe.html 的对应部分逐块对照 —— 它是 03 的可见产物，
+    也是日后改样式时的对照页。产品界面里没有入口，只能用 style-guide 启动参数打开。
+
+    窗口用**系统标题栏**：wireframe 里那条 .wintitle（含右侧三个圆点）不实现。
+  -->
+
+  <Window.Styles>
+    <Style Selector="TextBlock.page-title">
+      <Setter Property="FontSize" Value="21" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+    <Style Selector="TextBlock.page-sub">
+      <Setter Property="FontSize" Value="13" />
+      <Setter Property="Foreground" Value="{DynamicResource TokenInkMuted}" />
+      <Setter Property="TextWrapping" Value="Wrap" />
+      <Setter Property="MaxWidth" Value="900" />
+    </Style>
+    <Style Selector="TextBlock.note">
+      <Setter Property="FontSize" Value="12" />
+      <Setter Property="Foreground" Value="{DynamicResource TokenInkMuted}" />
+    </Style>
+    <Style Selector="Border.sect">
+      <Setter Property="Padding" Value="14" />
+    </Style>
+  </Window.Styles>
+
+  <ScrollViewer>
+    <StackPanel Margin="16" Spacing="18">
+
+      <StackPanel Spacing="4">
+        <TextBlock Classes="page-title" Text="视觉令牌样板" />
+        <TextBlock Classes="page-sub"
+                   Text="03 的可见产物。左边这块令牌板是代码画的，走 TokenSource；下面那些控件是 XAML 画的，走 DynamicResource。切主题时两边必须一起变 —— 哪边没动就是取色桥断了。" />
+        <TextBlock Classes="page-sub" Foreground="{DynamicResource TokenInkFaint}"
+                   Text="这个窗口只在 --style-guide 启动时出现，产品界面里没有入口。" />
+      </StackPanel>
+
+      <!-- ============ 主题 ============ -->
+      <StackPanel Orientation="Horizontal" Spacing="8">
+        <TextBlock Classes="note" VerticalAlignment="Center" Text="主题" />
+        <Button x:Name="ThemeSystemButton" Content="跟随系统" Click="OnThemeSystem" />
+        <Button x:Name="ThemeLightButton" Content="明亮" Click="OnThemeLight" />
+        <Button x:Name="ThemeDarkButton" Content="暗色" Click="OnThemeDark" />
+      </StackPanel>
+
+      <!-- ============ 令牌 ============ -->
+      <StackPanel Spacing="8">
+        <TextBlock Classes="sect-title" Text="令牌 · 25" />
+        <Border Classes="card">
+          <StackPanel Classes="sect" Spacing="8">
+            <TextBlock Classes="note"
+                       Text="自绘取色桥。名字和色值都是当前主题下从 TokenSource 现取的 —— 这一块整个拿不到 DynamicResource。" />
+            <views:TokenSwatchBoard x:Name="SwatchBoard" Height="310"
+                                    UiFont="{DynamicResource TokenFontUi}"
+                                    MonoFont="{DynamicResource TokenFontMono}" />
+          </StackPanel>
+        </Border>
+      </StackPanel>
+
+      <!-- ============ 圆角 ============ -->
+      <StackPanel Spacing="8">
+        <TextBlock Classes="sect-title" Text="圆角" />
+        <Border Classes="card">
+          <StackPanel Classes="sect" Orientation="Horizontal" Spacing="14">
+            <StackPanel Spacing="4">
+              <Border Width="72" Height="40" CornerRadius="{DynamicResource TokenRadiusSmall}"
+                      Background="{DynamicResource TokenSurface3}"
+                      BorderBrush="{DynamicResource TokenLine}" BorderThickness="1" />
+              <TextBlock Classes="mono note" Text="3 small" />
+            </StackPanel>
+            <StackPanel Spacing="4">
+              <Border Width="72" Height="40" CornerRadius="{DynamicResource TokenRadiusControl}"
+                      Background="{DynamicResource TokenSurface3}"
+                      BorderBrush="{DynamicResource TokenLine}" BorderThickness="1" />
+              <TextBlock Classes="mono note" Text="4 control" />
+            </StackPanel>
+            <StackPanel Spacing="4">
+              <Border Width="72" Height="40" CornerRadius="{DynamicResource TokenRadiusButton}"
+                      Background="{DynamicResource TokenSurface3}"
+                      BorderBrush="{DynamicResource TokenLine}" BorderThickness="1" />
+              <TextBlock Classes="mono note" Text="5 button" />
+            </StackPanel>
+            <StackPanel Spacing="4">
+              <Border Width="72" Height="40" CornerRadius="{DynamicResource TokenRadiusPanel}"
+                      Background="{DynamicResource TokenSurface3}"
+                      BorderBrush="{DynamicResource TokenLine}" BorderThickness="1" />
+              <TextBlock Classes="mono note" Text="6 panel" />
+            </StackPanel>
+            <StackPanel Spacing="4">
+              <Border Width="72" Height="40" CornerRadius="{DynamicResource TokenRadiusCard}"
+                      Background="{DynamicResource TokenSurface3}"
+                      BorderBrush="{DynamicResource TokenLine}" BorderThickness="1" />
+              <TextBlock Classes="mono note" Text="8 card" />
+            </StackPanel>
+          </StackPanel>
+        </Border>
+      </StackPanel>
+
+      <!-- ============ 字体 ============ -->
+      <StackPanel Spacing="8">
+        <TextBlock Classes="sect-title" Text="字体" />
+        <Border Classes="card">
+          <StackPanel Classes="sect" Spacing="10">
+            <StackPanel Spacing="2">
+              <TextBlock Classes="note" Text="正文 · Segoe UI / Microsoft YaHei 14px" />
+              <TextBlock Text="用游戏里的口琴弹一首完整的曲子，一个音一个音地按是弹不下来的。" />
+            </StackPanel>
+            <Border Classes="rule" />
+            <StackPanel Spacing="2">
+              <TextBlock Classes="note" Text="数字 · Cascadia Mono + tabular-nums（刻度、BPM、小节号要对齐）" />
+              <TextBlock Classes="mono" Text="001  002  003  004  005  006" />
+              <TextBlock Classes="mono" Text="1:11  22:22  333:33  4444:44" />
+              <TextBlock Classes="mono" Text="76 BPM   128 BPM   120 BPM" />
+            </StackPanel>
+          </StackPanel>
+        </Border>
+      </StackPanel>
+
+      <!-- ============ 控件 ============ -->
+      <StackPanel Spacing="8">
+        <TextBlock Classes="sect-title" Text="控件" />
+        <Border Classes="card">
+          <StackPanel Classes="sect" Spacing="14">
+
+            <StackPanel Spacing="6">
+              <TextBlock Classes="note" Text="按钮 · 普通 / 主 / 启动 / 危险 / 禁用" />
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <Button Content="保存" />
+                <Button Classes="primary" Content="导入 MIDI…" />
+                <Button Classes="launch" Content="演奏器…" />
+                <Button Classes="danger" Content="删除" />
+                <Button Content="不可用" IsEnabled="False" />
+                <Button Classes="primary" Content="不可用" IsEnabled="False" />
+                <Button Classes="launch" Content="不可用" IsEnabled="False" />
+                <Button Classes="chip-action" Content="不可用" IsEnabled="False" />
+              </StackPanel>
+            </StackPanel>
+
+            <Border Classes="rule" />
+
+            <StackPanel Spacing="6">
+              <TextBlock Classes="note" Text="输入框 · 普通 / 数字（等宽右对齐）" />
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <TextBox Text="起风了" Width="170" />
+                <TextBox Classes="numeric" Text="76" Width="66" />
+                <TextBox Classes="numeric" Text="32" Width="46" />
+                <TextBox Text="只读" Width="90" IsReadOnly="True" />
+              </StackPanel>
+            </StackPanel>
+
+            <Border Classes="rule" />
+
+            <StackPanel Spacing="6">
+              <TextBlock Classes="note" Text="下拉框 · 正常 / 占位 / 锁死（一条可弹的轨都没有）" />
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <ComboBox SelectedIndex="0" Width="180">
+                  <ComboBoxItem>口琴（默认）</ComboBoxItem>
+                  <ComboBoxItem>钢琴</ComboBoxItem>
+                  <ComboBoxItem>弦乐</ComboBoxItem>
+                </ComboBox>
+                <ComboBox PlaceholderText="选一条能弹的轨" Width="180" />
+                <ComboBox SelectedIndex="0" Width="180" IsEnabled="False">
+                  <ComboBoxItem>口琴（默认）</ComboBoxItem>
+                </ComboBox>
+              </StackPanel>
+            </StackPanel>
+
+            <Border Classes="rule" />
+
+            <StackPanel Spacing="6">
+              <TextBlock Classes="note" Text="滑块 · 正常 / 锁死（曲子还没选）" />
+              <Slider Value="62" Width="260" HorizontalAlignment="Left" />
+              <!--
+                锁死的那条一定要摆出来：圆点颜色走的是 Fluent 的资源键（见 Controls.axaml），
+                而「禁用态的圆点不能和没走过的那半截轨道同色」这种事，
+                只有并排放在这儿才看得出来 —— 圆点化进轨道里就成一根进度条了。
+              -->
+              <Slider Value="62" Width="260" HorizontalAlignment="Left" IsEnabled="False" />
+            </StackPanel>
+
+            <Border Classes="rule" />
+
+            <StackPanel Spacing="6">
+              <TextBlock Classes="note" Text="列表 · 曲库那种（悬停 / 选中）" />
+              <ListBox Width="300" HorizontalAlignment="Left" SelectedIndex="0">
+                <ListBoxItem>
+                  <Grid ColumnDefinitions="*,Auto">
+                    <TextBlock Grid.Column="0" Text="起风了" />
+                    <TextBlock Grid.Column="1" Classes="mono note" Text="4:32" />
+                  </Grid>
+                </ListBoxItem>
+                <ListBoxItem>
+                  <Grid ColumnDefinitions="*,Auto">
+                    <TextBlock Grid.Column="0" Text="夜空中最亮的星" />
+                    <TextBlock Grid.Column="1" Classes="mono note" Text="4:08" />
+                  </Grid>
+                </ListBoxItem>
+                <ListBoxItem>
+                  <Grid ColumnDefinitions="*,Auto">
+                    <TextBlock Grid.Column="0" Text="卡农（简化版）" />
+                    <TextBlock Grid.Column="1" Classes="mono note" Text="3:21" />
+                  </Grid>
+                </ListBoxItem>
+              </ListBox>
+            </StackPanel>
+
+            <Border Classes="rule" />
+
+            <StackPanel Spacing="6">
+              <TextBlock Classes="note" Text="标签片 · 卷帘上那条「删掉这一段」" />
+              <Border Classes="chip" HorizontalAlignment="Left">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                  <TextBlock VerticalAlignment="Center" FontSize="11"
+                             Foreground="{DynamicResource TokenInkMuted}"
+                             Text="第 5–8 小节 · 23 个音" />
+                  <Button Classes="chip-action" Content="删除" />
+                </StackPanel>
+              </Border>
+            </StackPanel>
+
+            <Border Classes="rule" />
+
+            <StackPanel Spacing="6">
+              <TextBlock Classes="note"
+                         Text="卷帘缩影 · 同样是代码画的，用的就是 lane / grid / note / stop 这几个令牌" />
+              <Border BorderBrush="{DynamicResource TokenLine}" BorderThickness="1"
+                      CornerRadius="{DynamicResource TokenRadiusControl}" ClipToBounds="True">
+                <views:RollPreviewStrip x:Name="RollStrip" Height="130" />
+              </Border>
+            </StackPanel>
+
+          </StackPanel>
+        </Border>
+      </StackPanel>
+
+    </StackPanel>
+  </ScrollViewer>
+</Window>
