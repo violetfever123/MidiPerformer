@@ -1,5 +1,7 @@
 using System.Reflection;
+using MidiPerformer.Core.Model;
 using MidiPerformer.Core.UseCases.Perform.Repertoire;
+using MidiPerformer.Core.UseCases.Project;
 
 namespace MidiPerformer.App.SelfTest;
 
@@ -97,6 +99,7 @@ internal static class PerformerSelfTest
         {
             TestCorpus();
             TestPinnedAssemblies();
+            TestProjectRoundTrip();
         }
         catch (Exception ex)
         {
@@ -466,6 +469,122 @@ internal static class PerformerSelfTest
         bool hasRead = t != null && t.GetMethods().Any(m => m.Name == "Read");
         Check("发布：DryWetMidi 的类型与公开方法没被裁掉", hasRead,
             t == null ? "Melanchall.DryWetMidi.Core.MidiFile 取不到" : "MidiFile.Read 在");
+    }
+
+    // ================= 工程文件存取 =================
+
+    /// <summary>
+    /// 存一份工程再读回来，逐字段比。
+    ///
+    /// **这是本自检里唯一压到 <c>System.Text.Json</c> 反射的一条。** 发布时 ILLink 对
+    /// <c>SongProject</c> 报了一串 IL2026 / IL2075，全是 STJ 反射；而 csproj 的
+    /// <c>TrimmerRootAssembly</c> 名单里有 App、有 DryWetMidi、有 Avalonia，
+    /// **没有 <c>MidiPerformer.Core</c>** —— Song / Track / Note / TempoMap 这些模型类型的
+    /// 属性与构造器，正是按「入口点可达」会被裁掉的东西。
+    ///
+    /// 导入 .mid 那条路走 DryWetMidi（钉住了，上面那条也验过）；
+    /// **只有「存工程 / 重新打开工程」这条路一直没人验**。NUnit 更验不了这件事：
+    /// 那边跑的是没裁剪的构建，程序集永远躺在文件旁边。
+    ///
+    /// 用内存里的一对（<c>WriteProject</c> / <c>ReadProject</c>）来回走，不碰文件系统：
+    /// 这个自检除了报告本身不该再写盘。语料里塞了要转义的轨名（反斜杠、双引号、中文）、
+    /// 变速变拍、以及音高/力度的上下边界 —— 反射被裁掉时最先露馅的就是这些字段。
+    /// </summary>
+    private static void TestProjectRoundTrip()
+    {
+        var tempo = new TempoMap(
+            TimeDivision.PulsesPerQuarter(480),
+            new[] { new TempoChange(0, 500_000), new TempoChange(1920, 400_000) },
+            new[] { new TimeSignatureChange(0, 4, 4), new TimeSignatureChange(3840, 3, 4) });
+
+        var song = new Song(
+            new[]
+            {
+                // 轨名里放了反斜杠、双引号、中文和逗号：JSON 转义那条路走不到的话这里最先红
+                new Track(0, 0, "主旋律 \\ \"引号\" 内测", 24, new[]
+                {
+                    new Note(60, 0, 480, 100),
+                    new Note(127, 1920, 1, 127),      // 音高与力度的上边界
+                    new Note(0, 3840, 960, 0),        // 音高与力度的下边界
+                }, Transpose: -12),
+                new Track(1, 2, "副歌", 0, new[]
+                {
+                    new Note(72, 100, 200, 64),
+                    new Note(64, 5000, 200, 64),
+                }),
+            },
+            tempo);
+
+        var header = new ProjectHeader(SongProject.ProjectVersion, "勾指起誓", true, @"C:\下载\起誓.mid");
+
+        string json = SongProject.WriteProject(song, header);
+        var (readHeader, read) = SongProject.ReadProject(json);
+
+        var diffs = new List<string>();
+        void Diff(string what, object? want, object? got)
+        {
+            if (!Equals(want, got)) diffs.Add($"{what} 存的是「{want}」读回来是「{got}」");
+        }
+
+        // 防假绿：写出来必须是份像样的文件，"两边都空"不许算通过
+        int expectedNotes = song.Tracks.Sum(t => t.Notes.Count);
+        Check("工程：写出的是非空 JSON，且音符数对得上",
+            json.Length > 0 && expectedNotes == 5,
+            $"{json.Length} 字符 / {expectedNotes} 个音");
+
+        // 文件头
+        Diff("版本", header.Version, readHeader.Version);
+        Diff("曲名", header.Name, readHeader.Name);
+        Diff("Edited", header.Edited, readHeader.Edited);
+        Diff("来路", header.ImportedFrom, readHeader.ImportedFrom);
+
+        // 曲子的骨架
+        Diff("轨数", song.Tracks.Count, read.Tracks.Count);
+        Diff("总音符数", expectedNotes, read.Tracks.Sum(t => t.Notes.Count));
+        Diff("Division 每四分音符 tick", tempo.Division.TicksPerQuarterNote,
+            read.TempoMap.Division.TicksPerQuarterNote);
+        Diff("变速条数", tempo.TempoChanges.Count, read.TempoMap.TempoChanges.Count);
+        Diff("变拍条数", tempo.TimeSignatureChanges.Count, read.TempoMap.TimeSignatureChanges.Count);
+
+        // 速度表是真正驱动时序的那份数据：按秒比一遍，比只比条数扎实
+        foreach (long tick in new long[] { 0, 480, 1920, 3840, 5000 })
+            Diff($"第 {tick} tick 处的秒数", tempo.SecondsAt(tick), read.TempoMap.SecondsAt(tick));
+
+        // 逐轨、逐音（音符是值类型，字段一个都不能少）
+        for (int i = 0; i < Math.Min(song.Tracks.Count, read.Tracks.Count); i++)
+        {
+            var want = song.Tracks[i];
+            var got = read.Tracks[i];
+            string at = $"轨{i}";
+
+            Diff($"{at} 轨块序号", want.TrackIndex, got.TrackIndex);
+            Diff($"{at} 声道", want.Channel, got.Channel);
+            Diff($"{at} 轨名", want.Name, got.Name);
+            Diff($"{at} 音色", want.Program, got.Program);
+            Diff($"{at} 移调", want.Transpose, got.Transpose);
+            Diff($"{at} 音符数", want.Notes.Count, got.Notes.Count);
+
+            for (int n = 0; n < Math.Min(want.Notes.Count, got.Notes.Count); n++)
+            {
+                var (a, b) = (want.Notes[n], got.Notes[n]);
+                Diff($"{at} 第{n}个音的音高", a.Pitch, b.Pitch);
+                Diff($"{at} 第{n}个音的起点", a.StartTick, b.StartTick);
+                Diff($"{at} 第{n}个音的时值", a.LengthTicks, b.LengthTicks);
+                Diff($"{at} 第{n}个音的力度", a.Velocity, b.Velocity);
+            }
+        }
+
+        // 逐字段比完再用 Track 自己的值相等收一遍：那份相等是覆写过的（音符逐个比），
+        // 反射把音符裁成空数组时它会露馅，而上面按 Count 比的写法会跟着一起错过去
+        bool valueEqual = song.Tracks.Count == read.Tracks.Count;
+        for (int i = 0; valueEqual && i < song.Tracks.Count; i++)
+            valueEqual &= song.Tracks[i].Equals(read.Tracks[i]);
+
+        Check("工程：存一份再读回来逐字段相等", diffs.Count == 0,
+            diffs.Count == 0
+                ? $"{read.Tracks.Count} 轨 / {expectedNotes} 个音 / 变速变拍与按秒换算都比过"
+                : $"{diffs.Count} 处不同，头几处：" + string.Join("；", diffs.Take(3)));
+        Check("工程：Track 的值相等也成立（音符不是被裁成空数组）", valueEqual);
     }
 
     // ================= 小工具 =================
