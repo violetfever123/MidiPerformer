@@ -85,11 +85,20 @@ public static class Format
     /// 音色号在那一轨没有意义 —— 直接说「标准鼓组」，比报一个 GM 编号清楚。
     /// </summary>
     public static string Timbre(int program, int channel) =>
-        channel == 9 ? "标准鼓组 · 通道 10" : $"{ProgramName(program)} · GM {program + 1}";
+        channel == 9 ? "标准鼓组 · 通道 10" : ProgramLabel(program);
+
+    /// <summary>
+    /// 音色下拉里那一行的写法：<c>口琴 · GM 23</c>。
+    ///
+    /// 轨头上的那句话和下拉里那一行**必须是同一个算法**：下拉合上之后显示的是选中的那一行，
+    /// 两处各拼各的，用户在列表里挑的和轨头上显示的就可能差一个字（GM 编号从 0 起还是从 1 起，
+    /// 正是最容易差的那一处）。
+    /// </summary>
+    public static string ProgramLabel(int program) => $"{ProgramName(program)} · GM {program + 1}";
 
     /// <summary>GM 音色名（0 起的音色号 → 中文名）。越界就退回编号，不编一个名字出来。</summary>
     public static string ProgramName(int program) =>
-        program >= 0 && program < ProgramNames.Length
+        program >= 0 && program < ProgramNames.Count
             ? ProgramNames[program]
             : $"音色 {program + 1}";
 
@@ -97,8 +106,11 @@ public static class Format
     /// MIDI 标准 128 个音色的中文名，顺序即 GM 编号。
     /// 抄的是通用译名表：只为了让人一眼认出「这条是小提琴还是贝斯」，
     /// 不追求和哪个软件逐字一致。
+    ///
+    /// <b>公开</b>出去是给音色下拉用的（16）：它要的就是这 128 行，
+    /// 在视图里再抄一份的话，改一处漏一处是迟早的事。
     /// </summary>
-    private static readonly string[] ProgramNames =
+    public static IReadOnlyList<string> ProgramNames { get; } = new string[]
     {
         "大钢琴", "明亮钢琴", "电大钢琴", "酒吧钢琴", "电钢琴 1", "电钢琴 2", "羽管键琴", "击弦古钢琴",
         "钢片琴", "钟琴", "八音盒", "颤音琴", "马林巴", "木琴", "管钟", "扬琴",

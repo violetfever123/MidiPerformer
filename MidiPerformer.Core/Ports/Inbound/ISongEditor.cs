@@ -3,7 +3,7 @@ using MidiPerformer.Core.Model;
 namespace MidiPerformer.Core.Ports.Inbound;
 
 /// <summary>
-/// 编辑命令的入口：改整曲速度、改某条轨的移调、挪音符、改时值、删音符、改轨名、删轨。
+/// 编辑命令的入口：改整曲速度、改某条轨的移调与音色、挪音符、改时值、删音符、改轨名、删轨。
 ///
 /// <b>收散参、返回新的 <see cref="Song"/>。</b>没有 Request、没有 Result ——
 /// <see cref="Song"/> 不可变，「改没改」就等于「返回的引用是不是同一个」，
@@ -45,6 +45,27 @@ public interface ISongEditor
     /// <param name="semitones">移调半音数（可正可负）。</param>
     /// <returns>新的曲子；本来就是这个值时返回 <paramref name="song"/> 本身。</returns>
     Song SetTranspose(Song song, int trackIndex, int semitones);
+
+    /// <summary>
+    /// 把第 <paramref name="trackIndex"/> 条轨的音色设成 GM 的 <paramref name="program"/> 号。
+    ///
+    /// <b>只影响试听。</b>发给游戏时永远是口琴那套键位 —— 音色是「我想听成什么样」，
+    /// 不是「弹出来是什么」。所以这条命令和 <see cref="SetTranspose"/> 一样，
+    /// 只换掉那条轨上的一格，音符一个字节都不动。
+    ///
+    /// 音色在 MIDI 里是**声道事件**，这正是模型按 (轨块, 声道) 切轨的理由之一
+    /// （见 <see cref="Track"/>）：一条轨一个音色，才落得到实处。
+    ///
+    /// <b>9 号声道（打击乐）不特殊对待。</b>MIDI 规定那一整个声道就是鼓组，
+    /// 音色号在它上面本来没有意义 —— 界面因此不给那一轨画下拉框，
+    /// 但命令不替界面把这一格挡掉：「这一格是什么」和「要不要让人改这一格」是两件事，
+    /// 挡在命令里的话，一个导入时带着音色的鼓轨就再也回不到原来的值了。
+    /// </summary>
+    /// <param name="song">改之前的曲子。</param>
+    /// <param name="trackIndex"><see cref="Song.Tracks"/> 里的下标。越界抛。</param>
+    /// <param name="program">GM 音色号 0..127。越界抛（换音色是从一张表里挑一个，不是填一个数）。</param>
+    /// <returns>新的曲子；本来就是这一号音色时返回 <paramref name="song"/> 本身。</returns>
+    Song SetProgram(Song song, int trackIndex, int program);
 
     /// <summary>
     /// 把一组音同时挪动 <paramref name="deltaTicks"/> 个 tick、<paramref name="deltaPitch"/> 个半音。

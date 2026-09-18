@@ -5,10 +5,10 @@
   <!--
     一条轨 = 轨道头 + 卷帘。
 
-    轨道头到 09 有三样是活的：**移调**那一格（四个步进按钮夹着当前值）、**改名**、
-    **删除**（两下：先问一句，再删）。音色下拉、只看这条、折叠还没有归属的切片，
-    所以右边那行灰字如实写着它们还没做 —— 摆一排按了没反应的控件比不摆更坏，
-    人会以为是自己没点对。
+    轨道头上是活的：**音色**（128 个 GM 音色的下拉，鼓轨换成一句说明）、**移调**
+    （四个步进按钮夹着当前值）、**改名**、**删除**（两下：先问一句，再删）、**折叠**。
+    还没做、也还没有归属切片的只剩「只看这条」，所以右边那行灰字如实写着它 ——
+    摆一排按了没反应的控件比不摆更坏，人会以为是自己没点对。
 
     底色 / 边框一律取令牌，这里不出现任何颜色字面值。
   -->
@@ -115,6 +115,54 @@
       <Setter Property="Foreground" Value="{DynamicResource TokenStop}" />
     </Style>
 
+    <!--
+      收起来的那一条：wireframe 的 .strip —— 一行「已折叠」加一根压扁的音符条。
+      底色跟着轨号奇偶走（和卷帘的 .lane.a / .lane.b 取的是同一对令牌），
+      收起来之后那一条仍然看得出是哪条轨。奇偶用 .b 这个类补，Avalonia 的选择器写不出 nth-child。
+    -->
+    <Style Selector="Border.strip">
+      <Setter Property="Background" Value="{DynamicResource TokenLaneA}" />
+      <Setter Property="Padding" Value="10,3,10,5" />
+    </Style>
+
+    <Style Selector="Border.strip.b">
+      <Setter Property="Background" Value="{DynamicResource TokenLaneB}" />
+    </Style>
+
+    <Style Selector="Border.strip TextBlock">
+      <Setter Property="FontSize" Value="10.5" />
+      <Setter Property="Foreground" Value="{DynamicResource TokenInkFaint}" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+
+    <!--
+      那根压扁的条：wireframe 的 .mini（height:9px、opacity:.45）。
+      取 TokenRadiusSmall 而不是 wireframe 写的 2px —— 圆角一律走令牌，这一处不单开一个例外。
+    -->
+    <Style Selector="Border.strip-mini">
+      <Setter Property="Height" Value="9" />
+      <Setter Property="CornerRadius" Value="{DynamicResource TokenRadiusSmall}" />
+      <Setter Property="Background" Value="{DynamicResource TokenNote}" />
+      <Setter Property="Opacity" Value="0.45" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="Margin" Value="8,0,0,0" />
+    </Style>
+
+    <!--
+      音色下拉：wireframe 的 .lhead select（11.5px、圆角 4px、最宽 150px）。
+      应用级那套 ComboBox 样式（见 Controls.axaml）管颜色，这里只管轨道头上要的尺寸 ——
+      轨道头一行里有八九样东西，按控件默认那套的个头会把这行撑得很高。
+    -->
+    <Style Selector="ComboBox.timbre">
+      <Setter Property="FontSize" Value="11.5" />
+      <Setter Property="Padding" Value="5,1" />
+      <Setter Property="MinHeight" Value="0" />
+      <Setter Property="MaxWidth" Value="150" />
+      <Setter Property="MaxDropDownHeight" Value="320" />
+      <Setter Property="CornerRadius" Value="{DynamicResource TokenRadiusControl}" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+
     <!-- 就地的改名输入框：和它顶替掉的那行名字同一个字号字重，换上去的时候整行不跳 -->
     <Style Selector="TextBox.rename">
       <Setter Property="FontSize" Value="12.5" />
@@ -132,11 +180,11 @@
             BorderThickness="0,0,0,1"
             Padding="10,6">
       <!--
-        列从头到尾：轨号 / 名字 / 音色 / 移调 / 改名 / 删除 / 音数 / 右边那行灰字。
+        列从头到尾：轨号 / 名字 / 音色 / 移调 / 改名 / 删除 / 折叠 / 音数 / 右边那行灰字。
         名字那格叠着两个控件（TextBlock 与 TextBox），同一时刻只亮一个 —— 改名是**就地**换的，
         不另开一格，否则一按改名整行会横向错位一下。
       -->
-      <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,*">
+      <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,*">
         <TextBlock x:Name="NumberText"
                    Grid.Column="0"
                    FontSize="11" FontWeight="Bold"
@@ -153,11 +201,27 @@
                  IsVisible="False"
                  KeyDown="OnNameBoxKeyDown"
                  LostFocus="OnNameBoxLostFocus" />
-        <TextBlock x:Name="TimbreText"
-                   Grid.Column="2"
-                   FontSize="11.5"
-                   Foreground="{DynamicResource TokenInkMuted}"
-                   VerticalAlignment="Center" />
+        <!--
+          音色那一格：旋律轨是一个 128 项的 GM 下拉，鼓轨是一句不能点的说明
+          （9 号声道整条都是鼓组，音色号在它上面没有意义 —— 摆一个改了也不知道会怎样的
+          下拉，比明说「这是鼓组」坏）。两样二选一，谁亮见 TrackLaneView.Bind。
+        -->
+        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="5" VerticalAlignment="Center">
+          <StackPanel x:Name="TimbrePicker" Orientation="Horizontal" Spacing="5" VerticalAlignment="Center">
+            <TextBlock FontSize="11.5"
+                       Foreground="{DynamicResource TokenInkMuted}"
+                       VerticalAlignment="Center" Text="音色" />
+            <ComboBox x:Name="TimbreBox"
+                      Classes="timbre"
+                      SelectionChanged="OnTimbreChanged"
+                      ToolTip.Tip="换这条轨试听用的音色（发给游戏时永远是口琴那套键位）" />
+          </StackPanel>
+          <TextBlock x:Name="TimbreText"
+                     FontSize="11.5"
+                     Foreground="{DynamicResource TokenInkMuted}"
+                     IsVisible="False"
+                     VerticalAlignment="Center" />
+        </StackPanel>
 
         <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="5" VerticalAlignment="Center">
           <TextBlock FontSize="12.5"
@@ -221,14 +285,26 @@
           </StackPanel>
         </StackPanel>
 
+        <!--
+          折叠 / 展开。**一个按钮两句话**，不是两个按钮：它说的是同一条轨的同一个开关，
+          按内容的字面意思走（wireframe 里那句 `this.textContent = now ? "折叠" : "展开"`）。
+        -->
+        <Button x:Name="FoldButton"
+                Grid.Column="6"
+                Classes="head-action"
+                Margin="6,0,0,0"
+                Content="折叠"
+                Click="OnFoldClick"
+                ToolTip.Tip="把这条轨收成一行（内容一个字节都不动）" />
+
         <TextBlock x:Name="CountText"
-                   Grid.Column="6"
+                   Grid.Column="7"
                    FontSize="11.5"
                    Margin="12,0,0,0"
                    Foreground="{DynamicResource TokenInkMuted}"
                    VerticalAlignment="Center" />
         <TextBlock x:Name="LaterText"
-                   Grid.Column="7"
+                   Grid.Column="8"
                    FontSize="11"
                    Foreground="{DynamicResource TokenInkFaint}"
                    HorizontalAlignment="Right" VerticalAlignment="Center"
@@ -237,5 +313,13 @@
     </Border>
 
     <views:PianoRollLane x:Name="Roll" />
+
+    <!-- 收起来时顶替卷帘的那一行。谁在什么时候亮，见 TrackLaneView.SetCollapsed -->
+    <Border x:Name="Strip" Classes="strip" IsVisible="False">
+      <Grid ColumnDefinitions="Auto,*">
+        <TextBlock Grid.Column="0" Text="已折叠" />
+        <Border Grid.Column="1" Classes="strip-mini" />
+      </Grid>
+    </Border>
   </StackPanel>
 </UserControl>

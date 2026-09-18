@@ -312,6 +312,49 @@ public class UndoableSongEditorTests
         });
     }
 
+    // ==================== 换音色 ====================
+
+    /// <summary>
+    /// 换音色也记一格账：挑了一个新音色，撤销回到原来那一号，重做再回去。
+    ///
+    /// 这条命令是 16 加进来的，装饰器一行都没为它改过 —— 它自动就有撤销。
+    /// 这里断的就是这件事，不是 SetProgram 会不会改 Program（那是 SongEditorTests 的事）。
+    /// </summary>
+    [Test]
+    public void 换音色可以撤销()
+    {
+        var editor = NewEditor();
+        var initial = SongAt(0);                    // 音色 24（尼龙弦吉他）
+        var edited = editor.SetProgram(initial, 0, 22);
+
+        Assert.That(edited.Tracks[0].Program, Is.EqualTo(22));
+
+        AssertSameSong("撤销之后", initial, editor.Undo());
+
+        var forward = editor.Redo();
+
+        Assert.That(forward, Is.SameAs(edited), "重做拿到的还是当初那一份");
+        Assert.That(((Song)forward!).Tracks[0].Program, Is.EqualTo(22));
+    }
+
+    /// <summary>挑的还是原来那一号：装饰器不该记一笔「按了没反应」的账。</summary>
+    [Test]
+    public void 音色没变时不记这一笔()
+    {
+        var editor = NewEditor();
+        var song = editor.SetProgram(SongAt(0), 0, 22);
+        editor.Undo();
+        Assert.That(editor.CanRedo, Is.True, "先摆一个重做在那儿");
+
+        var same = editor.SetProgram(song, 0, 22);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(same, Is.SameAs(song), "没改就还回来原来那一份");
+            Assert.That(editor.CanRedo, Is.True, "没改的命令也不该把重做链清掉");
+        });
+    }
+
     // ==================== 转发 ====================
 
     /// <summary>
@@ -399,6 +442,7 @@ public class UndoableSongEditorTests
         public double LastBpm { get; private set; }
         public int LastTrack { get; private set; }
         public int LastSemitones { get; private set; }
+        public int LastProgram { get; private set; }
         public IReadOnlyList<NoteRef>? LastNotes { get; private set; }
         public NoteRef LastNote { get; private set; }
         public long LastDeltaTicks { get; private set; }
@@ -419,6 +463,14 @@ public class UndoableSongEditorTests
             LastSong = song;
             LastTrack = trackIndex;
             LastSemitones = semitones;
+            return LastResult = new Song(song.Tracks, song.TempoMap);
+        }
+
+        public Song SetProgram(Song song, int trackIndex, int program)
+        {
+            LastSong = song;
+            LastTrack = trackIndex;
+            LastProgram = program;
             return LastResult = new Song(song.Tracks, song.TempoMap);
         }
 

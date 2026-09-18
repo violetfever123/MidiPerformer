@@ -609,8 +609,14 @@ public sealed class PianoRollLane : Control
         }
     }
 
-    /// <summary>这次拖动作废：什么都不提交，把预览和状态一起收掉。</summary>
-    private void CancelDrag()
+    /// <summary>
+    /// 这次拖动作废：什么都不提交，把预览和状态一起收掉。
+    ///
+    /// **外面也要用**：窗口每次编辑都会换一份曲子，而这条轨是就地重挂的（不是重建控件），
+    /// 拖动中那一份快照（<c>_group</c>、幽灵下标、框选区间）指的全是旧曲子上的下标，
+    /// 不在这儿清掉的话，下一次拖动结算出来的会是一条指着别人的命令。
+    /// </summary>
+    public void CancelDrag()
     {
         if (_drag == DragKind.None) return;
         ResetDrag();

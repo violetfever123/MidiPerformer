@@ -52,6 +52,13 @@ public sealed class UndoableSongEditor : ISongEditor
         => Record(song, _inner.SetTranspose(song, trackIndex, semitones));
 
     /// <summary>
+    /// 换音色。**一格撤销**：从「大钢琴」挑到「口琴」是一步，撤销回去也是一步 ——
+    /// 下拉框选一次就是一次选择，不像拖动那样中途会经过几十个值。
+    /// </summary>
+    public Song SetProgram(Song song, int trackIndex, int program)
+        => Record(song, _inner.SetProgram(song, trackIndex, program));
+
+    /// <summary>
     /// 挪音符这条命令**一次调用就是一格撤销**，哪怕界面上是一次鼠标拖动。
     ///
     /// 拖动过程中不发命令：界面先自己画预览，松手才算一次「挪到这里」交进来 ——

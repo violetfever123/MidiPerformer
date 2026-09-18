@@ -95,6 +95,28 @@ public sealed class SongEditor : ISongEditor
     }
 
     /// <summary>
+    /// 改某条轨的音色（GM 编号）。**只影响试听**，音符一个字节都不动。
+    ///
+    /// 越界**抛**而不是夹：换音色是从一张 128 项的固定表里挑一个，不是一个可以填任意数的格子。
+    /// 夹一下的话，界面传错了 200 会静静地变成 127（一个听着完全不一样的音色），
+    /// 而抛出来至少是个能被发现的 bug —— 和 <see cref="SetNoteSpan"/> 那种「用户拖过头了」
+    /// 的夹是两回事，那是用户意图，这是调用方写错了。
+    /// </summary>
+    public Song SetProgram(Song song, int trackIndex, int program)
+    {
+        if (program < 0 || program > 127)
+            throw new ArgumentOutOfRangeException(
+                nameof(program), program, $"音色号要在 0 到 127 之间（收到 {program}）。");
+
+        var track = TrackAt(song, trackIndex);
+        if (track.Program == program) return song;
+
+        var tracks = song.Tracks.ToArray();
+        tracks[trackIndex] = track with { Program = program };
+        return new Song(tracks, song.TempoMap);
+    }
+
+    /// <summary>
     /// 一组音同时挪一个量（tick 与音高各一个增量）。
     ///
     /// <b>越界整组一起夹，不是逐个夹。</b>逐个夹的话，拖到最左边时那一组会被压成一摞 ——

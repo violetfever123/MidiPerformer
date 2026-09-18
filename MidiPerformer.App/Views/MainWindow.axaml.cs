@@ -309,7 +309,10 @@ public partial class MainWindow : Window
         _edited = false;
         _title = title;
 
-        RebuildLanes();
+        // 换曲子一律重建轨控件：轨数碰巧一样时「就地重挂」看着也能用，但那是**另一首曲子的轨**
+        // 接着用上一首的控件 —— 折叠、改名框这些控件上的状态会跨曲子漏过去。
+        // 编辑那条路才是「同一首曲子的新一份」，两者不是一回事
+        SyncLanes(rebuildAll: true);
         _playback.Load(song);
 
         SongNameBox.Text = title;
@@ -328,30 +331,64 @@ public partial class MainWindow : Window
         RefreshEditState();
         RefreshLibrary(null);
 
-        // 布局还没跑，卷帘的宽度是 0 —— 场景要等 LanesHost.SizeChanged 那一趟才算得出来
+        // 这一趟多半算不出场景（控件刚建出来，宽度还是 0），但位置读数、导航条这些要它。
+        // 卷帘自己会在尺寸落定那一帧补上 —— 那条线挂在 TrackLaneView 的 Roll.SizeChanged 上
         RefreshView();
     }
 
     /// <summary>
-    /// 照着当前这份曲子把控制器和所有轨重建一遍。
+    /// 照着当前这份曲子把控制器和所有轨**同步**一遍。
     ///
-    /// <b>每次换谱面都得重建</b>，不能就地改：控制器是按曲子建出来的一次性对象
+    /// <b>控制器每次都得换新的</b>，不能就地改：它是按曲子建出来的一次性对象
     /// （音域、灰显标记、每小节音符数都算好缓存着了），移调会同时改掉音域和灰显，
     /// 没有哪一处能「顺手更新一下」。
+    ///
+    /// <b>但控件树不必跟着拆。</b>轨数没变就地重挂（<see cref="TrackLaneView.Rebind"/>）——
+    /// 从前的做法是无条件 <c>Children.Clear()</c> + 全部新建，代价是用户直接看得见的：
+    /// 内容高度掉到 0 的那一瞬间 <c>ScrollViewer</c> 把滚动位置夹回顶部（编辑一下就被弹回第 1 小节），
+    /// 新控件的卷帘当帧量不出宽度、算不出场景，要等一次谁也不知道什么时候会来的
+    /// <c>LanesHost.SizeChanged</c> 才画得出来 —— 轨数不变时那一趟根本不会来，
+    /// 于是「编辑一下，音轨就消失了」。就地重挂这两样都没有：控件还是那些控件，
+    /// 滚动位置、焦点、改名框、删轨那一问全都还在。
+    ///
+    /// 轨数变了（删了一条、或者撤销把它拿回来）只能重建 —— 控件和数据是一对一的，
+    /// 多一条少一条没有「就地」可言。那一路由 <see cref="TrackLaneView"/> 自己挂在
+    /// 卷帘尺寸上的重画兜住：布局一落定就补一帧，不会再空着。
     /// </summary>
-    private void RebuildLanes()
+    /// <param name="rebuildAll">
+    /// 强制全部重建。换一首曲子时用 —— 轨数碰巧一样时「就地重挂」是拿**另一首曲子的轨**
+    /// 接着用上一首的控件，控件上的那些状态（折叠、开着没提交的改名框）会跨曲子漏过去。
+    /// 「同一首曲子的新一份」（编辑、撤销）才走就地重挂那一支。
+    /// </param>
+    private void SyncLanes(bool rebuildAll = false)
     {
         if (_song is not { } song) return;
 
         _controller = new PianoRollController(song);
+
+        if (!rebuildAll && _lanes.Count == song.Tracks.Count)
+        {
+            for (int i = 0; i < _lanes.Count; i++) _lanes[i].Rebind(_controller, i);
+            return;
+        }
+
+        // 轨数变了只能重建控件，但**折叠是用户对某条轨的标记，不该被一次删轨顺手抹掉**
+        // （撤销把那条轨拿回来时尤其明显：收起来的那几条自己全弹开了）。
+        // 按轨的身份记，不按下标 —— 删掉第 0 条之后下标整体前移，按下标带会把折叠挪到别人身上。
+        // 必须在 Clear 之前抄下来：下面那一刻 _lanes 就空了
+        var collapsed = new HashSet<(int, int)>();
+        foreach (var lane in _lanes)
+            if (lane.IsCollapsed) collapsed.Add(lane.Identity);
 
         LanesHost.Children.Clear();
         _lanes.Clear();
         for (int i = 0; i < song.Tracks.Count; i++)
         {
             var lane = new TrackLaneView(_controller, i, _tokens);
+            lane.SetCollapsed(collapsed.Contains(lane.Identity));
             lane.HoverChanged += OnLaneHover;
             lane.TransposeRequested += OnTransposeRequested;
+            lane.ProgramRequested += OnProgramRequested;
             lane.NotesMoved += OnNotesMoved;
             lane.NoteResized += OnNoteResized;
             lane.NotesDeleted += OnNotesDeleted;
@@ -683,13 +720,13 @@ public partial class MainWindow : Window
 
         long playheadTick = _playback.PlayheadTick;
         long viewStartTick = _controller?.ViewStartTick ?? 0;
-        // 必须在 RebuildLanes 之前取：下面换掉控制器，旧下标当场作废
+        // 必须在 SyncLanes 之前取：下面换掉控制器，旧下标当场作废
         var selection = selectionAfter ?? CaptureSelectionValues();
 
         _song = edited;
         // 粘性标记：动过就是动过。撤销回原样也不清它（见 _edited 的说明），存盘也不清
         _edited = true;
-        RebuildLanes();
+        SyncLanes();
 
         // 视口照旧有效：小节刻度不受任何一条编辑命令影响（改速度只动速度表，其余只动音符），
         // 控制器自己的 SetViewStart 还会夹一次，曲子变短也不会越界
@@ -702,7 +739,8 @@ public partial class MainWindow : Window
         PlayButton.IsEnabled = edited.Tracks.Count > 0;
         StopButton.IsEnabled = false;
 
-        // 轨头是新建的，悬停状态跟着作废（鼠标这会儿多半正压在刚点的那个按钮上）
+        // 悬停那个音说的是**上一份**曲子里的下标，编辑之后一概作废
+        //（鼠标这会儿也多半正压在刚点的那个按钮上，本来就不在卷帘里）
         ShowHover(null);
         ShowSelection();
         RefreshEditState();
@@ -748,6 +786,19 @@ public partial class MainWindow : Window
     {
         if (_song is not { } song || sender is not TrackLaneView lane) return;
         ApplySong(_editor.SetTranspose(song, lane.TrackIndex, semitones));
+    }
+
+    /// <summary>
+    /// 轨道头上的音色下拉挑了新的一号。
+    ///
+    /// **只影响试听**：音色是「我想听成什么样」，发给游戏时永远是口琴那套键位。
+    /// 所以它和移调、改速度共用同一套重绘 —— 谱面一个字节都不动，
+    /// 走 <see cref="ApplySong"/> 要换的只有试听那张表（<c>PreviewPlayback.Load</c>）。
+    /// </summary>
+    private void OnProgramRequested(object? sender, int program)
+    {
+        if (_song is not { } song || sender is not TrackLaneView lane) return;
+        ApplySong(_editor.SetProgram(song, lane.TrackIndex, program));
     }
 
     // ==================== 卷帘编辑：事件 → 命令 ====================
@@ -826,7 +877,7 @@ public partial class MainWindow : Window
     /// <summary>
     /// 此刻选中的那组音，连**下标带值**一起抄下来。
     ///
-    /// 必须在换曲子（<see cref="RebuildLanes"/>）之前调 —— 下标只对它算出来的那份曲子有效。
+    /// 必须在换曲子（<see cref="SyncLanes"/>）之前调 —— 下标只对它算出来的那份曲子有效。
     /// 顺手丢掉越界的：ref 过期不是错误，轨刚被删掉那一下就会碰上。
     /// </summary>
     private List<(NoteRef Ref, Note Note)> CaptureSelection()
@@ -1225,8 +1276,10 @@ public partial class MainWindow : Window
         if (info is not { } note) return;
 
         ShowSelection();
-        // 横向已经由控制器对齐到那一小节，纵向（哪条轨）在这儿滚进视野
-        if (note.Track >= 0 && note.Track < _lanes.Count) _lanes[note.Track].BringIntoView();
+        // 横向已经由控制器对齐到那一小节，纵向（哪条轨）在这儿滚进视野。
+        // 走 Reveal 而不是 BringIntoView：那条轨要是收着的，「滚到它那儿」在屏幕上
+        // 一个像素的变化都没有 —— 跳过去的是那个音，所以顺手把它展开
+        if (note.Track >= 0 && note.Track < _lanes.Count) _lanes[note.Track].Reveal();
 
         RefreshView();
     }

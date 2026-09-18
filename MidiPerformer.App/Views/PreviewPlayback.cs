@@ -1,7 +1,7 @@
 using Avalonia.Threading;
 using MidiPerformer.Core.Model;
 using MidiPerformer.Core.Ports.Outbound;
-using MidiPerformer.Core.UseCases.Perform.Repertoire;
+using MidiPerformer.Core.UseCases.Preview;
 using MidiPerformer.Core.UseCases.Timeline;
 
 namespace MidiPerformer.App.Views;
@@ -28,7 +28,7 @@ public sealed class PreviewPlayback : IDisposable
     private readonly DispatcherTimer _timer;
 
     private SongWalker? _walker;
-    private IReadOnlyList<MappedNote> _notes = Array.Empty<MappedNote>();
+    private IReadOnlyList<PreviewNote> _notes = Array.Empty<PreviewNote>();
 
     public PreviewPlayback(IAudioSink sink, IClock clock)
     {
@@ -59,12 +59,17 @@ public sealed class PreviewPlayback : IDisposable
     /// <summary>放完了（无循环）—— 已自动停止并松开所有按键，界面该把视图对齐回小节线。</summary>
     public event EventHandler? Finished;
 
-    /// <summary>换一首曲子。会先把正在响的音停掉。</summary>
+    /// <summary>
+    /// 换一首曲子。会先把正在响的音停掉。
+    ///
+    /// 出声那张表（**每个音带哪个声道、哪个音色**）在用例层摊好，这儿只管拿 ——
+    /// 摊法本身有它自己的测试（<c>PreviewMixer</c>），视图这一层不重算一遍。
+    /// </summary>
     public void Load(Song song)
     {
         Stop();
         _walker = new SongWalker(song);
-        _notes = BuildNotes(song);
+        _notes = PreviewMixer.Mix(song);
     }
 
     /// <summary>
@@ -128,24 +133,5 @@ public sealed class PreviewPlayback : IDisposable
         }
 
         Frame?.Invoke(this, EventArgs.Empty);
-    }
-
-    /// <summary>
-    /// 整曲所有轨的音，换成**音乐时间**（秒）的 <see cref="MappedNote"/>。
-    ///
-    /// 每轨各带各的移调 —— 卷帘上看到的音高、耳朵听到的音高、这一份里的音高是同一个。
-    /// <c>InRange == false</c> 的音**照发**：MIDI 出声不挑音域，
-    /// 灰显说的是「游戏里弹不出来」，不是「不该出声」。试听正是用来听这个的。
-    /// </summary>
-    private static IReadOnlyList<MappedNote> BuildNotes(Song song)
-    {
-        var all = new List<MappedNote>();
-        foreach (var track in song.Tracks)
-        {
-            var raws = RepertoireToSeconds.Convert(track.Notes, song.TempoMap);
-            // 基准八度给 null（自动）：试听不按键，基准八度只影响 InRange 那个标记
-            all.AddRange(NoteMapper.Map(raws, track.Transpose, manualBaseOctave: null).Notes);
-        }
-        return all;
     }
 }

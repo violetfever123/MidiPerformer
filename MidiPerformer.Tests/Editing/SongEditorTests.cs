@@ -278,6 +278,93 @@ public class SongEditorTests
         Assert.That(edited.Tracks[0].Transpose, Is.EqualTo(-5), "不是 3 + (-5) = -2");
     }
 
+    // ==================== 音色 ====================
+
+    /// <summary>
+    /// 换音色只换轨上那一格，音符一个字节都不动（和移调同一条道理：音色是**听**的，
+    /// 不是谱面）。9 号声道的鼓轨也照改 —— 界面不给它画下拉框，命令不替界面挡。
+    /// </summary>
+    [Test]
+    public void 换音色只改轨的音色音符一点没动()
+    {
+        var song = SongOf(Map(), Melody(new Note(60, 0, 480, 100), new Note(64, 480, 480, 100)));
+
+        var edited = _editor.SetProgram(song, 0, 22);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(edited.Tracks[0].Program, Is.EqualTo(22), "换成了口琴");
+            Assert.That(edited.Tracks[0].Notes, Is.SameAs(song.Tracks[0].Notes), "音符是同一份，不是凑巧相等");
+            Assert.That(edited.Tracks[0].Transpose, Is.EqualTo(song.Tracks[0].Transpose), "移调不动");
+            Assert.That(edited.TempoMap, Is.SameAs(song.TempoMap), "速度表不动");
+        });
+    }
+
+    [Test]
+    public void 换音色只动目标轨别的轨一个字节不变()
+    {
+        var song = SongOf(
+            Map(),
+            Melody(new Note(60, 0, 480, 100)),
+            Bass(0, new Note(40, 0, 480, 100)),
+            Third(new Note(72, 0, 480, 100)));   // 第 9 声道（鼓）
+
+        var edited = _editor.SetProgram(song, 2, 16);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(edited.Tracks[2].Program, Is.EqualTo(16), "鼓轨也照改");
+            Assert.That(edited.Tracks[0], Is.SameAs(song.Tracks[0]));
+            Assert.That(edited.Tracks[1], Is.SameAs(song.Tracks[1]));
+        });
+    }
+
+    /// <summary>音色号没变时返回同一份：装饰器拿引用相等当判据，多返回一份新的就多一格空账。</summary>
+    [Test]
+    public void 音色没变时返回同一份曲子()
+    {
+        var song = SongOf(Map(), Melody(new Note(60, 0, 480, 100)));   // 24
+
+        Assert.That(_editor.SetProgram(song, 0, 24), Is.SameAs(song));
+    }
+
+    /// <summary>
+    /// 越界**抛**，不是夹到 0..127。换音色是从一张 128 项的固定表里挑一个，
+    /// 200 是调用方写错了 —— 夹成 127 的话界面会静静地换成一个没人要的音色，
+    /// 而且不报错（和「拖过头了就贴着边」那种用户意图不是一回事）。
+    /// </summary>
+    [TestCase(-1)]
+    [TestCase(128)]
+    [TestCase(9999)]
+    public void 非法音色号抛中文错(int program)
+    {
+        var song = SongOf(Map(), Melody(new Note(60, 0, 480, 100)));
+
+        var ex = Assert.Throws<ArgumentOutOfRangeException>(() => _editor.SetProgram(song, 0, program));
+
+        Assert.That(ex!.Message, Does.Contain("音色"), "错误消息得是给人看的中文");
+    }
+
+    [TestCase(0)]
+    [TestCase(127)]
+    public void 边界上的音色号是合法的(int program)
+    {
+        var song = SongOf(Map(), Melody(new Note(60, 0, 480, 100)));
+
+        Assert.That(_editor.SetProgram(song, 0, program).Tracks[0].Program, Is.EqualTo(program));
+    }
+
+    [TestCase(-1)]
+    [TestCase(3)]
+    public void 换音色时轨下标越界也抛中文错(int trackIndex)
+    {
+        var song = SongOf(Map(), Melody(new Note(60, 0, 480, 100)));
+
+        var ex = Assert.Throws<ArgumentOutOfRangeException>(() => _editor.SetProgram(song, trackIndex, 22));
+
+        Assert.That(ex!.Message, Does.Contain("越界"), "错误消息得是给人看的中文");
+    }
+
     // ==================== 没改就还回来同一个 ====================
 
     /// <summary>

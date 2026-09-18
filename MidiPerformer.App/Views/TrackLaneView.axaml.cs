@@ -6,6 +6,7 @@ using MidiPerformer.Adapters.Controllers;
 using MidiPerformer.Adapters.Presenters;
 using MidiPerformer.App.Theme;
 using MidiPerformer.Core.Model;
+using MidiPerformer.Core.UseCases.Preview;
 
 namespace MidiPerformer.App.Views;
 
@@ -31,8 +32,23 @@ public partial class TrackLaneView : UserControl
     /// <summary>一个音高行多高（像素），照 wireframe 的 <c>ROW_H = 7</c>。</summary>
     private const double RowPixels = 7;
 
-    private readonly PianoRollController _controller;
-    private readonly int _trackIndex;
+    /// <summary>
+    /// 这条轨挂在哪份曲子上。<b>不是 readonly</b>：编辑换的是一份新的 <see cref="Song"/>，
+    /// 而控件是**就地重挂**的（见 <see cref="Rebind"/>），不是拆了重建。
+    /// </summary>
+    private PianoRollController _controller;
+    private int _trackIndex;
+
+    /// <summary>
+    /// 这条轨收起来了（只留轨道头 + 一行「已折叠」）。
+    ///
+    /// **状态住在这儿，不在窗口里。** 它跟着控件走，于是编辑（就地重挂）不会把它抹掉 ——
+    /// 这正是 14 把「每次编辑重建控件」改掉之后白捡的一样：从前的做法下，
+    /// 收起来再挪一个音，这条轨会自己弹开。
+    /// 代价是**轨数真的变了**时控件要重建，这一格跟着丢 —— 窗口按轨的身份把它带过去
+    /// （见 <see cref="Identity"/>），所以那一路也保得住。
+    /// </summary>
+    private bool _collapsed;
 
     /// <summary>改名输入框正开着。</summary>
     private bool _renaming;
@@ -73,26 +89,28 @@ public partial class TrackLaneView : UserControl
     {
         InitializeComponent();
 
-        _controller = controller;
-        _trackIndex = trackIndex;
+        // 音色（16）、折叠（15）都做完了，这句话里只剩**真还没做、也还没有归属切片**的那一样：
+        // 只看这条（独奏）—— 别替它许诺
+        LaterText.Text = "只看这条 还没做";
 
-        var track = controller.Song.Tracks[trackIndex];
+        // 128 个 GM 音色一次装好。**文字走 Format**（和鼓轨那句话、和 FormatTests 盯的是同一处）：
+        // 在视图里自己拼一遍「· GM n」，改一处漏一处是迟早的事
+        TimbreBox.ItemsSource = Enumerable.Range(0, Format.ProgramNames.Count)
+            .Select(Format.ProgramLabel)
+            .ToArray();
 
-        NumberText.Text = Format.TrackNumber(trackIndex + 1);
-        NameText.Text = DisplayName(track.Name, trackIndex);
-        TimbreText.Text = $"音色 {Format.Timbre(track.Program, track.Channel)}";
-        TransposeText.Text = Format.Transpose(track.Transpose);
-        CountText.Text = Format.NoteCount(track.Notes.Count);
-        // 移调、改名、删轨都做完了（09），这句话只留**真还没做、也还没有归属切片**的那三样：
-        // 音色试听、只看这条、折叠 —— 别替它们许诺
-        LaterText.Text = "音色（试听） / 只看这条 / 折叠 还没做";
+        // 卷帘自己的尺寸一变就重算一屏。
+        //
+        // **这是「编辑一下音轨就消失」的一半解药。** 控件刚建出来那一帧宽度还是 0，
+        // Refresh 直接返回（照 wireframe 的 `if (w < 40) return;`）；而窗口那一趟
+        // LanesHost.SizeChanged 在轨数不变时**根本不会来**（高度没变），于是场景一直算不出来，
+        // 卷帘上连底色都没有 —— 要等某次改窗宽、某帧播放、某次点导航才补上。
+        // 挂在这儿之后，布局一落定就自己补一帧，不指望外面谁记得来喊。
+        Roll.SizeChanged += (_, _) => Refresh(_lastPlayheadTick, _lastPlayheadVisible);
 
-        // 行高恒定（标注 5）：轨高跟着这条轨的音域走，宽音域的轨就高一些
-        var (low, high) = controller.PitchRangeOf(trackIndex);
-        Roll.Height = PianoRollGeometry.RulerHeight + (high - low + 1) * RowPixels;
-        Roll.TrackIndex = trackIndex;
-        Roll.Controller = controller;
         Roll.Tokens = tokens;
+        _controller = controller;
+        Bind(trackIndex);
 
         // 悬停：这条轨的音符先报上去，由窗口去查读数条要的那几个数
         Roll.HoverChanged += (_, note) => HoverChanged?.Invoke(this, note);
@@ -114,6 +132,71 @@ public partial class TrackLaneView : UserControl
         };
     }
 
+    /// <summary>
+    /// 把这条轨的显示挂到 <see cref="_controller"/> 上、取第 <paramref name="trackIndex"/> 条。
+    /// 构造和 <see cref="Rebind"/> 共用这一份 —— 两处各写一遍的话，
+    /// 重挂之后迟早有一格显示停在上一份曲子上的旧数。
+    /// </summary>
+    private void Bind(int trackIndex)
+    {
+        _trackIndex = trackIndex;
+
+        var controller = _controller;
+        var track = controller.Song.Tracks[trackIndex];
+
+        NumberText.Text = Format.TrackNumber(trackIndex + 1);
+        NameText.Text = DisplayName(track.Name, trackIndex);
+
+        // 音色那一格两样二选一（见 axaml）：旋律轨给下拉，鼓轨给一句说明。
+        // 鼓轨不给下拉不是省事：9 号声道在 MIDI 里整条都是鼓组，音色号在它上面没有意义，
+        // 换成一个听不出区别的号只是让人以为自己改坏了什么
+        bool percussion = track.Channel == PreviewMixer.PercussionChannel;
+        TimbrePicker.IsVisible = !percussion;
+        TimbreText.IsVisible = percussion;
+        if (percussion) TimbreText.Text = $"音色 {Format.Timbre(track.Program, track.Channel)}";
+        // 下拉里选中的那一行就是曲子里那一号。**下标**就是音色号 ——
+        // 这一格装的是 0..127 那 128 行，第 i 行就是 GM 第 i 号
+        else TimbreBox.SelectedIndex = Math.Clamp(track.Program, 0, 127);
+
+        TransposeText.Text = Format.Transpose(track.Transpose);
+        CountText.Text = Format.NoteCount(track.Notes.Count);
+
+        // 行高恒定（标注 5）：轨高跟着这条轨的音域走，宽音域的轨就高一些。
+        // 重挂时必须重设：移调会改音域，轨高跟着变，不设的话卷帘会拿上一份的高度画
+        var (low, high) = controller.PitchRangeOf(trackIndex);
+        Roll.Height = PianoRollGeometry.RulerHeight + (high - low + 1) * RowPixels;
+        Roll.TrackIndex = trackIndex;
+        Roll.Controller = controller;
+    }
+
+    /// <summary>
+    /// 把这条轨重挂到**新的一份曲子**上（编辑之后走这条，不是拆了重建）。
+    ///
+    /// 窗口每次编辑都会换一份 <see cref="Song"/>，而控件和数据是一对一的：
+    /// 轨数没变就地重挂，控件树、卷帘的滚动位置、焦点都不动，用户看不出中间换过一次。
+    /// 从前的做法是把整摞控件拆掉重建，代价是看得见的 —— 内容高度掉到 0 时
+    /// <c>ScrollViewer</c> 把滚动位置夹回顶部，新控件当帧量不出宽度于是整片空白。
+    ///
+    /// 轨数变了那一路仍然得重建（多一条少一条没有「就地」可言），由窗口决定。
+    /// </summary>
+    /// <param name="controller">照新曲子建出来的控制器。</param>
+    /// <param name="trackIndex">这条轨在新曲子里的下标（本次没有轨被删时和原来一样）。</param>
+    public void Rebind(PianoRollController controller, int trackIndex)
+    {
+        // 手上开着的那两件小事先收掉：改名框里那半截名字、删轨那一问，
+        // 说的都是**上一份**曲子里的东西。从前每次编辑都换新控件，这两件顺手就没了；
+        // 现在轨是复用的，得自己收 —— 不然改名框会带着一个已经作废的下标提交出去
+        CancelRename();
+        SetConfirmingDelete(false);
+
+        // 拖动中的预览一并作废：幽灵和框选说的都是旧下标，在新曲子上一个都对不上
+        Roll.CancelDrag();
+
+        _controller = controller;
+        Bind(trackIndex);
+        Refresh(_lastPlayheadTick, _lastPlayheadVisible);
+    }
+
     /// <summary>悬停到的音符变了（-1 = 没命中）。</summary>
     public event EventHandler<int>? HoverChanged;
 
@@ -124,6 +207,15 @@ public partial class TrackLaneView : UserControl
     /// 命令那边永远只收到一个明确的目标值。
     /// </summary>
     public event EventHandler<int>? TransposeRequested;
+
+    /// <summary>
+    /// 用户在音色下拉里挑了这条轨的音色（**和曲子里原来那一号不一样**）。参数是新的 GM 音色号。
+    ///
+    /// 和 <see cref="TransposeRequested"/> 一个路子：界面只喊一声，命令由窗口去调 ——
+    /// 编辑脊柱只有一条。参数给的是**绝对的一号音色**，不是「换到下一号」，
+    /// 换音色本来就是从一张表里挑一个。
+    /// </summary>
+    public event EventHandler<int>? ProgramRequested;
 
     /// <summary>
     /// 用户改了这条轨的名字（**已经去过两端空白，而且和原来不一样**）。参数是新名字。
@@ -158,11 +250,70 @@ public partial class TrackLaneView : UserControl
     /// <summary>这条轨在 <c>Song.Tracks</c> 里的下标。</summary>
     public int TrackIndex => _trackIndex;
 
+    /// <summary>这条轨收起来了没有。</summary>
+    public bool IsCollapsed => _collapsed;
+
+    /// <summary>
+    /// 这条轨的**身份**：<c>(轨块号, 声道)</c>，取值来自模型自己那对唯一键
+    /// （见 <see cref="Track.TrackIndex"/>）。
+    ///
+    /// 窗口在轨数变化后要把折叠状态带到新的控件上，而<b>下标在这儿不能用</b>：
+    /// 删掉第 0 条之后 <c>Song.Tracks</c> 的下标整体前移，按下标带会把折叠挪到别人身上；
+    /// 这一对不重编号，删谁都还是它自己。
+    /// </summary>
+    public (int Chunk, int Channel) Identity
+    {
+        get
+        {
+            var track = _controller.Song.Tracks[_trackIndex];
+            return (track.TrackIndex, track.Channel);
+        }
+    }
+
+    // ==================== 折叠 ====================
+
+    private void OnFoldClick(object? sender, RoutedEventArgs e) => SetCollapsed(!_collapsed);
+
+    /// <summary>
+    /// 收起 / 展开这条轨。**只动看得见的那两样**（卷帘与那一行「已折叠」），
+    /// 谱面、选中集、播放一个字节都不碰 —— 折叠是「先不看它」，不是「不要它」。
+    /// </summary>
+    public void SetCollapsed(bool collapsed)
+    {
+        if (_collapsed == collapsed) return;
+        _collapsed = collapsed;
+
+        FoldButton.Content = collapsed ? "展开" : "折叠";
+        Roll.IsVisible = !collapsed;
+        Strip.IsVisible = collapsed;
+        // 收起来的那一条底色跟着轨号奇偶走，和卷帘的 .lane.a/.lane.b 是同一套
+        Strip.Classes.Set("b", _trackIndex % 2 != 0);
+
+        // 展开时立刻补一帧：收着的这段时间里 Refresh 一直跳过，场景还停在收起来之前那一份，
+        // 而曲子可能已经在背后改过好几轮了（编辑、撤销都换过 Song）。
+        // 收起那一头不用补 —— 卷帘藏了，画什么都没人看
+        if (!collapsed) Refresh(_lastPlayheadTick, _lastPlayheadVisible);
+    }
+
+    /// <summary>
+    /// 展开它并滚进视野。Ctrl + ←/→ 定位到一条收起来的轨上时走这条 ——
+    /// 不展开的话「跳过去了」在屏幕上一个像素的变化都没有，用户只会以为按键失灵了。
+    /// </summary>
+    public void Reveal()
+    {
+        SetCollapsed(false);
+        // `this.` 不能省：BringIntoView 是 ControlExtensions 上的**扩展方法**，
+        // 而扩展方法只在「表达式.名字」这个形状上找 —— 光写 BringIntoView() 编译器
+        // 只去类自己和基类里找，找不到就是 CS0103
+        this.BringIntoView();
+    }
+
     /// <summary>
     /// 步进器上四个按钮共用的入口：<c>Tag</c> 里是这一下要挪几个半音。
     ///
-    /// 当前值从控制器手里的曲子现取 —— 每次编辑之后窗口都会把所有轨重建一遍，
-    /// 所以这个控件手上的值永远是最新的，不会累加到一次编辑之前的旧值上。
+    /// 当前值从控制器手里的曲子现取 —— 每次编辑之后窗口都会把这条轨重挂一遍
+    /// （<see cref="Rebind"/>，控制器换成新的），所以这个控件手上的值永远是最新的，
+    /// 不会累加到一次编辑之前的旧值上。
     /// </summary>
     private void OnTransposeStepClick(object? sender, RoutedEventArgs e)
     {
@@ -170,6 +321,26 @@ public partial class TrackLaneView : UserControl
 
         int current = _controller.Song.Tracks[_trackIndex].Transpose;
         TransposeRequested?.Invoke(this, current + delta);
+    }
+
+    // ==================== 音色 ====================
+
+    /// <summary>
+    /// 音色下拉换了。选中项的**下标就是 GM 音色号**（第 i 行就是 i 号）。
+    /// </summary>
+    private void OnTimbreChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        int program = TimbreBox.SelectedIndex;
+        // 一项都没选中（清空过、或者还没装数据）时什么都不做
+        if (program < 0) return;
+
+        // 和曲子里那一号一样就当没发生 —— 这一条不是省事，是**必须**：
+        // Bind 会把 SelectedIndex 设成曲子里那一号（重挂时每一次编辑都会走一趟），
+        // 那一下同样会发 SelectionChanged，照喊的话每编辑一次就多记一笔「换了音色」的空账，
+        // 用户按撤销会看到一串按了什么都不动的格子
+        if (program == _controller.Song.Tracks[_trackIndex].Program) return;
+
+        ProgramRequested?.Invoke(this, program);
     }
 
     /// <summary>当前视口尺寸下重算一屏要画的东西。窗口改宽、滚动、播放每帧都调它。</summary>
@@ -181,6 +352,10 @@ public partial class TrackLaneView : UserControl
         // 但拖动预览那一头的重画得拿这一份状态，不能因为这一帧没画就丢掉
         _lastPlayheadTick = playheadTick;
         _lastPlayheadVisible = playheadVisible;
+
+        // 收起来的轨没有卷帘可画（Roll 已经藏了），算了也没人看 ——
+        // 这一趟不能省掉上面那两行：展开的那一下要拿「此刻」重算一屏
+        if (_collapsed) return;
 
         double width = Roll.Bounds.Width;
         // 还没量出来（首帧布局之前）就算了，照 wireframe 的 `if (w < 40) return;`
