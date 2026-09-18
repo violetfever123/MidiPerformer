@@ -3,15 +3,55 @@
              xmlns:views="clr-namespace:MidiPerformer.App.Views"
              x:Class="MidiPerformer.App.Views.TrackLaneView">
   <!--
-    一条轨 = 只读轨道头 + 卷帘。
+    一条轨 = 轨道头 + 卷帘。
 
-    **轨道头里一个控件都没有**，全是 TextBlock —— 这是有意的：
-    wireframe 里那几个（音色下拉、移调步进器、只看这条 / 折叠 / 删除轨）都要改谱面，
-    而这一张是只读的。摆一排按了没反应的控件，比不摆更坏 ——
-    人会以为是自己没点对。它们归 08，右边那行灰字就是留给谁看的一句话。
+    轨道头到 08 为止只有**移调**那一格是活的（四个步进按钮夹着当前值），
+    其余三样（音色下拉、只看这条、折叠）还没有归属的切片，所以右边那行灰字如实写着它们还没做 ——
+    摆一排按了没反应的控件比不摆更坏，人会以为是自己没点对。
 
     底色 / 边框一律取令牌，这里不出现任何颜色字面值。
   -->
+  <UserControl.Styles>
+    <!-- wireframe 的 .lhead .stepper：一个圆角框，里面按钮夹着值 -->
+    <Style Selector="Border.stepper">
+      <Setter Property="Background" Value="{DynamicResource TokenSurface}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource TokenLine}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="{DynamicResource TokenRadiusControl}" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+
+    <!-- 步进按钮：贴着外框，所以自己不要边框、不要圆角，比普通按钮矮一号 -->
+    <Style Selector="Button.step">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="CornerRadius" Value="0" />
+      <Setter Property="Padding" Value="6,2" />
+      <Setter Property="FontSize" Value="11.5" />
+      <Setter Property="MinHeight" Value="0" />
+      <Setter Property="Foreground" Value="{DynamicResource TokenInkMuted}" />
+    </Style>
+
+    <!--
+      中间那个值：左右各一条竖线，把它和按钮分开（wireframe 的 .stepper .val）。
+      竖线套在 Border 上而不是文字上 —— Avalonia 的 TextBlock 没有边框属性。
+    -->
+    <Style Selector="Border.step-value">
+      <Setter Property="MinWidth" Value="58" />
+      <Setter Property="BorderBrush" Value="{DynamicResource TokenLine}" />
+      <Setter Property="BorderThickness" Value="1,0" />
+      <Setter Property="Padding" Value="4,3" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+
+    <Style Selector="Border.step-value TextBlock">
+      <Setter Property="FontSize" Value="11.5" />
+      <Setter Property="Foreground" Value="{DynamicResource TokenInk}" />
+      <Setter Property="HorizontalAlignment" Value="Center" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+  </UserControl.Styles>
+
   <StackPanel>
     <Border Background="{DynamicResource TokenSurface2}"
             BorderBrush="{DynamicResource TokenLineSoft}"
@@ -32,11 +72,34 @@
                    FontSize="11.5"
                    Foreground="{DynamicResource TokenInkMuted}"
                    VerticalAlignment="Center" />
-        <TextBlock x:Name="TransposeText"
-                   Grid.Column="3"
-                   FontSize="11.5"
-                   Foreground="{DynamicResource TokenInkMuted}"
-                   VerticalAlignment="Center" />
+
+        <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="5" VerticalAlignment="Center">
+          <TextBlock FontSize="12.5"
+                     Foreground="{DynamicResource TokenInkMuted}"
+                     VerticalAlignment="Center" Text="移调" />
+          <!--
+            四个步进：±1 半音、±12（一个八度）。移调是**绝对赋值**，
+            按钮只负责把「当前值 ± n」算出来，交给命令去设。
+            Tag 里是 ASCII 减号（要被 int.Parse 读），按钮上写的是排版用的减号 U+2212 ——
+            两个字符不一样是有意的。
+          -->
+          <Border Classes="stepper">
+            <StackPanel Orientation="Horizontal">
+              <Button Classes="step" Content="−12" Tag="-12" Click="OnTransposeStepClick"
+                      ToolTip.Tip="低一个八度" />
+              <Button Classes="step" Content="−1" Tag="-1" Click="OnTransposeStepClick"
+                      ToolTip.Tip="低一个半音" />
+              <Border Classes="step-value">
+                <TextBlock x:Name="TransposeText" Classes="mono" />
+              </Border>
+              <Button Classes="step" Content="+1" Tag="1" Click="OnTransposeStepClick"
+                      ToolTip.Tip="高一个半音" />
+              <Button Classes="step" Content="+12" Tag="12" Click="OnTransposeStepClick"
+                      ToolTip.Tip="高一个八度" />
+            </StackPanel>
+          </Border>
+        </StackPanel>
+
         <TextBlock x:Name="CountText"
                    Grid.Column="4"
                    FontSize="11.5"

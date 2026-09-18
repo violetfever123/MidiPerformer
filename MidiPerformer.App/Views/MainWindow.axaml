@@ -9,11 +9,16 @@
   <!--
     窗口一：编辑器外壳（docs/wireframe.html 那一块 .toolbar / .lanes / .nav / .readout / .transport）。
 
-    切片到这儿已经合齐了，工具栏四条命令的着落：
+    切片到这儿已经合齐了，工具栏几条命令的着落：
       · 导入 MIDI… → 本窗口直接读（SongProject.Read）
-      · 保存 / 另存为… → **仍然置灰**，它们要的是曲库，归 10
-      · 导出 → 本窗口写回（SongProject.Write），装了曲子才亮
+      · 保存 / 另存为… → 写进曲库（SongProject.WriteProject），装了曲子才亮
+      · 导出 → 本窗口写回一个标准 MIDI 文件（SongProject.Write），装了曲子才亮
+      · 撤销 / 重做 → 08 的编辑脊柱（UndoableSongEditor），没有可撤的就置灰
       · 演奏器… → 组装点给的工厂，另开一个独立窗口（04）
+
+    能改谱面的有两处，都走同一条脊柱：走带条上的速度框（回车提交）和轨道头上的移调步进器。
+
+    左边那条曲库（10）是代码塞进来的，不走 XAML —— 它要曲库和取色桥两样构造参数。
 
     样式全部写在这儿的 Window.Styles 里：Styles/Controls.axaml 归 03，本切片不动它，
     而新增的容器（工具栏 / 导航条 / 读数条 / 走带条）总得有长相。
@@ -117,27 +122,43 @@
     <!-- ==================== 顶部工具栏 ==================== -->
     <Border Grid.Row="0" Classes="toolbar">
       <StackPanel Spacing="8">
-        <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,*">
+        <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,*">
           <Button Grid.Column="0" x:Name="ImportButton" Classes="primary" Content="导入 MIDI…"
                   Click="OnImportClick" />
-          <!-- 保存 / 另存为要等曲库，置灰 + 说清归谁。灰着的按钮比空按钮诚实 -->
+          <!-- 保存 / 另存为：存进曲库（.mproj）。没装曲子时置灰，在 RefreshEditState 里开 -->
           <Button Grid.Column="1" x:Name="SaveButton" Content="保存" IsEnabled="False"
-                  Margin="8,0,0,0" ToolTip.Tip="存进曲库归 10" />
+                  Margin="8,0,0,0" Click="OnSaveClick"
+                  ToolTip.Tip="存回曲库（名字一样就是覆盖这一首）" />
           <Button Grid.Column="2" x:Name="SaveAsButton" Content="另存为…" IsEnabled="False"
-                  Margin="8,0,0,0" ToolTip.Tip="存进曲库归 10" />
+                  Margin="8,0,0,0" Click="OnSaveAsClick"
+                  ToolTip.Tip="换一个曲名存进曲库" />
           <!-- 导出：没装曲子时置灰，装了才亮（在 LoadSong 里开） -->
           <Button Grid.Column="3" x:Name="ExportButton" Content="导出" IsEnabled="False"
                   Margin="8,0,0,0" Click="OnExportClick"
                   ToolTip.Tip="把这时的谱面写回一个标准 MIDI 文件" />
 
-          <StackPanel Grid.Column="4" Orientation="Horizontal" Spacing="6" Margin="12,0,0,0">
-            <TextBlock Classes="label" Text="歌曲名" />
-            <!-- 改名就是改文件名，那件事（曲库、命名、导入历史）归 10；这儿只报当前这份叫什么 -->
-            <TextBox x:Name="SongNameBox" Width="170" IsReadOnly="True"
-                     ToolTip.Tip="改名与曲库归 10" />
+          <!-- 撤销 / 重做：栈空的时候置灰（没得撤就别让人点）。
+               键盘入口 Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z 是同一件事，见 OnWindowKeyDown -->
+          <StackPanel Grid.Column="4" Orientation="Horizontal" Spacing="6" Margin="14,0,0,0">
+            <Button x:Name="UndoButton" Content="撤销" IsEnabled="False"
+                    Click="OnUndoClick" ToolTip.Tip="Ctrl+Z" />
+            <Button x:Name="RedoButton" Content="重做" IsEnabled="False"
+                    Click="OnRedoClick" ToolTip.Tip="Ctrl+Y 或 Ctrl+Shift+Z" />
           </StackPanel>
 
-          <Button Grid.Column="5" x:Name="PerformerButton" Classes="launch" Content="演奏器…"
+          <StackPanel Grid.Column="5" Orientation="Horizontal" Spacing="6" Margin="14,0,0,0">
+            <TextBlock Classes="label" Text="歌曲名" />
+            <!--
+              名字框就是曲名：改名 = 改曲库里的文件名（wireframe 脚注那句「改名就是改文件名」）。
+              还没进曲库的曲子（导入时取消了命名、或从没存过）回车就顺势存进去问个名字，
+              不然这一格会是个打完回车什么都没发生的死框。见 OnSongNameKeyDown。
+            -->
+            <TextBox x:Name="SongNameBox" Width="170" IsEnabled="False"
+                     KeyDown="OnSongNameKeyDown"
+                     ToolTip.Tip="回车改名（改名就是改曲库里的文件名）；还没进曲库的，回车就存进去" />
+          </StackPanel>
+
+          <Button Grid.Column="6" x:Name="PerformerButton" Classes="launch" Content="演奏器…"
                   HorizontalAlignment="Right" Click="OnPerformerClick"
                   ToolTip.Tip="另开一个窗口，把选中的轨弹到别的程序里去" />
         </Grid>
@@ -154,20 +175,33 @@
       </StackPanel>
     </Border>
 
-    <!-- ==================== 卷帘区：所有轨上下堆叠 ==================== -->
-    <ScrollViewer Grid.Row="1" x:Name="LanesScroll"
-                  HorizontalScrollBarVisibility="Disabled"
-                  VerticalScrollBarVisibility="Auto">
-      <Panel>
-        <StackPanel x:Name="LanesHost" />
-        <TextBlock x:Name="EmptyHint"
-                   Margin="24,60"
-                   TextAlignment="Center" TextWrapping="Wrap"
-                   FontSize="12.5"
-                   Foreground="{DynamicResource TokenInkFaint}"
-                   Text="还没有曲子 —— 点左上角「导入 MIDI…」选一个 .mid 文件，谱面就会铺在这儿。" />
-      </Panel>
-    </ScrollViewer>
+    <!-- ==================== 曲库 + 卷帘区 ==================== -->
+    <!--
+      wireframe 的 .split：左边曲库固定 212px，右边卷帘吃满剩下的。
+      曲库**只跟卷帘并排** —— 工具栏 / 导航条 / 读数条 / 走带条都是整幅宽，和 wireframe 一样
+      （那几条在 .split 外面）。
+
+      面板是代码塞进 LibraryHost 的，不走 XAML：它要曲库和取色桥两样构造参数，
+      而 XAML 只能调无参构造。见 MainWindow.axaml.cs 的 BuildLibraryPanel。
+    -->
+    <Grid Grid.Row="1" ColumnDefinitions="212,*">
+      <ContentControl Grid.Column="0" x:Name="LibraryHost" />
+
+      <ScrollViewer Grid.Column="1" x:Name="LanesScroll"
+                    HorizontalScrollBarVisibility="Disabled"
+                    VerticalScrollBarVisibility="Auto">
+        <Panel>
+          <!-- 可聚焦：速度框回车提交之后焦点要**从这里放开**，不然接着打字会改到刚提交的框里 -->
+          <StackPanel x:Name="LanesHost" Focusable="True" />
+          <TextBlock x:Name="EmptyHint"
+                     Margin="24,60"
+                     TextAlignment="Center" TextWrapping="Wrap"
+                     FontSize="12.5"
+                     Foreground="{DynamicResource TokenInkFaint}"
+                     Text="还没有曲子 —— 点左上角「导入 MIDI…」选一个 .mid 文件，或者把文件直接拖进这个窗口。" />
+        </Panel>
+      </ScrollViewer>
+    </Grid>
 
     <!-- ==================== 小节导航条 ==================== -->
     <Border Grid.Row="2" Classes="navbar">
@@ -218,7 +252,7 @@
 
     <!-- ==================== 走带条 ==================== -->
     <Border Grid.Row="4" Classes="transportbar">
-      <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,*">
+      <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,*">
         <Button Grid.Column="0" x:Name="PlayButton" Classes="primary transport"
                 Content="▶ 从当前位置播放" IsEnabled="False" Click="OnPlayClick" />
         <Button Grid.Column="1" x:Name="StopButton" Classes="transport"
@@ -226,9 +260,14 @@
 
         <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="7" Margin="12,0,0,0">
           <TextBlock Classes="label" Text="速度" />
-          <!-- 改速度是改谱面（08），本切片只报当前值。数字框做成只读的，免得看着像能改 -->
-          <TextBox x:Name="BpmBox" Classes="numeric" Width="66" IsReadOnly="True"
-                   Text="120" VerticalAlignment="Center" ToolTip.Tip="改 BPM 归 08" />
+          <!--
+            改速度就是改这一格：回车提交，写的是**具体的拍/分**，不是百分比也不是倍率。
+            没装曲子时置灰（在 RefreshEditState 里开）。
+          -->
+          <TextBox x:Name="BpmBox" Classes="numeric" Width="66" IsEnabled="False"
+                   Text="120" VerticalAlignment="Center"
+                   KeyDown="OnBpmKeyDown"
+                   ToolTip.Tip="回车改整曲速度（拍/分）。音符本身一个字节都不动" />
           <TextBlock Classes="faint" Text="拍/分" />
         </StackPanel>
 
@@ -237,7 +276,18 @@
           <TextBlock x:Name="PositionText" Classes="readout-value mono" Text="—" />
         </StackPanel>
 
-        <TextBlock Grid.Column="4" Classes="faint" TextAlignment="Right"
+        <!--
+          时长：**改 BPM 唯一看得见的地方。**
+          卷帘是 tick 轴（一屏固定 4 小节），改速度不会让音符在谱面上挪动一个像素 ——
+          音符相对小节的位置本来就不该变（那也正是「音符数组一个字节都不动」的意思）。
+          跟着缩放的是总时长、播放快慢，以及一切 tick → 秒 的换算。
+        -->
+        <StackPanel Grid.Column="4" Orientation="Horizontal" Spacing="5" Margin="12,0,0,0">
+          <TextBlock Classes="label" Text="时长" />
+          <TextBlock x:Name="DurationText" Classes="readout-value mono" Text="—" />
+        </StackPanel>
+
+        <TextBlock Grid.Column="5" Classes="faint" TextAlignment="Right"
                    HorizontalAlignment="Right" VerticalAlignment="Center">
           <Run Text="没有循环" FontWeight="SemiBold" Foreground="{DynamicResource TokenInkMuted}" />
           <Run Text=" · 放完自动停止并松开所有按键" />

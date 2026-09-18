@@ -16,7 +16,8 @@ namespace MidiPerformer.Adapters.Controllers;
 /// 不会各算各的。
 ///
 /// 这一张是**只读**的：没有任何改谱面的方法，只有「看哪儿、选中谁」。
-/// 编辑命令归 08 / 09，那时候它们从这儿旁边过去，不改这儿。
+/// 编辑命令从它旁边过去 —— 08 只借了 <see cref="RestoreSelection"/> 这一个口子
+/// （编辑之后控制器要重建，选中得能放回去），改谱面那些归 09。
 /// </summary>
 public sealed class PianoRollController
 {
@@ -74,6 +75,24 @@ public sealed class PianoRollController
 
     /// <summary>某个 tick 落在第几小节（**1 起**）。走带条那个「位置」用它。</summary>
     public int BarOfTick(long tick) => PianoRollGeometry.BarAtTick(tick, TicksPerBar) + 1;
+
+    /// <summary>
+    /// 把选中放回某个音符上。<b>编辑之后重建控制器时用它。</b>
+    ///
+    /// 改速度、改移调都会换一份 <see cref="Song"/>，而控制器是照着曲子建出来的一次性对象，
+    /// 只能重建 —— 重建之后新控制器不认识上一个的选中，用户改一下就会丢掉选中。
+    /// 音符数组本身一个字节都没动，所以下标照旧有效；这里仍然夹一道，越界就当没选中
+    /// （曲子换成另一首、或将来某条命令删掉了音符时，不该抛在这儿）。
+    /// </summary>
+    /// <param name="track">轨下标（0 起）。</param>
+    /// <param name="note">音在该轨音符数组里的下标。</param>
+    public void RestoreSelection(int track, int note)
+    {
+        bool valid = track >= 0 && track < _song.Tracks.Count
+            && note >= 0 && note < _song.Tracks[track].Notes.Count;
+
+        Selection = valid ? (track, note) : null;
+    }
 
     // ==================== 视图位置 ====================
 

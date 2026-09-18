@@ -1,4 +1,5 @@
 using Avalonia.Controls;
+using Avalonia.Interactivity;
 using MidiPerformer.Adapters;
 using MidiPerformer.Adapters.Controllers;
 using MidiPerformer.Adapters.Presenters;
@@ -8,11 +9,15 @@ using MidiPerformer.Core.Model;
 namespace MidiPerformer.App.Views;
 
 /// <summary>
-/// 一条轨那一整块：轨道头（只读）+ 卷帘。
+/// 一条轨那一整块：轨道头 + 卷帘。
 ///
 /// 它自己不换算任何东西 —— 卷帘的宽高定下来之后，向 <see cref="PianoRollController"/>
 /// 要一份视口，再向 <see cref="PianoRollPresenter"/> 要一屏要画的东西，剩下的交给
 /// <see cref="PianoRollLane"/>。这就是「界面层薄」的意思：这里只有布置，没有数学。
+///
+/// <b>它也不改谱面。</b>轨道头上那个移调步进器只把「当前值 ± n」算出来喊一声
+/// （<see cref="TransposeRequested"/>），命令由窗口去调 —— 编辑脊柱只有一条，
+/// 撤销的记账在装饰器里，谁调命令都自动有撤销，但调命令的地方只该有一处。
 /// </summary>
 public partial class TrackLaneView : UserControl
 {
@@ -46,10 +51,11 @@ public partial class TrackLaneView : UserControl
             ? $"轨 {Format.TrackNumber(trackIndex + 1)}"
             : track.Name;
         TimbreText.Text = $"音色 {Format.Timbre(track.Program, track.Channel)}";
-        // 只报数、不给控件：改它是 08 的事，而「现在移了几个半音」是这一屏显示得对不对的一半
-        TransposeText.Text = $"移调 {track.Transpose:+0;-0;0} 半音";
+        TransposeText.Text = Format.Transpose(track.Transpose);
         CountText.Text = Format.NoteCount(track.Notes.Count);
-        LaterText.Text = "音色 / 移调 / 只看这条 / 折叠 / 删除轨 归 08";
+        // 移调已经做完了，这句话只留**真还没做、也还没有归属切片**的那三样。
+        // 删除轨 / 改名归 09，音色试听、只看这条、折叠还没有切片认领 —— 别替它们许诺
+        LaterText.Text = "音色（试听） / 只看这条 / 折叠 还没做";
 
         // 行高恒定（标注 5）：轨高跟着这条轨的音域走，宽音域的轨就高一些
         var (low, high) = controller.PitchRangeOf(trackIndex);
@@ -65,8 +71,30 @@ public partial class TrackLaneView : UserControl
     /// <summary>悬停到的音符变了（-1 = 没命中）。</summary>
     public event EventHandler<int>? HoverChanged;
 
+    /// <summary>
+    /// 移调步进器被按了一下，参数是**新的绝对半音数**（不是增量）。
+    ///
+    /// 界面算值、窗口调命令：这样「移调是绝对赋值」这条语义只有界面这一处解释，
+    /// 命令那边永远只收到一个明确的目标值。
+    /// </summary>
+    public event EventHandler<int>? TransposeRequested;
+
     /// <summary>这条轨在 <c>Song.Tracks</c> 里的下标。</summary>
     public int TrackIndex => _trackIndex;
+
+    /// <summary>
+    /// 步进器上四个按钮共用的入口：<c>Tag</c> 里是这一下要挪几个半音。
+    ///
+    /// 当前值从控制器手里的曲子现取 —— 每次编辑之后窗口都会把所有轨重建一遍，
+    /// 所以这个控件手上的值永远是最新的，不会累加到一次编辑之前的旧值上。
+    /// </summary>
+    private void OnTransposeStepClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { Tag: string tag } || !int.TryParse(tag, out int delta)) return;
+
+        int current = _controller.Song.Tracks[_trackIndex].Transpose;
+        TransposeRequested?.Invoke(this, current + delta);
+    }
 
     /// <summary>当前视口尺寸下重算一屏要画的东西。窗口改宽、滚动、播放每帧都调它。</summary>
     /// <param name="playheadTick">播放头在哪。</param>

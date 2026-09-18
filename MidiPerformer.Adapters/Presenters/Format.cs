@@ -23,7 +23,15 @@ public static class Format
     /// 写上去等于承诺一个按了没反应的键 —— 那比不写更坏。方向和归属都在这儿说清楚。
     /// </summary>
     public const string ReadoutHint =
-        "← → 在音符之间前后跳（只定位，不改）· 编辑（拖音符 / 改时值 / 框选）归 09 与 08";
+        "← → 在音符之间前后跳（只定位，不改）· Ctrl+Z 撤销 / Ctrl+Y 重做 · 编辑（拖音符 / 改时值 / 框选）归 09";
+
+    /// <summary>
+    /// 轨头上移调那一格的读数：几个半音。
+    ///
+    /// 正负号只在真有方向时才出现（<c>+0</c> / <c>-0</c> 都落到 <c>0</c> 那一节），
+    /// 零就是零 —— 它同时也是「没移调」这个默认状态的样子。
+    /// </summary>
+    public static string Transpose(int semitones) => $"{semitones:+0;-0;0} 半音";
 
     /// <summary>音高：音名 + 简谱记号。需求里两样都要，缺一个都得让人对着谱子数半天。</summary>
     public static string Pitch(int pitch) =>

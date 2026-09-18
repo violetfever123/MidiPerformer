@@ -19,7 +19,7 @@ namespace MidiPerformer.Tests.Project;
 /// <c>MidiLoader</c> 和文件里的整数 tick 逐条钉过了。所以「读得回来」等价于「写出去的是标准形态的 MIDI」。
 ///
 /// 比较一律**逐字段、精确**（tick 是整数，不用容差），这是 S1 缝的原话。
-/// 比较帮手在文件末尾，<c>Song</c> 刻意没有值相等（撤销装饰器要的是引用相等），只能自己比。
+/// 比较帮手是 <see cref="SongAssert"/>，<c>Song</c> 刻意没有值相等（撤销装饰器要的是引用相等），只能自己比。
 /// </summary>
 public class SongProjectWriteTests
 {
@@ -31,7 +31,7 @@ public class SongProjectWriteTests
         var song = SongProject.Read(path);
         var again = SongProject.ReadBytes(SongProject.WriteBytes(song));
 
-        AssertSameSong(song, again, Path.GetFileName(path));
+        SongAssert.Same(song, again, Path.GetFileName(path));
     }
 
     /// <summary>
@@ -253,7 +253,7 @@ public class SongProjectWriteTests
 
         var again = SongProject.ReadBytes(SongProject.WriteBytes(song));
 
-        AssertSameSong(song, again, "格式 0 一个轨块两个声道");
+        SongAssert.Same(song, again, "格式 0 一个轨块两个声道");
 
         Assert.Multiple(() =>
         {
@@ -285,7 +285,7 @@ public class SongProjectWriteTests
 
         var again = SongProject.ReadBytes(SongProject.WriteBytes(song));
 
-        AssertSameSong(song, again, "序号不从 0 起的曲子");
+        SongAssert.Same(song, again, "序号不从 0 起的曲子");
     }
 
     [Test]
@@ -307,7 +307,7 @@ public class SongProjectWriteTests
         {
             Assert.That(again.Tracks.Select(t => t.TrackIndex), Is.EqualTo(new[] { 0, 2 }),
                 "空掉的序号 1 要补一个空轨块，否则第三条会前移成 1");
-            AssertSameSong(song, again, "序号中间空着的曲子");
+            SongAssert.Same(song, again, "序号中间空着的曲子");
         });
     }
 
@@ -326,7 +326,7 @@ public class SongProjectWriteTests
 
         var again = SongProject.ReadBytes(SongProject.WriteBytes(song));
 
-        AssertSameSong(song, again, $"PPQ {ticksPerQuarterNote}");
+        SongAssert.Same(song, again, $"PPQ {ticksPerQuarterNote}");
     }
 
     [TestCase(24, 40)]
@@ -343,7 +343,7 @@ public class SongProjectWriteTests
 
         Assert.Multiple(() =>
         {
-            AssertSameSong(song, again, $"SMPTE {framesPerSecond}×{ticksPerFrame}");
+            SongAssert.Same(song, again, $"SMPTE {framesPerSecond}×{ticksPerFrame}");
             Assert.That(again.TempoMap.Division.IsSmpte, Is.True, "写回去还得是 SMPTE，不能退化成 PPQ");
         });
     }
@@ -373,7 +373,7 @@ public class SongProjectWriteTests
         Assert.Multiple(() =>
         {
             Assert.That(again.Tracks, Is.Empty);
-            AssertSameSong(song, again, "空曲");
+            SongAssert.Same(song, again, "空曲");
             Assert.That(again.TempoMap.TempoChanges, Has.Count.EqualTo(2), "空曲的速度表也要写出去");
             Assert.That(again.EndTick, Is.EqualTo(0));
         });
@@ -386,7 +386,7 @@ public class SongProjectWriteTests
             new[] { new Track(0, 3, "单音", 7, new[] { new ModelNote(60, 0, 480, 100) }) },
             new ModelTempoMap(ModelTimeDivision.PulsesPerQuarter(480)));
 
-        AssertSameSong(song, SongProject.ReadBytes(SongProject.WriteBytes(song)), "单轨单音");
+        SongAssert.Same(song, SongProject.ReadBytes(SongProject.WriteBytes(song)), "单轨单音");
     }
 
     /// <summary>
@@ -496,32 +496,6 @@ public class SongProjectWriteTests
         return (gap, multiChannel, drums, multiChunk, format2);
     }
 
-    /// <summary>
-    /// 逐字段比较两份 <see cref="Song"/>。
-    ///
-    /// 为什么不写 <c>song1 == song2</c>：<see cref="Song"/> 刻意只有引用相等（撤销装饰器拿它当
-    /// 「这条命令改没改」的判据），所以 S1 缝要比内容就只能在这儿自己比。
-    /// <see cref="Track"/> 有值相等（音符**逐个**比），直接用；比不到的只剩速度表那一摊。
-    /// </summary>
-    private static void AssertSameSong(Song expected, Song actual, string because)
-    {
-        Assert.That(actual.Tracks, Has.Count.EqualTo(expected.Tracks.Count), $"{because}：轨数");
-
-        for (int i = 0; i < expected.Tracks.Count; i++)
-        {
-            // Track 的值相等会把轨块序号 / 声道 / 轨名 / 音色 / 移调 / 每个音的四个字段全部比掉，
-            // 而 tick 是整数，比的就是精确值，没有容差。
-            Assert.That(actual.Tracks[i], Is.EqualTo(expected.Tracks[i]),
-                $"{because}：第 {i} 条轨（{expected.Tracks[i].Name}）");
-        }
-
-        Assert.Multiple(() =>
-        {
-            Assert.That(actual.TempoMap.Division, Is.EqualTo(expected.TempoMap.Division), $"{because}：分辨率");
-            Assert.That(actual.TempoMap.TempoChanges, Is.EqualTo(expected.TempoMap.TempoChanges),
-                $"{because}：速度事件表");
-            Assert.That(actual.TempoMap.TimeSignatureChanges, Is.EqualTo(expected.TempoMap.TimeSignatureChanges),
-                $"{because}：变拍事件表");
-        });
-    }
+    // 逐字段比较的帮手在 SongAssert 里 —— .mproj 那半（SongProjectFileTests）用的是同一份：
+    // 缝的两半要比的是同一个东西，比法也该是同一份实现，不然两边会各松各的。
 }

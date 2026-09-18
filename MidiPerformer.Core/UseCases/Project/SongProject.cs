@@ -1,3 +1,10 @@
+using System.Reflection;
+using System.Text;
+using System.Text.Encodings.Web;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
+using System.Text.Unicode;
 using Melanchall.DryWetMidi.Common;
 using Melanchall.DryWetMidi.Core;
 using Melanchall.DryWetMidi.Interaction;
@@ -11,7 +18,8 @@ using ModelTimeDivision = MidiPerformer.Core.Model.TimeDivision;
 namespace MidiPerformer.Core.UseCases.Project;
 
 /// <summary>
-/// 工程进出：标准 MIDI 文件 ⇄ <see cref="Song"/>。**这是 S1 缝**（见 spec「Testing Decisions」）。
+/// 工程进出：标准 MIDI 文件 ⇄ <see cref="Song"/>，以及 .mproj 工程文件 ⇄ <see cref="Song"/>。
+/// **两条都是 S1 缝**（见 spec「Testing Decisions」）—— 缝的两半在同一个文件里。
 ///
 /// **全程序唯一允许出现 DryWetMidi 的文件。** 这个文件之外，任何地方都不许出现它的类型 ——
 /// <c>MidiPerformer.Tests</c> 里有一条反射测试盯着这件事。
@@ -565,4 +573,512 @@ public static class SongProject
                 $"每四分音符 {division.TicksPerQuarterNote} tick 不是合法的 MIDI 分辨率（只能是 1..{short.MaxValue}）。");
         }
     }
+
+    // ==================== .mproj：工程文件 ====================
+    //
+    // S1 缝的另一半：Song ⇄ .mproj。要的也是逐字段精确：
+    //   SaveProject → LoadProject 之后，轨数、每轨的轨块序号/声道/名字/音色/移调、
+    //   每个音的四个字段、速度表的分辨率与两张事件表，一个都不能变。
+    //
+    // **文件格式**：JSON，平铺成一个对象 —— 文件头那几个字段就是文件最上面那几行：
+    //     {
+    //       "Version": 1,
+    //       "Name": "起风了",
+    //       "Edited": true,
+    //       "ImportedFrom": "C:\\下载\\起风了.mid",
+    //       "Song": { "Tracks": [ … ], "TempoMap": { … } }
+    //     }
+    // 头和信息平铺在一层，是因为它们确实是「这份文件的头」；于是「缺 Song」也就成了
+    // 读取端要单独认的一种坏文件。
+    //
+    // **实体直接序列化，没有 DTO 层**（spec「文件与存储」）：只有一个消费者的文件格式，
+    // 多一层映射是纯仪式。代价是模型上那几个「算出来的属性」得挡住不写 —— 见 DropDerivedProperties。
+
+    /// <summary>当前 .mproj 的版本。读到比它大的版本就报错，不猜着读 —— 猜出来的谱面比读不出来更坏。</summary>
+    public const int ProjectVersion = 1;
+
+    /// <summary>
+    /// <see cref="Song"/> + 文件头 → .mproj 的 JSON 文本。
+    ///
+    /// 这里**不校验谱面**：JSON 里没有「装不下」的值，MIDI 导出那边的越界检查（分辨率上限之类）
+    /// 在这儿一条都不适用。什么 <see cref="Song"/> 都写得出来，空曲（0 轨）也一样。
+    /// </summary>
+    public static string WriteProject(Song song, ProjectHeader header)
+    {
+        ArgumentNullException.ThrowIfNull(song);
+        ArgumentNullException.ThrowIfNull(header);
+
+        // 先整体序列化进内存再交给调用方，和 MIDI 的 Write 是对称的：序列化中途出错
+        // 不会在盘上留下半截文件（那半截会被当成本地文件损坏，更难查）。
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream, WriterOptions))
+        {
+            writer.WriteStartObject();
+            // 字段名一律从 record 上取（nameof），改了属性名这里跟着改，不会两边对不上。
+            // 版本号**不取 header 里的那个值**：写出去的只有当前这一种格式，
+            // 照着调用方手里那个数写，等于让文件声称自己是另一种格式。
+            writer.WriteNumber(nameof(ProjectHeader.Version), ProjectVersion);
+            writer.WriteString(nameof(ProjectHeader.Name), header.Name);
+            writer.WriteBoolean(nameof(ProjectHeader.Edited), header.Edited);
+            if (header.ImportedFrom is null)
+                writer.WriteNull(nameof(ProjectHeader.ImportedFrom));
+            else
+                writer.WriteString(nameof(ProjectHeader.ImportedFrom), header.ImportedFrom);
+
+            writer.WritePropertyName(SongFieldName);
+            JsonSerializer.Serialize(writer, song, ProjectJson);
+            writer.WriteEndObject();
+        }
+        return Encoding.UTF8.GetString(stream.ToArray());
+    }
+
+    /// <summary>
+    /// .mproj 的 JSON 文本 → <see cref="Song"/> + 文件头。
+    ///
+    /// 读不回来时抛 <see cref="InvalidDataException"/>，消息是给人看的中文 ——
+    /// 和这个文件的读取端（<see cref="Read"/>）同一条规矩：宁可说清楚哪儿坏了，不给英文异常。
+    /// </summary>
+    public static (ProjectHeader Header, Song Song) ReadProject(string json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+            throw new InvalidDataException("工程文件是空的：多半是保存没写完，或者复制/下载时丢了内容。");
+
+        JsonDocument document;
+        try
+        {
+            document = JsonDocument.Parse(json);
+        }
+        catch (JsonException ex)
+        {
+            throw new InvalidDataException($"工程文件不是合法的 JSON：{ex.Message}");
+        }
+
+        using (document)
+        {
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
+                throw new InvalidDataException("工程文件的内容不是一个 JSON 对象，多半不是 .mproj 文件。");
+
+            int version = ReadVersion(root);
+            // 比当前新：不猜着读。将来真加了版本 2，迁移就写在下面这一行之后
+            //（「版本 1 → 2 要补什么」是那个版本的事，现在没有）
+            if (version > ProjectVersion)
+            {
+                throw new InvalidDataException(
+                    $"这份工程是更新版本的 MIDI 演奏器存的（版本 {version}，本程序只认到 {ProjectVersion}）。" +
+                    "请换用新版本的程序打开，或者用导出的 MIDI 文件。");
+            }
+            if (version < 1)
+                throw new InvalidDataException($"工程文件的版本号不合法（{version}）。");
+
+            Song song = ReadSong(root);
+            var header = new ProjectHeader(version, ReadName(root), ReadEdited(root), ReadImportedFrom(root));
+            return (header, song);
+        }
+    }
+
+    /// <summary>
+    /// <see cref="Song"/> + 文件头 → 盘上的 .mproj。
+    ///
+    /// 先整体序列化进内存再一次落盘，和 <see cref="Write"/> 同一个理由：不落半截文件。
+    /// 文件是 **UTF-8 无 BOM**（<see cref="File.WriteAllText(string, string)"/> 的默认），
+    /// 中文因此原样在里面，diff 工具和编辑器都读得懂。
+    /// </summary>
+    public static void SaveProject(Song song, ProjectHeader header, string path) =>
+        File.WriteAllText(path, WriteProject(song, header));
+
+    /// <summary>
+    /// 盘上的 .mproj → <see cref="Song"/> + 文件头。
+    ///
+    /// 文件不在 / 读不动（被别的程序占着、路径不允许）也抛 <see cref="InvalidDataException"/>：
+    /// 这个特性里「读不回来」只有一种异常，调用方 catch 一处就够，
+    /// 提示语里带着路径和系统给的原因，照样查得出是什么事。
+    /// </summary>
+    public static (ProjectHeader Header, Song Song) LoadProject(string path)
+    {
+        string json;
+        try
+        {
+            json = File.ReadAllText(path);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            throw new InvalidDataException($"工程文件读不出来（{path}）：{ex.Message}", ex);
+        }
+
+        return ReadProject(json);
+    }
+
+    /// <summary>
+    /// 只问文件头，不碰谱面 —— 曲库列表为每一首读一次的就是它。
+    ///
+    /// 所以它**不抛**：坏了、不是 JSON、读不动，一律返回 null。
+    /// 一首读不出来的曲子不能让整个曲库列表消失 —— 用户得有机会把那首从列表里删掉。
+    /// </summary>
+    public static ProjectHeader? TryReadProjectHeader(string path)
+    {
+        try
+        {
+            // 只解析、不建对象：谱面那棵树（每个音符一个对象）一个都不造。
+            using var stream = File.OpenRead(path);
+            using var document = JsonDocument.Parse(stream);
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object) return null;
+
+            int version = ReadVersion(root);
+            if (version < 1 || version > ProjectVersion) return null;
+
+            return new ProjectHeader(version, ReadName(root), ReadEdited(root), ReadImportedFrom(root));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
+            or JsonException or InvalidDataException or NotSupportedException)
+        {
+            return null;
+        }
+    }
+
+    // ==================== .mproj 的内部件 ====================
+
+    /// <summary>谱面挂在 JSON 的这个字段下。缺了它就是一份坏工程。</summary>
+    private const string SongFieldName = "Song";
+
+    /// <summary>
+    /// 工程文件的写法：缩进 + 中文不转义。
+    ///
+    /// 缩进是给 diff 工具的（工程文件会跟着 git 走，一行到底的 JSON 一比就是整文件重写）；
+    /// 中文不转义是给人看的 —— 默认转义会把曲名和导入路径写成一片 <c>\u8D77\u98CE</c>。
+    /// 用 <see cref="UnicodeRanges.All"/> 而不是那个名字很吓人的 Relaxed：
+    /// 中文照样原样写出去，而 <c>&lt;</c>、<c>&amp;</c> 该转义还是转义。
+    /// </summary>
+    private static readonly JsonWriterOptions WriterOptions = new()
+    {
+        Indented = true,
+        Encoder = JavaScriptEncoder.Create(UnicodeRanges.All)
+    };
+
+    /// <summary>读写共用的序列化设置。写法见 <see cref="WriterOptions"/>，读这边只用到转换器与类型信息。</summary>
+    private static readonly JsonSerializerOptions ProjectJson = CreateProjectJson();
+
+    private static JsonSerializerOptions CreateProjectJson()
+    {
+        var options = new JsonSerializerOptions
+        {
+            WriteIndented = true,
+            Encoder = JavaScriptEncoder.Create(UnicodeRanges.All),
+            TypeInfoResolver = new DefaultJsonTypeInfoResolver { Modifiers = { DropDerivedProperties } },
+            // 工程文件里不写 null 之外的东西 —— 默认行为就够，这里不额外开任何开关
+        };
+        options.Converters.Add(new TimeDivisionConverter());
+        options.Converters.Add(new TempoMapConverter());
+        options.Converters.Add(new NoteConverter());
+        return options;
+    }
+
+    /// <summary>
+    /// **只留构造器收得到的那些属性**，公开属性里其余的（= 算出来的派生视图）直接从类型信息里摘掉。
+    ///
+    /// 为什么要摘掉：模型上那些算出来的东西 —— <c>Song.EndTick</c> / <c>TotalSeconds</c>、
+    /// <c>Track.NoteCount</c> / <c>EndTick</c> —— 写进文件就是给同一个事实开了第二个真相源：
+    /// 改一个字段忘改另一个，文件里就自相矛盾；而**读**回来时它们本该由构造器重新算出来，
+    /// 一旦被当成「必填」，字段缺一个就整份工程读不回来。
+    ///
+    /// 为什么是「摘掉」而不是把 <c>ShouldSerialize</c> 设成 false —— 那是这个坑踩出来的：
+    /// STJ 写一个成员时是**先取值、再问要不要写**（<c>GetMemberAndWriteJson</c> 里
+    /// <c>Get(obj)</c> 在 <c>ShouldSerialize</c> 之前），所以设 false 只挡住了写出去，
+    /// 挡不住取值这个动作本身。而派生属性的 getter 是**会抛的**：<c>Song.TotalSeconds</c> 对
+    /// 一个大到不现实的 tick 会抛「时间跨度太大」—— 于是「存一份 tick 很大的工程」会当场炸，
+    /// 而它本该只是一个数字。摘掉之后取值这一步根本不存在。
+    ///
+    /// 用「构造器参数以外的一律不留」这条笼统的规矩，而不是逐个点名：
+    /// 以后模型上再加派生属性（或者加一个真字段）不用回来补名单，规矩自己就成立。
+    /// 这些类型上**没有加任何序列化特性** —— 模型不该知道文件格式这回事。
+    /// （<c>TimeDivision</c> / <c>TempoMap</c> / <c>Note</c> 走各自的转换器，不经过这里。）
+    /// </summary>
+    private static void DropDerivedProperties(JsonTypeInfo info)
+    {
+        if (info.Kind != JsonTypeInfoKind.Object) return;
+
+        var fromConstructor = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var constructor in info.Type.GetConstructors(BindingFlags.Public | BindingFlags.Instance))
+            foreach (var parameter in constructor.GetParameters())
+                if (parameter.Name is { } name) fromConstructor.Add(name);
+
+        // 先抄一份再删：不能一边遍历一边改这个集合
+        foreach (var property in info.Properties.Where(p => !fromConstructor.Contains(p.Name)).ToArray())
+            info.Properties.Remove(property);
+    }
+
+    /// <summary>
+    /// <see cref="ModelTimeDivision"/> 的读写。**必须自己写**：它的构造器是私有的
+    /// （只有 <c>PulsesPerQuarter</c> / <c>Smpte</c> 两个工厂），STJ 自己建不出来，
+    /// 不管就是一句英文的 <c>NotSupportedException</c>。
+    ///
+    /// 写成三个整数（两种模式互斥，另一种的字段是 0），读回来按「SMPTE 帧率是不是 &gt; 0」
+    /// 分流 —— 和模型的 <c>IsSmpte</c> 是同一个判据，不另立一套。
+    /// </summary>
+    private sealed class TimeDivisionConverter : JsonConverter<ModelTimeDivision>
+    {
+        public override ModelTimeDivision Read(
+            ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            using var document = JsonDocument.ParseValue(ref reader);
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
+                throw new JsonException("时间分辨率应该是一个对象。");
+
+            int ticksPerQuarter = Field(root, "TicksPerQuarterNote");
+            int framesPerSecond = Field(root, "SmpteFramesPerSecond");
+            int ticksPerFrame = Field(root, "SmpteTicksPerFrame");
+
+            if (framesPerSecond > 0)
+            {
+                if (ticksPerFrame < 1)
+                    throw new JsonException($"SMPTE 分辨率每帧至少要 1 tick（现在是 {ticksPerFrame}）。");
+                if (ticksPerQuarter != 0)
+                    throw new JsonException("时间分辨率同时写着 PPQ 和 SMPTE 两种模式，只能有一种。");
+                return ModelTimeDivision.Smpte(framesPerSecond, ticksPerFrame);
+            }
+
+            if (ticksPerFrame != 0)
+                throw new JsonException("时间分辨率里没有 SMPTE 帧率，却有「每帧 tick 数」。");
+            if (ticksPerQuarter < 1)
+                throw new JsonException($"时间分辨率里的每四分音符 tick 数至少要 1（现在是 {ticksPerQuarter}）。");
+            return ModelTimeDivision.PulsesPerQuarter(ticksPerQuarter);
+        }
+
+        public override void Write(
+            Utf8JsonWriter writer, ModelTimeDivision value, JsonSerializerOptions options)
+        {
+            writer.WriteStartObject();
+            writer.WriteNumber("TicksPerQuarterNote", value.TicksPerQuarterNote);
+            writer.WriteNumber("SmpteFramesPerSecond", value.SmpteFramesPerSecond);
+            writer.WriteNumber("SmpteTicksPerFrame", value.SmpteTicksPerFrame);
+            writer.WriteEndObject();
+        }
+
+        /// <summary>
+        /// 取一个整数字段。缺了、或者不是数字（写成字符串、小数、null），都当场说清楚。
+        ///
+        /// 为什么要自己判 <see cref="JsonValueKind.Number"/>：<c>JsonElement.TryGetInt32</c> 对一个
+        /// **字符串**元素不是返回 false，是**抛** <c>InvalidOperationException</c>（实测），
+        /// 而那是个英文异常；而且它会从转换器里冒出去，被 STJ 换成一句
+        /// 「The JSON value could not be converted to …」，中文原因就全没了。
+        /// </summary>
+        private static int Field(JsonElement root, string name)
+        {
+            if (!root.TryGetProperty(name, out var element) || element.ValueKind != JsonValueKind.Number)
+                throw new JsonException($"时间分辨率里缺 {name} 字段（或者它不是个数字）。");
+            if (!element.TryGetInt32(out int value))
+                throw new JsonException($"时间分辨率里的 {name} 不是一个整数。");
+            return value;
+        }
+    }
+
+    /// <summary>
+    /// <see cref="ModelNote"/> 的读写。模型的四个字段就是文件的四个字段，一个不多一个不少。
+    ///
+    /// 为什么要自己写，而不是靠 STJ 按构造器参数配：**STJ 对缺字段是悄悄补默认值的**
+    /// （.NET 8 的默认行为：构造器参数没配到属性时，值类型就填 0，不报错）。
+    /// 一份被改坏 / 手改漏了一行的工程会静默地读成一堆 velocity = 0 或者 length = 0 的音 ——
+    /// 那不是「读出来了」，是「读出了一个错的谱面还告诉用户没问题」。宁可在这儿报中文错。
+    ///
+    /// 顺带把值的范围也拦下：音高与力度是七位整数（0..127，模型和 MIDI 都是这个约定），
+    /// tick 不能是负数。这些都是「文件里写着但物理上不可能」的值。
+    /// </summary>
+    private sealed class NoteConverter : JsonConverter<ModelNote>
+    {
+        public override ModelNote Read(
+            ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            using var document = JsonDocument.ParseValue(ref reader);
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
+                throw new JsonException("音符应该是一个对象。");
+
+            int pitch = Int(root, "Pitch");
+            long startTick = Long(root, "StartTick");
+            long lengthTicks = Long(root, "LengthTicks");
+            int velocity = Int(root, "Velocity");
+
+            if (pitch is < 0 or > 127)
+                throw new JsonException($"音符的音高是 {pitch}，不在 0..127 里。");
+            if (velocity is < 0 or > 127)
+                throw new JsonException($"音符的力度是 {velocity}，不在 0..127 里。");
+            if (startTick < 0)
+                throw new JsonException($"音符的起始 tick 是负数（{startTick}）。");
+            if (lengthTicks < 0)
+                throw new JsonException($"音符的时值是负数（{lengthTicks}）。");
+
+            return new ModelNote(pitch, startTick, lengthTicks, velocity);
+        }
+
+        public override void Write(Utf8JsonWriter writer, ModelNote value, JsonSerializerOptions options)
+        {
+            writer.WriteStartObject();
+            writer.WriteNumber(nameof(ModelNote.Pitch), value.Pitch);
+            writer.WriteNumber(nameof(ModelNote.StartTick), value.StartTick);
+            writer.WriteNumber(nameof(ModelNote.LengthTicks), value.LengthTicks);
+            writer.WriteNumber(nameof(ModelNote.Velocity), value.Velocity);
+            writer.WriteEndObject();
+        }
+
+        private static int Int(JsonElement root, string name)
+        {
+            long value = Long(root, name);
+            if (value is < int.MinValue or > int.MaxValue)
+                throw new JsonException($"音符的 {name} 是 {value}，超出了整数的范围。");
+            return (int)value;
+        }
+
+        private static long Long(JsonElement root, string name)
+        {
+            if (!root.TryGetProperty(name, out var element) || element.ValueKind != JsonValueKind.Number)
+                throw new JsonException($"音符里缺 {name} 字段（或者它不是个数字）。这份工程多半被改坏了。");
+            if (!element.TryGetInt64(out long value))
+                throw new JsonException($"音符的 {name} 不是一个整数。");
+            return value;
+        }
+    }
+
+    /// <summary>
+    /// <see cref="ModelTempoMap"/> 的读写。**必须自己写**，理由不是「不方便」，是 STJ **拒绝**：
+    /// 它的构造器收的是 <c>IEnumerable&lt;TempoChange&gt;</c>，而属性是 <c>IReadOnlyList&lt;TempoChange&gt;</c>，
+    /// STJ 要求构造器参数与属性**同名且同类型**才能配对，类型对不上就一句
+    /// <c>InvalidOperationException: Each parameter ... must bind to an object property or field</c>，
+    /// 而且是在**读第一份文件时**才炸（实测：写出去一切正常，读回来才报错）。
+    ///
+    /// 为什么不改模型的构造器签名：模型是为了「调用方能传数组、能传 LINQ」才收
+    /// <c>IEnumerable</c> 的，**文件格式不该反过来规定模型的签名**。写个转换器就都保住了。
+    ///
+    /// 表缺了当空表（构造器本来就有默认值），但**类型不对要报错** ——
+    /// 一个不是列表的东西假装成速度表，读出来的曲子会静默地变回 120 BPM。
+    /// </summary>
+    private sealed class TempoMapConverter : JsonConverter<ModelTempoMap>
+    {
+        public override ModelTempoMap Read(
+            ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            using var document = JsonDocument.ParseValue(ref reader);
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
+                throw new JsonException("速度表应该是一个对象。");
+
+            if (!root.TryGetProperty(nameof(ModelTempoMap.Division), out var divisionElement))
+                throw new JsonException("速度表里没有时间分辨率（Division 字段），这份工程读不出曲子的时间轴。" +
+                    "多半是保存时没写完。");
+
+            ModelTimeDivision division = divisionElement.Deserialize<ModelTimeDivision>(options)
+                ?? throw new JsonException("速度表里的时间分辨率是空的。");
+
+            return new ModelTempoMap(
+                division,
+                Table<TempoChange>(root, nameof(ModelTempoMap.TempoChanges), options),
+                Table<TimeSignatureChange>(root, nameof(ModelTempoMap.TimeSignatureChanges), options));
+        }
+
+        public override void Write(Utf8JsonWriter writer, ModelTempoMap value, JsonSerializerOptions options)
+        {
+            writer.WriteStartObject();
+
+            writer.WritePropertyName(nameof(ModelTempoMap.Division));
+            JsonSerializer.Serialize(writer, value.Division, options);
+
+            // 写的是构造器收下的那两张表（= TempoMap 自己归一化过的视图），
+            // 不是从哪儿读来的原始事件流 —— 工程文件里只留一份算得出来的东西。
+            writer.WritePropertyName(nameof(ModelTempoMap.TempoChanges));
+            JsonSerializer.Serialize(writer, value.TempoChanges, options);
+
+            writer.WritePropertyName(nameof(ModelTempoMap.TimeSignatureChanges));
+            JsonSerializer.Serialize(writer, value.TimeSignatureChanges, options);
+
+            writer.WriteEndObject();
+        }
+
+        /// <summary>读一张事件表。缺 = 空表，但不是列表就是坏文件（见类型上的注释）。</summary>
+        private static IReadOnlyList<T> Table<T>(JsonElement root, string name, JsonSerializerOptions options)
+        {
+            if (!root.TryGetProperty(name, out var element)) return Array.Empty<T>();
+            if (element.ValueKind == JsonValueKind.Null) return Array.Empty<T>();
+            if (element.ValueKind != JsonValueKind.Array)
+                throw new JsonException($"速度表里的 {name} 应该是一个列表。");
+
+            return element.Deserialize<T[]>(options) ?? Array.Empty<T>();
+        }
+    }
+
+    private static Song ReadSong(JsonElement root)
+    {
+        if (!root.TryGetProperty(SongFieldName, out var element) || element.ValueKind == JsonValueKind.Null)
+            throw new InvalidDataException("工程文件里没有 Song 字段：这份文件不是 .mproj，或者保存时没写完。");
+
+        try
+        {
+            return element.Deserialize<Song>(ProjectJson)
+                ?? throw new InvalidDataException("工程文件里的 Song 字段是空的。");
+        }
+        catch (JsonException ex)
+        {
+            throw new InvalidDataException($"工程文件里的谱面读不出来：{ex.Message}");
+        }
+        catch (NotSupportedException ex)
+        {
+            throw new InvalidDataException($"工程文件里的谱面读不出来：{ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// 读版本号。**只认数字**：<c>TryGetInt32</c> 对字符串元素是抛异常而不是返回 false
+    /// （见 <c>TimeDivisionConverter.Field</c> 的注释），不先判一下，
+    /// 「版本号写成字符串」这种坏文件冒出去的就是一句英文的 InvalidOperationException。
+    /// </summary>
+    private static int ReadVersion(JsonElement root)
+    {
+        if (!root.TryGetProperty(nameof(ProjectHeader.Version), out var element) ||
+            element.ValueKind != JsonValueKind.Number ||
+            !element.TryGetInt32(out int version))
+        {
+            throw new InvalidDataException("工程文件里没有版本号（Version 字段）：这份文件不是 .mproj。");
+        }
+        return version;
+    }
+
+    /// <summary>
+    /// 曲名 / 是否改过 / 从哪导入的，缺了或类型不对**都当没有**，不算坏文件。
+    ///
+    /// 它们只是给人看的信息：曲名本来就从文件名来（见 <c>SongLibrary</c>），
+    /// 「改过没改过」缺省就是没动过，导入来源丢了顶多看不到出处。
+    /// 为这仨字段把一份读得出来的谱面拦在门外，是拿用户的时间换格式的洁癖。
+    /// </summary>
+    private static string ReadName(JsonElement root) =>
+        root.TryGetProperty(nameof(ProjectHeader.Name), out var element) &&
+        element.ValueKind == JsonValueKind.String
+            ? element.GetString() ?? ""
+            : "";
+
+    private static bool ReadEdited(JsonElement root) =>
+        root.TryGetProperty(nameof(ProjectHeader.Edited), out var element) &&
+        element.ValueKind is JsonValueKind.True or JsonValueKind.False &&
+        element.GetBoolean();
+
+    private static string? ReadImportedFrom(JsonElement root) =>
+        root.TryGetProperty(nameof(ProjectHeader.ImportedFrom), out var element) &&
+        element.ValueKind == JsonValueKind.String
+            ? element.GetString()
+            : null;
 }
+
+/// <summary>
+/// 工程文件的文件头 —— 一个 .mproj 的身份，也是曲库列表要显示的三个东西。
+/// </summary>
+/// <param name="Version">格式版本，见 <see cref="SongProject.ProjectVersion"/>。</param>
+/// <param name="Name">曲名。也就是它存进曲库后的文件名（去扩展名）。</param>
+/// <param name="Edited">
+/// **粘性**标记：这首曲子被编辑过并且存过盘。
+///
+/// 它是**进度指示**（「这首我动过」），**不是**和原始导入的逐字节比较 ——
+/// 撤销回初始状态也不会把它变回 <c>false</c>，再存一版照样是 <c>true</c>。
+/// 这是有意的，别当 bug 查：要「和刚导入时一模一样」就得留一份原始 MIDI 逐字节比对，
+/// 既费盘又答非所问 —— 用户要看的是「我记得这首还没弄完」，不是文件的哈希。
+/// </param>
+/// <param name="ImportedFrom">当初从哪个文件导入的（原始 MIDI 的全路径）。没导入过的工程是 null。</param>
+public sealed record ProjectHeader(int Version, string Name, bool Edited, string? ImportedFrom);

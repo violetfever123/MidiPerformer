@@ -56,7 +56,13 @@ public partial class App : Application
                 var sink = new WinmmPreview();
                 var sender = new InputSender();
 
-                desktop.MainWindow = new MainWindow(Tokens, clock, sink, PerformerFactory(clock, sender));
+                // 曲库就住在 exe 旁边。**「在哪儿」这件事只写在这一行** ——
+                // SongLibrary 自己不猜自己在哪（它收一个目录），所以测试塞得进临时目录，
+                // 而这句 Path.Combine 是产品里唯一一次决定 .\songs\ 的位置。
+                var library = new SongLibrary(Path.Combine(AppContext.BaseDirectory, "songs"));
+
+                desktop.MainWindow = new MainWindow(
+                    Tokens, clock, sink, PerformerFactory(clock, sender), library);
 
                 // 退出时收尾。窗口自己会松开按着的音，但那要窗口正常关掉才算数 ——
                 // 进程被别处带走时，还按着的键就留在游戏里了。多松一次是幂等的，代价为零。

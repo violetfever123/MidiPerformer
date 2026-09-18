@@ -91,6 +91,29 @@ public class FormatTests
         });
     }
 
+    /// <summary>
+    /// 移调那格的读数：正负号只在真有方向时才出现。
+    ///
+    /// 零写成 <c>0</c> 而不是 <c>+0</c> 是有意的 —— 零同时也是「没移调」这个默认状态的样子，
+    /// 「+0 半音」看着像动过一手。这条单独钉住它，因为轨头上那一格是**每时每刻**都挂着的，
+    /// 一个「+0」会在每一首没移调的曲子上出现。
+    /// </summary>
+    [Test]
+    public void 移调读数只在有方向时才带符号()
+    {
+        Assert.Multiple(() =>
+        {
+            Assert.That(Format.Transpose(0), Is.EqualTo("0 半音"), "零就是零，不带符号");
+            Assert.That(Format.Transpose(12), Is.EqualTo("+12 半音"));
+            Assert.That(Format.Transpose(-12), Is.EqualTo("-12 半音"));
+            Assert.That(Format.Transpose(1), Is.EqualTo("+1 半音"));
+            Assert.That(Format.Transpose(-1), Is.EqualTo("-1 半音"));
+            // 移调步进器一直能按，按到 int 的边上也得写得出字来，不能抛
+            Assert.That(Format.Transpose(int.MinValue), Is.EqualTo("-2147483648 半音"));
+            Assert.That(Format.Transpose(int.MaxValue), Is.EqualTo("+2147483647 半音"));
+        });
+    }
+
     [Test]
     public void 读数条的选中格()
     {
