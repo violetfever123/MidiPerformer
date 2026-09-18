@@ -1,0 +1,86 @@
+namespace MidiPerformer.Core.Model;
+
+/// <summary>
+/// 一条轨 = MIDI 文件里的**一个轨块 × 一个声道**。
+///
+/// 为什么按 (轨块, 声道) 而不是按轨块切：游戏里的口琴是单声部乐器，用户要的是「看清有几条声部」。
+/// 格式 0 的 MIDI 把整首曲子塞在一个轨块里、靠声道分声部——按轨块切的话整首歌就是一条轨，
+/// 既没法删声部也没法挑一条来弹。而且**音色（Program）本来就是声道事件**，
+/// 只有切到声道这一层，「每轨一个音色」才说得通。
+///
+/// 没有任何音符的轨块（纯速度/版权信息轨）不成轨，直接不出现。
+///
+/// <see cref="TrackIndex"/> + <see cref="Channel"/> 唯一确定一条轨，也唯一确定原版
+/// harmonica-auto-player 里的一个「候选」（它的 <c>MidiCandidate</c> 就是这两个字段）。
+/// 全链对拍靠这一对做两边的 1:1 配对。
+///
+/// 不可变。<see cref="Transpose"/> 是轨的属性，**永远不落进 <see cref="Note"/>**——想改回来随时改，无损。
+/// </summary>
+/// <param name="TrackIndex">来自文件里第几个轨块（0 起）。同一轨块的不同声道共享这个编号。</param>
+/// <param name="Channel">MIDI 声道 0..15（9 = 打击乐）。</param>
+/// <param name="Name">轨名。文件里有就用文件里的，没有就用「声道 N」补齐。</param>
+/// <param name="Program">该声道的音色号 0..127。只影响编辑器里的试听，发给游戏时永远是口琴那套键位。</param>
+/// <param name="Notes">音符，按起始 tick 升序。</param>
+/// <param name="Transpose">整轨移调，单位半音。</param>
+public sealed record Track(
+    int TrackIndex,
+    int Channel,
+    string Name,
+    int Program,
+    IReadOnlyList<Note> Notes,
+    int Transpose = 0)
+{
+    public int NoteCount => Notes.Count;
+
+    /// <summary>该轨最后一个音的结束 tick（空轨为 0）。</summary>
+    public long EndTick
+    {
+        get
+        {
+            long end = 0;
+            foreach (var n in Notes)
+                if (n.EndTick > end) end = n.EndTick;
+            return end;
+        }
+    }
+
+    /// <summary>换音符、保持其余字段不变。</summary>
+    public Track WithNotes(IReadOnlyList<Note> notes) => this with { Notes = notes };
+
+    /// <summary>
+    /// 值相等：音符**逐个**比，不是比列表引用。
+    ///
+    /// 为什么必须自己写：record 自动生成的相等会把 <see cref="Notes"/> 当引用比，
+    /// 于是两份内容完全一样的轨也不相等 —— 而 S1 缝要的正是「导入 → 导出 → 再导入，
+    /// 两个 <see cref="Song"/> 逐字段相等」。留着默认实现的话，那条测试即使实现全对也会红，
+    /// 而且红得让人摸不着头脑。
+    ///
+    /// 与 <see cref="Song"/> 刻意不一致：<c>Song</c> 是**引用**相等，因为撤销装饰器拿
+    /// 引用相等当「这条命令改没改」的判据（见 spec）。两处不一样是有意的：
+    /// <c>Track</c> 是个值（内容），<c>Song</c> 是份文档（身份）。
+    /// </summary>
+    public bool Equals(Track? other)
+    {
+        if (other is null) return false;
+        if (ReferenceEquals(this, other)) return true;
+        return TrackIndex == other.TrackIndex
+            && Channel == other.Channel
+            && Program == other.Program
+            && Transpose == other.Transpose
+            && string.Equals(Name, other.Name, StringComparison.Ordinal)
+            && Notes.SequenceEqual(other.Notes);
+    }
+
+    /// <summary>与 <see cref="Equals(Track?)"/> 对齐：音符参与哈希，且与顺序相关。</summary>
+    public override int GetHashCode()
+    {
+        var hash = new HashCode();
+        hash.Add(TrackIndex);
+        hash.Add(Channel);
+        hash.Add(Name, StringComparer.Ordinal);
+        hash.Add(Program);
+        hash.Add(Transpose);
+        foreach (var n in Notes) hash.Add(n);
+        return hash.ToHashCode();
+    }
+}
