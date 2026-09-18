@@ -12,7 +12,8 @@ public sealed record RankedTrack(int SongTrackIndex, Track Track, double Score);
 /// <summary>
 /// 挑出能弹的轨，并按「最像主旋律」排序，第一条默认选中。
 ///
-/// <b>能弹 = 单声部 + 非打击乐。</b> 单声部见 <see cref="MonophonyCheck"/>（起音是否同时）。
+/// <b>能弹 = 有音 + 单声部 + 非打击乐</b>（就是 <see cref="IsPlayable"/>，判据只有那一份）。
+/// 单声部见 <see cref="MonophonyCheck"/>（起音是否同时）。
 /// 打击乐那一半直接照搬原版：<c>TrackRowVM.IsPlayable => !IsPercussion</c> ——
 /// 口琴是按音高吹的，鼓点发过去只是一串没有意义的音，留着它只会把真正想弹的轨挤下去。
 ///
@@ -33,9 +34,19 @@ public static class TrackRanking
     /// <summary>GM 规定第 10 声道（下标 9，0 起）是打击乐。原版的 <c>IsPercussion</c> 也是这么判的。</summary>
     public const int PercussionChannel = 9;
 
-    /// <summary>单声部且不是打击乐 —— 游戏口琴弹得了。</summary>
+    /// <summary>
+    /// 能弹：有音 + 不是打击乐 + 单声部 —— 游戏口琴弹得了。
+    ///
+    /// <b>「有音」这一条也算在里面，不是废话。</b> 漏了它，同一个问题就会有两个答案：
+    /// 预检拿这一条判「放不放行」，<see cref="Of"/> 拿它筛下拉框 —— 而一条零音符的空轨
+    /// （MIDI 里很常见：只有轨头与元事件）单声部恒真，于是预检放行、起跑，最后建出一张空事件表，
+    /// 用户看到的是「按了开始什么都没发生，也没有任何解释」。预检存在的全部理由就是给那句解释。
+    /// 判据只能有一份，就放在这里。
+    /// </summary>
     public static bool IsPlayable(Track track, TempoMap tempoMap)
-        => track.Channel != PercussionChannel && MonophonyCheck.IsMonophonic(track, tempoMap);
+        => track.Notes.Count > 0
+        && track.Channel != PercussionChannel
+        && MonophonyCheck.IsMonophonic(track, tempoMap);
 
     /// <summary>
     /// 一首曲子里所有能弹的轨，最像主旋律的在最前。
@@ -49,8 +60,7 @@ public static class TrackRanking
         for (int i = 0; i < song.Tracks.Count; i++)
         {
             var track = song.Tracks[i];
-            if (track.Notes.Count == 0) continue;              // 没有音的轨不成轨，见 Track 的说明
-            if (!IsPlayable(track, song.TempoMap)) continue;
+            if (!IsPlayable(track, song.TempoMap)) continue;   // 空轨也在这条里面，别在外面再判一次
 
             ranked.Add(new RankedTrack(i, track, Score(track, song)));
         }

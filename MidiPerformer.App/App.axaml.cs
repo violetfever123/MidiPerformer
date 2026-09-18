@@ -40,6 +40,16 @@ public partial class App : Application
             {
                 desktop.MainWindow = new StyleGuideWindow(Tokens);
             }
+            else if (Has(desktop.Args, "--overlay-demo"))
+            {
+                // dev-only：把悬浮层单独拉起来。工单里「已在一个普通窗口上验证悬浮层置顶与不抢焦点」
+                // 这一条没法在测试里验 —— 它需要一个真窗口、一个真前台窗口、一次真点击。
+                // 照 --style-guide 的先例留一个开关：起来之后前台窗口还是不是原来那个，一比就知道。
+                // 它没有边框、不进任务栏、还点击穿透，所以**关不掉**：验完从外面结束进程。
+                var overlay = new PerformerOverlayWindow();
+                overlay.Opened += (_, _) => overlay.ShowAllStatesForDemo();
+                desktop.MainWindow = overlay;
+            }
             else
             {
                 var clock = new SystemClock();

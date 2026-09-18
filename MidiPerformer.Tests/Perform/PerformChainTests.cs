@@ -17,8 +17,8 @@ namespace MidiPerformer.Tests.Perform;
 /// 这一条守的是**接缝**：单位换得对不对（tick 只在这里变成秒）、
 /// 走子的锚点和看门狗的截止点是不是同一个原点、空轨和越界音会不会把链条打断。
 ///
-/// 窗口里的编排逻辑（<c>PerformerWindow.StartPerformance</c>）就是照这个顺序写的，
-/// 所以这一条同时是那块编排的可执行说明。06 把它提到用例层时，这里应当原样跟着搬。
+/// 窗口里的编排逻辑（06 起搬进了用例层 <c>StartPerformance</c>）就是照这个顺序写的，
+/// 所以这一条同时是那块编排的可执行说明。
 /// </summary>
 public class PerformChainTests
 {

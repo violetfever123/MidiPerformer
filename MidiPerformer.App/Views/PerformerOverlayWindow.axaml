@@ -1,0 +1,140 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="MidiPerformer.App.Views.PerformerOverlayWindow"
+        Title="演奏提示"
+        SizeToContent="WidthAndHeight"
+        CanResize="False"
+        ShowActivated="False"
+        ShowInTaskbar="False"
+        SystemDecorations="None"
+        Topmost="True"
+        Background="Transparent"
+        TransparencyLevelHint="Transparent"
+        WindowStartupLocation="Manual">
+
+  <!--
+    窗口二之外的那一层：悬浮在游戏画面上的提示。docs/wireframe.html 的 .ovl 三种形态。
+
+    这个窗口有两个属性是**不可动的**，动了就出事：
+      · ShowActivated="False" —— 显示这一下不抢焦点。抢了的话，之后发的按键就发到它身上了。
+      · 三个拓展样式（点击穿透 / 不抢焦点 / 不进任务栏）Avalonia 表达不了，
+        由 code-behind 在显示之后去网关要 —— 见 PerformerOverlayWindow.OnOpened。
+    两个都要：ShowActivated 管「显示这一下」，WS_EX_NOACTIVATE 管「之后任何一下」。
+
+    外观一律取令牌。底层那张半透明的深色卡片，wireframe 里写的是 rgba(12,18,26,.9) ——
+    令牌里没有带透明度的颜色（25 个令牌都是实色），所以用 TokenGround 加 Opacity 做，
+    不写死颜色。代价是卡片里的字也跟着降到 0.9，压在游戏画面上仍然读得清。
+  -->
+
+  <Window.Styles>
+
+    <!-- 卡片本身：圆角 + 细边 + 阴影，和 wireframe 的 .ovl 对齐 -->
+    <Style Selector="Border.ovl">
+      <Setter Property="Background" Value="{DynamicResource TokenGround}" />
+      <Setter Property="Opacity" Value="0.9" />
+      <Setter Property="BorderBrush" Value="{DynamicResource TokenLine}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="{DynamicResource TokenRadiusCard}" />
+      <Setter Property="BoxShadow" Value="{DynamicResource TokenShadow}" />
+      <Setter Property="Padding" Value="11,22" />
+      <Setter Property="MinWidth" Value="186" />
+      <Setter Property="HorizontalAlignment" Value="Center" />
+    </Style>
+
+    <!-- 倒计时那个大数字：等宽体，44px。字号是照 wireframe 的 .big-num 抄的 -->
+    <Style Selector="TextBlock.big-num">
+      <Setter Property="FontFamily" Value="{DynamicResource TokenFontMono}" />
+      <Setter Property="FontSize" Value="44" />
+      <Setter Property="FontWeight" Value="Bold" />
+      <Setter Property="Foreground" Value="{DynamicResource TokenInk}" />
+      <Setter Property="HorizontalAlignment" Value="Center" />
+    </Style>
+
+    <!-- 演奏中的当前音：同样等宽体，小一号（wireframe 的 .now） -->
+    <Style Selector="TextBlock.now">
+      <Setter Property="FontFamily" Value="{DynamicResource TokenFontMono}" />
+      <Setter Property="FontSize" Value="26" />
+      <Setter Property="FontWeight" Value="Bold" />
+      <Setter Property="Foreground" Value="{DynamicResource TokenInk}" />
+      <Setter Property="HorizontalAlignment" Value="Center" />
+    </Style>
+
+    <!-- 「已停止」那两行是纯文本，不需要等宽体的数字感 -->
+    <Style Selector="TextBlock.now-plain">
+      <Setter Property="FontSize" Value="17" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="Foreground" Value="{DynamicResource TokenInk}" />
+      <Setter Property="HorizontalAlignment" Value="Center" />
+    </Style>
+
+    <!-- 大数字底下那行小字（wireframe 的 .cap） -->
+    <Style Selector="TextBlock.cap">
+      <Setter Property="FontSize" Value="12" />
+      <Setter Property="Foreground" Value="{DynamicResource TokenInkMuted}" />
+      <Setter Property="HorizontalAlignment" Value="Center" />
+    </Style>
+
+    <!-- 进度与时间（wireframe 的 .tsec） -->
+    <Style Selector="TextBlock.tsec">
+      <Setter Property="FontFamily" Value="{DynamicResource TokenFontMono}" />
+      <Setter Property="FontSize" Value="10.5" />
+      <Setter Property="Foreground" Value="{DynamicResource TokenInkFaint}" />
+      <Setter Property="HorizontalAlignment" Value="Center" />
+    </Style>
+
+    <!-- F6 提示：一条细线隔开（wireframe 的 .panic-hint） -->
+    <Style Selector="Border.panic">
+      <Setter Property="BorderBrush" Value="{DynamicResource TokenLineSoft}" />
+      <Setter Property="BorderThickness" Value="0,1,0,0" />
+      <Setter Property="Margin" Value="0,7,0,0" />
+      <Setter Property="Padding" Value="0,6,0,0" />
+    </Style>
+
+    <Style Selector="Border.panic TextBlock">
+      <Setter Property="FontSize" Value="10.5" />
+      <Setter Property="Foreground" Value="{DynamicResource TokenInkFaint}" />
+      <Setter Property="HorizontalAlignment" Value="Center" />
+    </Style>
+
+    <!-- 进度条。Fluent 的默认色不走我们的令牌，所以在这里覆盖掉它 -->
+    <Style Selector="ProgressBar">
+      <Setter Property="Foreground" Value="{DynamicResource TokenAccent}" />
+      <Setter Property="Background" Value="{DynamicResource TokenSurface3}" />
+      <Setter Property="Height" Value="5" />
+      <Setter Property="MinHeight" Value="5" />
+      <Setter Property="Margin" Value="0,8,0,0" />
+    </Style>
+
+  </Window.Styles>
+
+  <Border Classes="ovl">
+    <Panel>
+
+      <!-- ============ 倒计时 ============ -->
+      <StackPanel x:Name="CountdownState">
+        <TextBlock x:Name="CountdownNumber" Classes="big-num" Text="3" />
+        <TextBlock Classes="cap" Text="准备演奏 · 切到游戏窗口" Margin="0,5,0,0" />
+        <Border Classes="panic">
+          <TextBlock Text="按 F6 取消 / 急停" />
+        </Border>
+      </StackPanel>
+
+      <!-- ============ 演奏中 ============ -->
+      <StackPanel x:Name="PlayingState" IsVisible="False">
+        <TextBlock x:Name="NoteNow" Classes="now" Text="♪ —" />
+        <ProgressBar x:Name="Progress" Minimum="0" Maximum="1" Value="0" />
+        <TextBlock x:Name="TimeNow" Classes="tsec" Text="0:00 / 0:00" Margin="0,5,0,0" />
+        <Border Classes="panic">
+          <TextBlock Text="按 F6 急停" />
+        </Border>
+      </StackPanel>
+
+      <!-- ============ 已停止 ============ -->
+      <StackPanel x:Name="StoppedState" IsVisible="False">
+        <TextBlock Classes="now-plain" Text="已停止" />
+        <TextBlock Classes="tsec" Text="已松开所有按键" Margin="0,7,0,0" />
+      </StackPanel>
+
+    </Panel>
+  </Border>
+</Window>

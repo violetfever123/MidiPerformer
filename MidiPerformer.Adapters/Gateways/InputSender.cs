@@ -28,6 +28,12 @@ public sealed class InputSender : IEventSink
     private const uint KEYEVENTF_KEYUP = 0x0002;
     private const uint KEYEVENTF_SCANCODE = 0x0008;
 
+    // ---- 权限自检（OpenProcessToken + GetTokenInformation）----
+    private const uint TOKEN_QUERY = 0x0008;
+
+    /// <summary><c>TOKEN_INFORMATION_CLASS.TokenElevation</c>。枚举值不在 BCL 里，只能写死。</summary>
+    private const int TokenElevationClass = 20;
+
     // ---- 鼠标事件标志 ----
     private const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
     private const uint MOUSEEVENTF_LEFTUP = 0x0004;
@@ -62,6 +68,42 @@ public sealed class InputSender : IEventSink
             throw new InvalidOperationException(
                 $"INPUT 联合体的布局不对：64 位下应当是 40 字节，实际是 {size} 字节。"
                 + "SendInput 会因为这个尺寸被拒而静默地什么都不发。");
+        }
+    }
+
+    /// <summary>
+    /// 本进程是不是以管理员身份在跑。<b>由界面直接调，不经过端口</b> —— 见 spec：
+    /// <c>IEventSink</c> 只声明 <see cref="Send"/> 和 <see cref="ReleaseAll"/>，
+    /// 权限自检是「按开始之前问一句」的事，不是用例层要知道的事。
+    ///
+    /// <b>为什么要问这一句</b>：UIPI 会把权限低的进程发往权限高的窗口的输入整批丢掉。
+    /// 游戏多半是管理员权限跑的，于是不提权的话一次 <see cref="SendInput"/> 也进不去 ——
+    /// 而那表现为「点了开始，游戏里什么都没发生」，不报错、不卡住，最难查的一种。
+    ///
+    /// <b>判据取进程令牌的提权位</b>（<c>TokenElevation</c>），不看用户名是不是
+    /// Administrator：后者在启用了 UAC 的机器上根本说明不了问题 —— 管理员账户跑的程序
+    /// 默认也是非提权的，照样被 UIPI 拦。
+    ///
+    /// <b>取不到就当作没提权</b>（严的一侧）：查询失败基本只发生在受限环境里，
+    /// 而那时按下开始多半也是白发。宁可让用户看到一句「请以管理员身份重开」，
+    /// 也不要让他对着一局静音的演奏找原因。
+    /// </summary>
+    public static bool CheckElevation()
+    {
+        if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, out IntPtr token)) return false;
+
+        try
+        {
+            int size = Marshal.SizeOf<TOKEN_ELEVATION>();
+            if (!GetTokenInformation(token, TokenElevationClass, out TOKEN_ELEVATION elevation, size, out _))
+                return false;
+
+            return elevation.TokenIsElevated != 0;
+        }
+        finally
+        {
+            // 令牌句柄是内核对象，泄漏它不像托管内存那样会被 GC 收掉。
+            CloseHandle(token);
         }
     }
 
@@ -173,6 +215,26 @@ public sealed class InputSender : IEventSink
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern uint SendInput(uint nInputs, [In] INPUT[] pInputs, int cbSize);
+
+    /// <summary><c>TokenElevation</c> 只回一个 DWORD：提权了就是 1，否则 0。</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    private struct TOKEN_ELEVATION
+    {
+        public int TokenIsElevated;
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern IntPtr GetCurrentProcess();
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    private static extern bool OpenProcessToken(IntPtr process, uint desiredAccess, out IntPtr token);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    private static extern bool GetTokenInformation(
+        IntPtr token, int informationClass, out TOKEN_ELEVATION information, int length, out int returnedLength);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool CloseHandle(IntPtr handle);
 
     [StructLayout(LayoutKind.Sequential)]
     private struct KEYBDINPUT

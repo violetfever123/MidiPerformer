@@ -5,9 +5,9 @@
     App.axaml.cs 的 OnFrameworkInitializationCompleted() 是全程序**唯一**允许
     new 具体实现（new InputSender() / new SongLibrary(path) …）的地方，别处一律构造器注入。
 
-    win-x64 自包含单文件 + PublishTrimmed 是**发布**配置，归 11（自检与发布）管，
-    不写在这里 —— 写死 RuntimeIdentifier 会让普通 build 也变成 RID 专属的，
-    引用它的测试工程跟着遭殃。
+    Main 的第一件事是查内置自检的环境变量（MIDIPERFORMER_SELFTEST，见 SelfTest\PerformerSelfTest.cs）：
+    走那条路时不建窗口、不注册热键、不碰按键与 MIDI 设备，跑完直接退出。
+    发布产物的校验（tools/run-selftest.ps1）走的就是这条路。
   -->
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
@@ -22,6 +22,61 @@
     <AvaloniaUseCompiledBindingsByDefault>false</AvaloniaUseCompiledBindingsByDefault>
   </PropertyGroup>
 
+  <!--
+    发布形态：win-x64 / 自包含 / 单文件 / 裁剪。**只在显式打开开关时才生效**：
+        pwsh tools/publish.ps1                                    （推荐，脚本里带好了开关）
+        dotnet publish MidiPerformer.App -c Release -p:MidiPerformerPublish=true
+
+    为什么不像 midikey-player 那样无条件写在这里 —— 因为那边没有测试工程引用它的 App，
+    这边有：MidiPerformer.Tests 引用了本工程。2026-09-19 实测（.NET SDK 10.0.401）：
+      · 无条件写 RuntimeIdentifier：dotnet build / dotnet test 仍然全绿（1057 条），
+        也没报现场担心的 NETSDK1047；但**普通 Debug 构建也变成 RID 专属**了 ——
+        产物从 bin\Debug\net8.0\ 挪到 bin\Debug\net8.0\win-x64\，而且因为 SelfContained，
+        一次 build 就是 96MB / 223 个文件（整个运行时跟着落盘）。
+        exe 的位置、跑起来的东西、磁盘占用全都跟着变，开发环回白白背上发布的包袱。
+        既然本工程的既有注释（上一版）已经写明"发布配置不该管到普通 build"，就按那个意图收在开关后面。
+      · 开关打开时只影响本工程：dotnet publish -p:MidiPerformerPublish=true 照常还原 RID 资产，
+        发布完再跑 dotnet test（不带开关）也照常全绿。
+      代价要说清楚：不带开关的 `dotnet publish` 产出的是**非**单文件、**不**裁剪的开发形态，
+      不能当交付物。交付物一律走 tools/publish.ps1。
+
+    DebugType=none：单文件 exe 是唯一交付物，不带 .pdb 伴生文件（发布目录里就只能有一个 exe）。
+    EnableCompressionInSingleFile 没开：exe 大一点，但少一层自解压，启动与排错都更直白。
+  -->
+  <PropertyGroup Condition="'$(MidiPerformerPublish)' == 'true'">
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <DebugType>none</DebugType>
+    <PublishTrimmed>true</PublishTrimmed>
+    <TrimMode>partial</TrimMode>
+  </PropertyGroup>
+
+  <!--
+    裁剪时钉住的程序集：这些程序集的类型与成员一个都不删。
+      MidiPerformer        —— App 程序集（AssemblyName 是 MidiPerformer）。XAML 里 new 的那些控件、
+                              {Binding} 的目标属性只被反射用到（AvaloniaUseCompiledBindingsByDefault=false），
+                              按"入口点可达"裁会删掉；
+      Avalonia 系列        —— 绑定引擎与 XAML 运行时，反射大户；
+      Melanchall.DryWetMidi —— MIDI 读写（Core 的 SongProject）大量用反射。
+    改这份名单要同时改 SelfTest\PerformerSelfTest.cs 里的 PinnedAssemblies：那边有一条
+    "钉住的程序集裁剪后还加载得起来吗"的运行时断言，名单对不上就白验了。
+  -->
+  <ItemGroup Condition="'$(MidiPerformerPublish)' == 'true'">
+    <TrimmerRootAssembly Include="MidiPerformer" />
+    <TrimmerRootAssembly Include="Avalonia" />
+    <TrimmerRootAssembly Include="Avalonia.Base" />
+    <TrimmerRootAssembly Include="Avalonia.Controls" />
+    <TrimmerRootAssembly Include="Avalonia.Desktop" />
+    <TrimmerRootAssembly Include="Avalonia.Markup" />
+    <TrimmerRootAssembly Include="Avalonia.Markup.Xaml" />
+    <TrimmerRootAssembly Include="Avalonia.Skia" />
+    <TrimmerRootAssembly Include="Avalonia.Themes.Fluent" />
+    <TrimmerRootAssembly Include="Avalonia.Win32" />
+    <TrimmerRootAssembly Include="Melanchall.DryWetMidi" />
+  </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="Avalonia" Version="11.3.20" />
     <PackageReference Include="Avalonia.Desktop" Version="11.3.20" />
@@ -32,5 +87,31 @@
     <ProjectReference Include="..\MidiPerformer.Adapters\MidiPerformer.Adapters.csproj" />
     <ProjectReference Include="..\MidiPerformer.Core\MidiPerformer.Core.csproj" />
   </ItemGroup>
+
+  <!--
+    发布目录里只留一个 exe。DryWetMidi 包里带 macOS / Linux 的原生库（.dylib / .so），
+    它们不是 RID 限定的资产，publish 时会被一起复制到 win-x64 输出，于是"多出几个文件"。
+    在发布清单算完之后把它们剔掉；tools/publish.ps1 里另有一道"目录里只有一个 exe"的检查兜底。
+    （这段照搬 midikey-player 的 MidiKeyPlayer.csproj：同一个包，同一个坑。）
+  -->
+  <Target Name="RemoveForeignNativeLibsFromPublish" AfterTargets="ComputeResolvedFilesToPublishList">
+    <ItemGroup>
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)"
+                             Condition="'%(Extension)' == '.dylib' Or '%(Extension)' == '.so'" />
+    </ItemGroup>
+  </Target>
+
+  <!--
+    发布目录里同样不留 .pdb。本工程 DebugType=none，自己不产 pdb，但**被引用的**
+    MidiPerformer.Core / MidiPerformer.Adapters 会产，publish 时会被一起复制进来 ——
+    实测就是这一条让发布目录里多出两个 .pdb。（midikey-player 是单工程，没这个问题，
+    所以那边没有这一段；这是本仓库与它不同的一点。）
+    只在发布清单里剔：普通 build 的 pdb 照旧留着，调试时还要用。
+  -->
+  <Target Name="RemovePdbFromPublish" AfterTargets="ComputeResolvedFilesToPublishList">
+    <ItemGroup>
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)" Condition="'%(Extension)' == '.pdb'" />
+    </ItemGroup>
+  </Target>
 
 </Project>
