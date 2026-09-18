@@ -1,0 +1,220 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="MidiPerformer.App.Views.PerformerWindow"
+        Title="演奏器"
+        Width="430" SizeToContent="Height"
+        CanResize="False"
+        Topmost="True"
+        WindowStartupLocation="CenterScreen"
+        Background="{DynamicResource TokenSurface}">
+
+  <!--
+    窗口二 · 演奏器（docs/wireframe.html 里那一块）。
+
+    和编辑器的窗口是两件事：这个窗口**置顶**，因为演奏时要切到游戏里去，
+    切回来只是为了急停 —— 置顶能让它一直露在游戏画面上面。
+
+    窗口本身就是 wireframe 里的 .perf 那张卡片（surface 底 + 细边 + 圆角 + 阴影），
+    所以这里只设窗口底色，外面不再套一层 Border。
+
+    风险提示（下面那个 .risk）是**常驻**的：不是弹窗、不是首次提示、不折叠。
+    它必须在「开始」按下去之前就看得见 —— 这是这一块唯一一条与安全有关的界面要求。
+
+    这一张里没有的东西（它们归 05 / 06）：倒计时、悬浮层、权限与输入法预检、
+    只列出单声部轨、目标窗口选择。所以这里没有对应的行，也不留空壳。
+  -->
+
+  <Window.Styles>
+
+    <!-- ==================== 排版 ==================== -->
+    <!-- wireframe 的 .prow：一行「标签 + 值」。标签定宽，几行左边就对齐了 -->
+    <Style Selector="TextBlock.row-label">
+      <Setter Property="Width" Value="74" />
+      <Setter Property="FontSize" Value="11.5" />
+      <Setter Property="Foreground" Value="{DynamicResource TokenInkFaint}" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+
+    <Style Selector="TextBlock.row-value">
+      <Setter Property="FontSize" Value="13" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="Foreground" Value="{DynamicResource TokenInk}" />
+      <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+
+    <!-- wireframe 的 .phint：缩进到与值齐，说明下一行的「为什么只有这些」 -->
+    <Style Selector="TextBlock.hint">
+      <Setter Property="FontSize" Value="11" />
+      <Setter Property="Foreground" Value="{DynamicResource TokenInkFaint}" />
+      <Setter Property="TextWrapping" Value="Wrap" />
+      <Setter Property="Margin" Value="84,0,0,0" />
+    </Style>
+
+    <!-- ==================== 启动 / 急停 ==================== -->
+    <!-- wireframe 的 .big：占满一行、字大一号，闭着眼睛也点得中 -->
+    <Style Selector="Button.big">
+      <Setter Property="FontSize" Value="15" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="Padding" Value="12" />
+      <Setter Property="HorizontalAlignment" Value="Stretch" />
+      <Setter Property="HorizontalContentAlignment" Value="Center" />
+    </Style>
+
+    <!--
+      下面每一条都写了 Button 自己和它的 ContentPresenter 两层：
+      hover / pressed / disabled 是 Fluent 直接设在模板里的 ContentPresenter 上的，
+      只设 Button 的属性盖不住（Controls.axaml 的开头解释了这件事）。
+    -->
+    <Style Selector="Button.big-start">
+      <Setter Property="Background" Value="{DynamicResource TokenAccent}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource TokenAccent}" />
+      <!-- 前景取 TokenSurface 而不是 wireframe 的白：暗色下 accent 是浅蓝，压白字读不清 -->
+      <Setter Property="Foreground" Value="{DynamicResource TokenSurface}" />
+    </Style>
+    <Style Selector="Button.big-start /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource TokenAccent}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource TokenAccent}" />
+      <Setter Property="Foreground" Value="{DynamicResource TokenSurface}" />
+    </Style>
+    <Style Selector="Button.big-start:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="BorderBrush" Value="{DynamicResource TokenAccentLine}" />
+    </Style>
+    <Style Selector="Button.big-start:pressed /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="BorderBrush" Value="{DynamicResource TokenAccentLine}" />
+    </Style>
+
+    <Style Selector="Button.big-stop">
+      <Setter Property="Background" Value="{DynamicResource TokenStopSoft}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource TokenStopLine}" />
+      <Setter Property="Foreground" Value="{DynamicResource TokenStop}" />
+    </Style>
+    <Style Selector="Button.big-stop /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource TokenStopSoft}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource TokenStopLine}" />
+      <Setter Property="Foreground" Value="{DynamicResource TokenStop}" />
+    </Style>
+    <Style Selector="Button.big-stop:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource TokenStopSoft}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource TokenStop}" />
+    </Style>
+    <Style Selector="Button.big-stop:pressed /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource TokenStopSoft}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource TokenStop}" />
+    </Style>
+
+    <!--
+      禁用态排在**每一条**按钮类规则之后：同优先级的 setter 谁后写谁赢，
+      排在前面就会被 .big-start 的 setter 盖回去，没有曲子的时候「开始」看着还能点。
+      （Controls.axaml 里那条管不到这里 —— 窗口自己的样式优先级更高。）
+    -->
+    <Style Selector="Button.big:disabled /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource TokenLine}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource TokenLine}" />
+      <Setter Property="Foreground" Value="{DynamicResource TokenInkFaint}" />
+    </Style>
+
+    <!-- ==================== 状态行 ==================== -->
+    <!-- wireframe 的 .status：一枚小圆点 + 一句话。圆点的颜色就是「在什么状态」 -->
+    <Style Selector="Border.status">
+      <Setter Property="Background" Value="{DynamicResource TokenSurface2}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource TokenLineSoft}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="{DynamicResource TokenRadiusButton}" />
+      <Setter Property="Padding" Value="10,7" />
+    </Style>
+    <Style Selector="TextBlock.dot">
+      <Setter Property="FontSize" Value="10" />
+      <Setter Property="Foreground" Value="{DynamicResource TokenInkFaint}" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style Selector="TextBlock.dot.ready">
+      <Setter Property="Foreground" Value="{DynamicResource TokenAccent}" />
+    </Style>
+    <Style Selector="TextBlock.dot.run">
+      <Setter Property="Foreground" Value="{DynamicResource TokenStop}" />
+    </Style>
+
+    <!-- ==================== 风险提示 ==================== -->
+    <!-- wireframe 的 .risk：警告色系的一整块，常驻在窗口里 -->
+    <Style Selector="Border.risk">
+      <Setter Property="Background" Value="{DynamicResource TokenWarnSoft}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource TokenWarnLine}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="{DynamicResource TokenRadiusButton}" />
+      <Setter Property="Padding" Value="9,7" />
+    </Style>
+    <Style Selector="Border.risk TextBlock">
+      <Setter Property="FontSize" Value="11.5" />
+      <Setter Property="Foreground" Value="{DynamicResource TokenWarn}" />
+      <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
+
+  </Window.Styles>
+
+  <StackPanel Margin="14" Spacing="11">
+
+    <!-- ============ 曲目 ============ -->
+    <Grid ColumnDefinitions="74,*,Auto" ColumnSpacing="10">
+      <TextBlock Grid.Column="0" Classes="row-label" Text="曲目" />
+      <TextBlock Grid.Column="1" Classes="row-value" x:Name="SongValue" Text="还没有选曲子" />
+      <Button Grid.Column="2" x:Name="OpenButton" Content="打开 MIDI…" Click="OnOpenMidi" />
+    </Grid>
+
+    <!-- ============ 演奏轨 ============ -->
+    <Grid ColumnDefinitions="74,*" ColumnSpacing="10">
+      <TextBlock Grid.Column="0" Classes="row-label" Text="演奏轨" />
+      <ComboBox Grid.Column="1" x:Name="TrackCombo" HorizontalAlignment="Stretch"
+                PlaceholderText="先打开一首 MIDI" IsEnabled="False" />
+    </Grid>
+    <!--
+      这一张里下拉框列的是**该曲的所有轨**，不做任何筛选：
+      「只列单声部轨」归 05，「只列能弹的」归 06。先把最小的那条路径走通，
+      筛选加上来之后这句提示会跟着改（wireframe 里写的就是筛选后的那句）。
+    -->
+    <TextBlock Classes="hint" x:Name="TrackHint" Text="列出这首曲子的全部轨，默认第一条。" />
+
+    <!-- ============ 时序档位 ============ -->
+    <Grid ColumnDefinitions="74,*" ColumnSpacing="10">
+      <TextBlock Grid.Column="0" Classes="row-label" Text="时序" />
+      <ComboBox Grid.Column="1" x:Name="TimingCombo" HorizontalAlignment="Stretch" SelectedIndex="1" />
+    </Grid>
+    <TextBlock Classes="hint" x:Name="TimingHint"
+               Text="游戏按键按帧采样，间隔给不够会漏音。不确定就用标准档。" />
+
+    <Border Classes="rule" />
+
+    <!-- ============ 开始 / 急停 ============ -->
+    <Button x:Name="StartButton" Classes="big big-start" Click="OnStart" IsEnabled="False">
+      <StackPanel Orientation="Horizontal" Spacing="8">
+        <TextBlock Text="▶ 开始演奏" VerticalAlignment="Center" />
+        <!-- 急停键写在按钮上：演奏前就该知道出事了按哪个键 -->
+        <TextBlock Text="F6 急停" FontSize="11" FontWeight="Normal" Opacity="0.8"
+                   VerticalAlignment="Center" />
+      </StackPanel>
+    </Button>
+
+    <Button x:Name="StopButton" Classes="big big-stop" Content="■ 急停"
+            Click="OnStop" IsEnabled="False" />
+
+    <!-- ============ 状态 ============ -->
+    <Border Classes="status">
+      <StackPanel Orientation="Horizontal" Spacing="8">
+        <TextBlock x:Name="StatusDot" Classes="dot" Text="●" />
+        <TextBlock x:Name="StatusText" TextWrapping="Wrap" VerticalAlignment="Center"
+                   Text="就绪 · 先打开一首 MIDI" />
+      </StackPanel>
+    </Border>
+
+    <!-- ============ 常驻风险提示 ============ -->
+    <!-- 位置在按钮下面，但它一直在：不需要点任何东西就能看见 -->
+    <Border Classes="risk">
+      <StackPanel Spacing="3">
+        <TextBlock FontWeight="Bold"
+                   Text="虚拟输入违反游戏规则，可能导致封号，风险自负。" />
+        <TextBlock Text="本程序只做一件事：往系统里发按键。它不读游戏进程、不查前台窗口、不碰游戏内存。演奏期间随时按 F6 急停，急停会立刻停下并松开所有按住的键和鼠标键。" />
+      </StackPanel>
+    </Border>
+
+  </StackPanel>
+</Window>
