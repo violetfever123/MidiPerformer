@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    适配层：唯一知道外部世界长什么样的地方（SendInput / 低层钩子 / winmm / 文件系统）。
+    网关是明确不测的那一类，所以这一层要尽可能薄。
+  -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>MidiPerformer.Adapters</RootNamespace>
+    <AssemblyName>MidiPerformer.Adapters</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\MidiPerformer.Core\MidiPerformer.Core.csproj" />
+  </ItemGroup>
+
+</Project>

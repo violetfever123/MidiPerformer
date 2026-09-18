@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    第二个 Main：装的是 FakeClock + RecordingEventSink，换配置就是换一个 Main，内层一行不改。
+
+    这里引用原版 harmonica-auto-player **工程本体**（不是副本），对拍跑的就是原版代码本体。
+    原版仓库一行都不改 —— 它的 BuildScheduleForTest 本来就公开，只是裹在 #if HARP_TEST 里，
+    所以这里用 AdditionalProperties 给那一个工程单独定义 HARP_TEST，
+    我们自己这些工程的 DefineConstants 不受影响。
+  -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>MidiPerformer.Tests</RootNamespace>
+    <AssemblyName>MidiPerformer.Tests</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.13.0" />
+    <PackageReference Include="NUnit" Version="4.3.2" />
+    <PackageReference Include="NUnit3TestAdapter" Version="5.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\MidiPerformer.App\MidiPerformer.App.csproj" />
+    <ProjectReference Include="..\MidiPerformer.Adapters\MidiPerformer.Adapters.csproj" />
+    <ProjectReference Include="..\MidiPerformer.Core\MidiPerformer.Core.csproj" />
+    <ProjectReference Include="..\..\harmonica-auto-player\HarpAutoPlayer\HarpAutoPlayer.csproj">
+      <AdditionalProperties>DefineConstants=HARP_TEST</AdditionalProperties>
+    </ProjectReference>
+  </ItemGroup>
+
+</Project>

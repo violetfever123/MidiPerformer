@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    最外层：Avalonia + Main。
+    App.axaml.cs 的 OnFrameworkInitializationCompleted() 是全程序**唯一**允许
+    new 具体实现（new InputSender() / new SongLibrary(path) …）的地方，别处一律构造器注入。
+
+    win-x64 自包含单文件 + PublishTrimmed 是**发布**配置，归 11（自检与发布）管，
+    不写在这里 —— 写死 RuntimeIdentifier 会让普通 build 也变成 RID 专属的，
+    引用它的测试工程跟着遭殃。
+  -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>MidiPerformer.App</RootNamespace>
+    <AssemblyName>MidiPerformer</AssemblyName>
+    <InvariantGlobalization>false</InvariantGlobalization>
+    <SatelliteResourceLanguages>zh-Hans</SatelliteResourceLanguages>
+    <AvaloniaUseCompiledBindingsByDefault>false</AvaloniaUseCompiledBindingsByDefault>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="11.3.20" />
+    <PackageReference Include="Avalonia.Desktop" Version="11.3.20" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.20" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\MidiPerformer.Adapters\MidiPerformer.Adapters.csproj" />
+    <ProjectReference Include="..\MidiPerformer.Core\MidiPerformer.Core.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,8 @@
+<Solution>
+  <!-- 原版 harmonica-auto-player 故意**不**列在这里：它是对拍用的参照物，
+       由测试工程按路径引用，不属于本解决方案。 -->
+  <Project Path="MidiPerformer.Adapters/MidiPerformer.Adapters.csproj" />
+  <Project Path="MidiPerformer.App/MidiPerformer.App.csproj" />
+  <Project Path="MidiPerformer.Core/MidiPerformer.Core.csproj" />
+  <Project Path="MidiPerformer.Tests/MidiPerformer.Tests.csproj" />
+</Solution>

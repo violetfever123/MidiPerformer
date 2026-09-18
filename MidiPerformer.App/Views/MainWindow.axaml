@@ -1,0 +1,13 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="MidiPerformer.App.Views.MainWindow"
+        Title="MIDI 演奏器"
+        Width="1024" Height="680">
+  <StackPanel Margin="16" Spacing="8">
+    <TextBlock Text="MIDI 演奏器" FontSize="20" FontWeight="SemiBold" />
+    <TextBlock TextWrapping="Wrap"
+               Text="给《三角洲行动》口琴用的 MIDI 编辑 + 自动演奏器。编辑器与曲库尚未接上（见 .scratch/midi-performer/issues）。" />
+    <TextBlock TextWrapping="Wrap" Opacity="0.7"
+               Text="风险提示：本程序通过虚拟输入向系统发送按键，违反游戏规则，可能导致封号，风险自负。" />
+  </StackPanel>
+</Window>
