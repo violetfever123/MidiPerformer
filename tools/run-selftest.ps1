@@ -35,11 +35,12 @@
     pwsh -File tools/publish.ps1 ; pwsh -File tools/run-selftest.ps1
 
 .NOTES
-    退出码：
+    退出码（本脚本只吐出这四个，别的一律并进来）：
       0  = 自检全部通过
       1  = 报告里有 FAIL（或自检进程返回 1）
       2  = 找不到 exe
       3  = 启动失败、超时、报告缺失，或报告路径落在仓库里
+           —— 自检崩了（返回别的非零码）也走这条，原始码打在控制台上
 #>
 [CmdletBinding()]
 param(
@@ -131,7 +132,12 @@ $code = $proc.ExitCode
 
 if (-not (Test-Path -LiteralPath $report -PathType Leaf)) {
     Write-Host "!! 自检没有写出报告文件。进程退出码：$code"
-    if ($code -ne 0) { exit $code }
+    # 只放行 1（自检自己说「有用例失败」，那是文档里约定好的一条），别的非零码一律并成 3。
+    # 这里原先写的是 `exit $code`，等于把子进程的码原样漏出去 —— 而本脚本对外承诺的只有
+    # 0/1/2/3 四个，漏出来的 2 恰好撞上「找不到 exe」：exe 明明找到了、只是崩了，
+    # CI 看到 2 会朝反方向查。非零码已经不在这条分支的正常路径上了（自检只返回 0 或 1，
+    # 报告写不出去也照样返回），所以这里并成 3 不丢信息 —— 原始码就在上面那行里。
+    if ($code -eq 1) { exit 1 }
     exit 3
 }
 
@@ -159,7 +165,10 @@ if ($failLines.Count -gt 0) {
 if ($code -ne 0) {
     Write-Host ''
     Write-Host "自检失败。退出码 $code。"
-    exit $code
+    # 和「报告缺失」那条同一个道理：报告读得到、进程却是非零，就是「自检失败」——
+    # 并成 1，别把原始码原样漏出去（那会让「只吐 0/1/2/3」这句变成假话）。
+    # 原始码在上面那行里，没丢。
+    exit 1
 }
 if ($failLines.Count -gt 0) {
     Write-Host ''
