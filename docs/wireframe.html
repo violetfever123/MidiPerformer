@@ -1,0 +1,1144 @@
+<title>MIDI 编辑器线框</title>
+<style>
+  :root{
+    --ground:#EEF1F5; --surface:#FFFFFF; --surface-2:#F7F9FB; --surface-3:#EAEEF3;
+    --ink:#171C23; --ink-muted:#5C6673; --ink-faint:#8A94A1;
+    --line:#CDD5DE; --line-soft:#E3E8EE;
+    --accent:#2C6BA8; --accent-soft:#DCEAF7; --accent-line:#9CC2E4;
+    --warn:#A85A1E; --warn-soft:#F8EADC; --warn-line:#DDB183;
+    --stop:#A83232; --stop-soft:#F8E2E2; --stop-line:#DFA8A8;
+    --note:#4A5563; --note-edge:#333C47;
+    --grid-bar:#B9C4D0; --grid-beat:#DDE3EA;
+    --lane-a:#FBFCFD; --lane-b:#F3F6F9;
+    --annot:#7B4BA8; --annot-soft:#EFE7F7; --annot-line:#C4A9DE;
+    --shadow:0 1px 2px rgba(23,28,35,.06), 0 8px 24px rgba(23,28,35,.06);
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --ground:#13171C; --surface:#1A1F26; --surface-2:#1F252D; --surface-3:#262D36;
+      --ink:#E7EBF1; --ink-muted:#9BA6B3; --ink-faint:#6E7987;
+      --line:#333C46; --line-soft:#272E37;
+      --accent:#74ABDD; --accent-soft:#1C2E42; --accent-line:#3A5F85;
+      --warn:#D89B60; --warn-soft:#33261A; --warn-line:#6B4E2E;
+      --stop:#E08080; --stop-soft:#33201F; --stop-line:#6E3B38;
+      --note:#5E6B7A; --note-edge:#48535F;
+      --grid-bar:#4A5563; --grid-beat:#2C343D;
+      --lane-a:#1D232B; --lane-b:#20272F;
+      --annot:#B08AD6; --annot-soft:#2A2036; --annot-line:#4E3B66;
+      --shadow:0 1px 2px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.25);
+    }
+  }
+  :root[data-theme="dark"]{
+    --ground:#13171C; --surface:#1A1F26; --surface-2:#1F252D; --surface-3:#262D36;
+    --ink:#E7EBF1; --ink-muted:#9BA6B3; --ink-faint:#6E7987;
+    --line:#333C46; --line-soft:#272E37;
+    --accent:#74ABDD; --accent-soft:#1C2E42; --accent-line:#3A5F85;
+    --warn:#D89B60; --warn-soft:#33261A; --warn-line:#6B4E2E;
+    --stop:#E08080; --stop-soft:#33201F; --stop-line:#6E3B38;
+    --note:#5E6B7A; --note-edge:#48535F;
+    --grid-bar:#4A5563; --grid-beat:#2C343D;
+    --lane-a:#1D232B; --lane-b:#20272F;
+    --annot:#B08AD6; --annot-soft:#2A2036; --annot-line:#4E3B66;
+    --shadow:0 1px 2px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.25);
+  }
+
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--ground); color:var(--ink);
+    font-family:"Segoe UI","Microsoft YaHei","PingFang SC",system-ui,sans-serif;
+    font-size:14px; line-height:1.5;
+    padding-block:26px 48px; padding-inline:16px;
+  }
+  .mono{font-family:"Cascadia Mono",Consolas,ui-monospace,monospace;font-variant-numeric:tabular-nums}
+
+  .page{max-width:1280px;margin:0 auto;display:flex;flex-direction:column;gap:26px}
+
+  .phead{display:flex;flex-wrap:wrap;gap:10px 20px;align-items:baseline;justify-content:space-between}
+  .phead h1{margin:0;font-size:21px;font-weight:650;letter-spacing:-.01em}
+  .phead .sub{margin:2px 0 0;color:var(--ink-muted);font-size:13px;max-width:74ch}
+  .tag{
+    display:inline-block;padding:2px 8px;border-radius:3px;font-size:11px;font-weight:600;
+    letter-spacing:.04em;background:var(--annot-soft);color:var(--annot);border:1px solid var(--annot-line);
+    white-space:nowrap;
+  }
+
+  .sect{display:flex;flex-direction:column;gap:12px}
+  .sect > h2{
+    margin:0;font-size:12px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;
+    color:var(--ink-faint);display:flex;align-items:center;gap:10px;
+  }
+  .sect > h2::after{content:"";flex:1;height:1px;background:var(--line)}
+
+  .win{background:var(--surface);border:1px solid var(--line);border-radius:8px;overflow:hidden;box-shadow:var(--shadow)}
+  .wintitle{
+    display:flex;align-items:center;gap:10px;padding:7px 12px;
+    background:var(--surface-3);border-bottom:1px solid var(--line);font-size:12px;color:var(--ink-muted);
+  }
+  .wintitle .name{font-weight:600;color:var(--ink)}
+  .wintitle .dots{margin-left:auto;display:flex;gap:6px}
+  .wintitle .dots i{width:10px;height:10px;border-radius:50%;background:var(--line);display:block}
+  .placeholder{font-size:11px;color:var(--ink-faint);border:1px dashed var(--line);border-radius:3px;padding:0 5px}
+
+  .toolbar{
+    display:flex;flex-wrap:wrap;align-items:center;gap:8px;
+    padding:9px 12px;border-bottom:1px solid var(--line);background:var(--surface-2);
+  }
+  .btn{
+    font:inherit;font-size:12.5px;color:var(--ink);background:var(--surface);
+    border:1px solid var(--line);border-radius:5px;padding:5px 11px;cursor:pointer;
+  }
+  .btn:hover{border-color:var(--accent-line);background:var(--accent-soft)}
+  .btn:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+  .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  .btn.primary:hover{filter:brightness(1.08)}
+  .btn.launch{border-color:var(--accent-line);color:var(--accent);font-weight:600}
+  .field{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--ink-muted)}
+  .field input[type=text]{
+    font:inherit;font-size:13px;color:var(--ink);background:var(--surface);
+    border:1px solid var(--line);border-radius:5px;padding:5px 9px;width:170px;
+  }
+
+  .split{display:grid;grid-template-columns:212px minmax(0,1fr)}
+
+  .lib{border-right:1px solid var(--line);background:var(--surface-2);display:flex;flex-direction:column;min-height:340px}
+  .lib h2{
+    margin:0;padding:9px 12px 7px;font-size:11px;font-weight:700;letter-spacing:.08em;
+    text-transform:uppercase;color:var(--ink-faint);border-bottom:1px solid var(--line-soft);
+    display:flex;justify-content:space-between;align-items:center;
+  }
+  .lib h2 span{font-weight:500;letter-spacing:0;text-transform:none;font-size:11px}
+  .songlist{list-style:none;margin:0;padding:6px;display:flex;flex-direction:column;gap:2px}
+  .song{
+    display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:5px;
+    font-size:12.5px;cursor:pointer;border:1px solid transparent;
+  }
+  .song:hover{background:var(--surface-3)}
+  .song[aria-current="true"]{background:var(--accent-soft);border-color:var(--accent-line);font-weight:600}
+  .song .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .song .mt{font-size:11px;color:var(--ink-faint);flex:none}
+  .song .del{flex:none;opacity:0;color:var(--ink-faint);border:0;background:none;cursor:pointer;font-size:14px;line-height:1;padding:2px 3px;border-radius:3px}
+  .song:hover .del{opacity:1}
+  .song .del:hover{color:var(--warn);background:var(--warn-soft)}
+  .libfoot{margin-top:auto;padding:8px 12px;border-top:1px solid var(--line-soft);font-size:11px;color:var(--ink-faint)}
+
+  .lanes{display:flex;flex-direction:column;min-width:0}
+  .lane{border-bottom:1px solid var(--line)}
+  .lane:last-of-type{border-bottom:0}
+
+  .lhead{
+    display:flex;flex-wrap:wrap;align-items:center;gap:8px;
+    padding:6px 10px;background:var(--surface-2);border-bottom:1px solid var(--line-soft);
+  }
+  .lane.b .lhead{background:var(--surface)}
+  .lhead .num{font-size:11px;font-weight:700;color:var(--ink-faint);min-width:20px}
+  .lhead .tname{font-size:12.5px;font-weight:650;min-width:62px}
+  .lhead .ctl{display:flex;align-items:center;gap:5px;font-size:11.5px;color:var(--ink-muted)}
+  .lhead select{
+    font:inherit;font-size:11.5px;color:var(--ink);background:var(--surface);
+    border:1px solid var(--line);border-radius:4px;padding:3px 6px;max-width:150px;
+  }
+  .lhead .stepper{display:flex;align-items:center;border:1px solid var(--line);border-radius:4px;overflow:hidden;background:var(--surface)}
+  .lhead .stepper button{
+    font:inherit;font-size:12px;line-height:1;color:var(--ink-muted);background:none;border:0;
+    padding:4px 7px;cursor:pointer;
+  }
+  .lhead .stepper button:hover{background:var(--accent-soft);color:var(--accent)}
+  .lhead .stepper .val{min-width:54px;text-align:center;font-size:11.5px;border-inline:1px solid var(--line);padding:3px 0}
+  .iconbtn{
+    font:inherit;font-size:11.5px;color:var(--ink-muted);background:var(--surface);
+    border:1px solid var(--line);border-radius:4px;padding:3px 7px;cursor:pointer;
+  }
+  .iconbtn:hover{border-color:var(--accent-line);color:var(--accent);background:var(--accent-soft)}
+  .iconbtn[aria-pressed="true"]{background:var(--accent-soft);border-color:var(--accent-line);color:var(--accent)}
+  .iconbtn.danger:hover{border-color:var(--warn-line);color:var(--warn);background:var(--warn-soft)}
+  .lhead .grp{display:flex;align-items:center;gap:5px;margin-left:auto}
+
+  .roll{position:relative;overflow:hidden;background:var(--lane-a)}
+  .lane.b .roll{background:var(--lane-b)}
+  .lane[data-collapsed="true"] .roll{display:none}
+  .lane[data-collapsed="true"] .lhead{border-bottom:0}
+  .roll canvas{display:block}
+
+  .lane[data-collapsed="true"] .strip{display:flex;align-items:center;gap:8px;padding:3px 10px 5px;background:var(--lane-a)}
+  .lane:not([data-collapsed="true"]) .strip{display:none}
+  .strip .mini{height:9px;border-radius:2px;background:var(--note);opacity:.45;flex:1}
+  .strip .lbl{font-size:10.5px;color:var(--ink-faint);flex:none}
+
+  .rangebar{
+    position:absolute;top:0;height:100%;background:var(--accent-soft);
+    border-inline:1px solid var(--accent);opacity:.7;pointer-events:none;display:none;
+  }
+  .chip{
+    position:absolute;top:4px;display:none;align-items:center;gap:6px;
+    background:var(--surface);border:1px solid var(--accent-line);border-radius:5px;
+    padding:3px 4px 3px 8px;font-size:11.5px;box-shadow:var(--shadow);z-index:3;white-space:nowrap;
+  }
+  .chip[data-show="true"]{display:flex}
+  .chip .cn{font-size:11px;color:var(--ink-muted)}
+  .chip button{
+    font:inherit;font-size:11.5px;border-radius:4px;padding:2px 7px;cursor:pointer;
+    background:var(--warn-soft);border:1px solid var(--warn-line);color:var(--warn);
+  }
+
+  /* ---------- 小节导航 ---------- */
+  .nav{
+    display:flex;align-items:center;gap:12px;padding:9px 12px;
+    background:var(--surface-2);border-top:1px solid var(--line);
+  }
+  .nav .nl{font-size:11px;font-weight:700;letter-spacing:.06em;color:var(--ink-faint);flex:none}
+  .navtrack{
+    position:relative;flex:1;min-width:150px;height:30px;
+    background:var(--surface);border:1px solid var(--line);border-radius:4px;
+    cursor:pointer;overflow:hidden;
+  }
+  .navtrack canvas{position:absolute;inset:0;display:block}
+  .navthumb{
+    position:absolute;top:0;bottom:0;border-radius:3px;pointer-events:none;
+    background:var(--accent-soft);border:1px solid var(--accent-line);
+  }
+  .navpos{font-size:12px;color:var(--ink-muted);flex:none;white-space:nowrap}
+  .jump{display:flex;align-items:center;gap:5px;font-size:12px;color:var(--ink-muted);flex:none}
+  .jump input{
+    font-family:"Cascadia Mono",Consolas,ui-monospace,monospace;font-size:12.5px;color:var(--ink);
+    background:var(--surface);border:1px solid var(--line);border-radius:4px;
+    padding:3px 6px;width:46px;text-align:right;font-variant-numeric:tabular-nums;
+  }
+
+  .readout{
+    display:flex;flex-wrap:wrap;align-items:center;gap:0 16px;padding:6px 12px;
+    background:var(--surface-2);border-top:1px solid var(--line);font-size:12px;color:var(--ink-muted);
+    min-height:31px;
+  }
+  .readout .k{color:var(--ink-faint);font-size:11px;letter-spacing:.04em;text-transform:uppercase}
+  .readout .v{color:var(--ink);font-weight:600}
+  .readout .hint{margin-left:auto;font-size:11px;color:var(--ink-faint);text-align:right}
+
+  .transport{
+    display:flex;flex-wrap:wrap;align-items:center;gap:12px;
+    padding:9px 12px;background:var(--surface-3);border-top:1px solid var(--line);
+  }
+  .tbtn{
+    font:inherit;font-size:13px;display:inline-flex;align-items:center;gap:6px;
+    background:var(--surface);border:1px solid var(--line);border-radius:5px;
+    padding:5px 13px;cursor:pointer;color:var(--ink);
+  }
+  .tbtn:hover{border-color:var(--accent-line);background:var(--accent-soft)}
+  .tbtn:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+  .tbtn.play{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+  .tbtn.play:hover{filter:brightness(1.08)}
+  .tbtn[aria-pressed="true"]{background:var(--stop-soft);border-color:var(--stop-line);color:var(--stop)}
+  .bpm{display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--ink-muted)}
+  .bpm input{
+    font-family:"Cascadia Mono",Consolas,ui-monospace,monospace;font-size:15px;font-weight:650;
+    color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:5px;
+    padding:3px 8px;width:66px;text-align:right;font-variant-numeric:tabular-nums;
+  }
+  .bpm .unit{font-size:11px;color:var(--ink-faint)}
+  .noloop{margin-left:auto;font-size:11.5px;color:var(--ink-faint)}
+  .noloop b{color:var(--ink-muted);font-weight:600}
+
+  /* ---------- 演奏器 ---------- */
+  .perfwrap{display:grid;grid-template-columns:minmax(0,430px) minmax(0,1fr);gap:18px;align-items:start}
+  .perf{background:var(--surface);border:1px solid var(--line);border-radius:8px;overflow:hidden;box-shadow:var(--shadow)}
+  .perfbody{padding:14px;display:flex;flex-direction:column;gap:11px}
+
+  .prow{display:flex;align-items:center;gap:10px;font-size:12.5px;color:var(--ink-muted)}
+  .prow .lb{width:64px;flex:none;color:var(--ink-faint);font-size:11.5px}
+  .prow .val{flex:1;min-width:0;font-size:13px;font-weight:600;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .prow select{
+    font:inherit;font-size:12.5px;color:var(--ink);background:var(--surface);
+    border:1px solid var(--line);border-radius:5px;padding:5px 7px;flex:1;min-width:0;
+  }
+  .prow .mini-btn{
+    font:inherit;font-size:11.5px;color:var(--ink-muted);background:var(--surface);
+    border:1px solid var(--line);border-radius:5px;padding:4px 9px;cursor:pointer;flex:none;
+  }
+  .prow .mini-btn:hover{border-color:var(--accent-line);color:var(--accent);background:var(--accent-soft)}
+  .phint{margin:-4px 0 0 74px;font-size:11px;color:var(--ink-faint);line-height:1.4}
+
+  .rule{height:1px;background:var(--line-soft)}
+
+  .big{
+    font:inherit;font-size:15px;font-weight:650;border-radius:6px;padding:12px;cursor:pointer;
+    display:flex;align-items:center;justify-content:center;gap:8px;
+  }
+  .big.start{background:var(--accent);border:1px solid var(--accent);color:#fff}
+  .big.start:hover{filter:brightness(1.08)}
+  .big.stop{background:var(--stop-soft);border:1px solid var(--stop-line);color:var(--stop)}
+  .big.stop:hover{border-color:var(--stop)}
+  .big .hint{font-size:11px;font-weight:500;opacity:.8}
+  .big.start[disabled]{background:var(--line);border-color:var(--line);color:var(--ink-faint);cursor:not-allowed}
+  .big.start[disabled]:hover{filter:none}
+
+  .perf.empty{opacity:.82}
+  .emptybox{
+    display:flex;flex-direction:column;gap:7px;align-items:flex-start;
+    background:var(--warn-soft,var(--surface-2));border:1px solid var(--warn-line,var(--line));
+    border-radius:6px;padding:11px 12px;font-size:12px;color:var(--ink-muted);line-height:1.55;
+  }
+  .emptybox b{font-size:12.5px;color:var(--ink)}
+  .emptybox .mini-btn{margin-top:2px}
+
+  .status{
+    display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--ink-muted);
+    background:var(--surface-2);border:1px solid var(--line-soft);border-radius:5px;padding:7px 10px;
+  }
+  .status .dot{width:7px;height:7px;border-radius:50%;background:var(--ink-faint);flex:none}
+  .status[data-state="ready"] .dot{background:var(--accent)}
+  .status[data-state="run"] .dot{background:var(--stop)}
+  .status b{color:var(--ink);font-weight:600}
+
+  .risk{
+    display:flex;align-items:flex-start;gap:7px;
+    font-size:11.5px;color:var(--warn);background:var(--warn-soft);
+    border:1px solid var(--warn-line);border-radius:5px;padding:7px 9px;
+  }
+  .risk b{font-weight:700}
+
+  /* ---------- 游戏画面示意 + 悬浮层 ---------- */
+  .gamewin{
+    --gw-bg:#101720; --gw-panel:#1A2431; --gw-line:#2A3849; --gw-ink:#7E8FA3;
+    background:var(--gw-bg); border:1px solid var(--line); border-radius:8px;
+    overflow:hidden; box-shadow:var(--shadow); position:relative; min-height:330px;
+  }
+  .gamewin .gbar{
+    display:flex;align-items:center;gap:8px;padding:7px 12px;
+    background:var(--gw-panel);border-bottom:1px solid var(--gw-line);
+    font-size:11.5px;color:var(--gw-ink);
+  }
+  .gamewin .gbar .gt{color:#B9C7D6;font-weight:600}
+  .gamewin .gbar .gd{margin-left:auto;display:flex;gap:6px}
+  .gamewin .gbar .gd i{width:9px;height:9px;border-radius:50%;background:var(--gw-line);display:block}
+  .ghud{position:relative;padding:16px;display:flex;flex-direction:column;gap:14px}
+  .ghud .row{display:flex;gap:12px}
+  .ghud .blk{background:var(--gw-panel);border:1px solid var(--gw-line);border-radius:5px;height:52px;flex:1}
+  .ghud .blk.tall{height:104px}
+  .ghud .hintline{
+    position:absolute;inset:auto 16px 14px 16px;text-align:center;
+    font-size:11px;color:#5C6B7D;border-top:1px dashed var(--gw-line);padding-top:10px;
+  }
+
+  .ovl{
+    position:absolute;top:74px;left:50%;transform:translateX(-50%);
+    background:rgba(12,18,26,.9);border:1px solid rgba(150,175,200,.32);border-radius:9px;
+    padding:11px 22px;text-align:center;color:#E8EEF6;min-width:186px;
+    box-shadow:0 10px 30px rgba(0,0,0,.5);
+  }
+  .ovl .big-num{
+    font-family:"Cascadia Mono",Consolas,ui-monospace,monospace;
+    font-size:44px;font-weight:700;line-height:1;letter-spacing:-.02em;
+  }
+  .ovl .cap{font-size:12px;color:#A9BACB;margin-top:5px}
+  .ovl .panic-hint{
+    font-size:10.5px;color:#7E8FA3;margin-top:7px;
+    border-top:1px solid rgba(150,175,200,.2);padding-top:6px;
+  }
+  .ovl .panic-hint b{color:#C8D6E4}
+  .ovl .now{
+    font-family:"Cascadia Mono",Consolas,ui-monospace,monospace;
+    font-size:26px;font-weight:700;line-height:1.1;
+  }
+  .ovl .track{height:5px;border-radius:3px;background:rgba(150,175,200,.24);margin-top:8px;overflow:hidden}
+  .ovl .track i{display:block;height:100%;width:31%;background:#6FA8DC;border-radius:3px}
+  .ovl .tsec{font-family:"Cascadia Mono",Consolas,ui-monospace,monospace;font-size:10.5px;color:#8C9CAE;margin-top:5px}
+
+  .ovlrow{display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start;margin-top:14px}
+  .ovldemo{
+    background:var(--gw-bg);border:1px solid var(--line);border-radius:8px;padding:16px;
+    display:flex;flex-direction:column;align-items:center;gap:9px;flex:1;min-width:212px;
+  }
+  .ovldemo .lab{font-size:11px;color:var(--gw-ink);letter-spacing:.05em}
+  .ovldemo .ovl{position:static;transform:none}
+
+  /* ---------- 标注 ---------- */
+  .annots{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:10px}
+  .annot{
+    background:var(--surface);border:1px solid var(--annot-line);border-left-width:3px;
+    border-radius:5px;padding:9px 11px;
+  }
+  .annot .n{
+    display:inline-flex;align-items:center;justify-content:center;
+    width:17px;height:17px;border-radius:50%;background:var(--annot);color:var(--surface);
+    font-size:10.5px;font-weight:700;margin-right:6px;vertical-align:1px;
+  }
+  .annot .t{font-size:12.5px;font-weight:650}
+  .annot p{margin:4px 0 0;font-size:12px;color:var(--ink-muted);line-height:1.5}
+  .annot code{
+    font-family:"Cascadia Mono",Consolas,ui-monospace,monospace;font-size:11.5px;
+    background:var(--surface-3);border-radius:3px;padding:0 4px;
+  }
+  .annot kbd{
+    font-family:"Cascadia Mono",Consolas,ui-monospace,monospace;font-size:11px;
+    background:var(--surface-3);border:1px solid var(--line);border-bottom-width:2px;
+    border-radius:3px;padding:0 4px;
+  }
+
+  @media (max-width:900px){
+    .perfwrap{grid-template-columns:minmax(0,1fr)}
+  }
+  @media (max-width:760px){
+    .split{grid-template-columns:minmax(0,1fr)}
+    .lib{border-right:0;border-bottom:1px solid var(--line);min-height:0}
+    .songlist{max-height:150px;overflow-y:auto}
+    .lhead .grp{margin-left:0;width:100%}
+    .nav{flex-wrap:wrap}
+  }
+</style>
+
+<div class="page">
+
+  <div class="phead">
+    <div>
+      <h1>MIDI 编辑器线框</h1>
+      <p class="sub">两个窗口：编辑器（编辑 + 试听）和演奏器（把音符转成鼠标键盘输入）。卷帘固定显示 4 小节、不缩放，靠下方导航条定位。紫色标注是设计决定。</p>
+    </div>
+    <span class="tag">示例数据 · 非真实曲目</span>
+  </div>
+
+  <!-- ================= 编辑器 ================= -->
+  <section class="sect">
+    <h2>窗口一 · 编辑器</h2>
+
+    <div class="win">
+      <div class="wintitle">
+        <span class="name">MIDI 演奏编辑器</span>
+        <span class="placeholder">应用名待定</span>
+        <span class="dots"><i></i><i></i><i></i></span>
+      </div>
+
+      <div class="toolbar">
+        <button class="btn primary">导入 MIDI…</button>
+        <button class="btn">保存</button>
+        <button class="btn">另存为…</button>
+        <span class="field">歌曲名 <input type="text" value="起风了"></span>
+        <button class="btn launch" style="margin-left:auto">演奏器…</button>
+      </div>
+
+      <div class="split">
+        <aside class="lib">
+          <h2>歌曲库 <span>12 首</span></h2>
+          <ul class="songlist">
+            <li class="song" aria-current="true"><span class="nm">起风了</span><span class="mt mono">4:32</span><button class="del" title="删除">×</button></li>
+            <li class="song"><span class="nm">夜空中最亮的星</span><span class="mt mono">4:08</span><button class="del" title="删除">×</button></li>
+            <li class="song"><span class="nm">卡农（简化版）</span><span class="mt mono">3:21</span><button class="del" title="删除">×</button></li>
+            <li class="song"><span class="nm">天空之城</span><span class="mt mono">3:47</span><button class="del" title="删除">×</button></li>
+            <li class="song"><span class="nm">千本樱</span><span class="mt mono">4:01</span><button class="del" title="删除">×</button></li>
+            <li class="song"><span class="nm">告白气球</span><span class="mt mono">3:35</span><button class="del" title="删除">×</button></li>
+          </ul>
+          <div class="libfoot">导入的曲子存进这个文件夹，改名就是改文件名</div>
+        </aside>
+
+        <div class="lanes" id="lanes">
+          <section class="lane a" data-track="0">
+            <div class="lhead">
+              <span class="num">01</span>
+              <span class="tname">主旋律</span>
+              <span class="ctl">音色 <select><option>口琴 · GM 23</option></select></span>
+              <span class="ctl">移调 <span class="stepper"><button>−</button><span class="val mono">0 半音</span><button>+</button></span></span>
+              <span class="grp">
+                <button class="iconbtn" data-role="solo" aria-pressed="true">只看这条</button>
+                <button class="iconbtn" data-role="fold">折叠</button>
+                <button class="iconbtn danger" data-role="del">删除轨</button>
+              </span>
+            </div>
+            <div class="roll" data-track="0"><div class="rangebar"></div><div class="chip"><span class="cn"></span><button>删除选中段落</button></div></div>
+            <div class="strip"><span class="lbl">已折叠</span><span class="mini"></span></div>
+          </section>
+
+          <section class="lane b" data-track="1">
+            <div class="lhead">
+              <span class="num">02</span>
+              <span class="tname">和弦</span>
+              <span class="ctl">音色 <select><option>尼龙弦吉他 · GM 25</option></select></span>
+              <span class="ctl">移调 <span class="stepper"><button>−</button><span class="val mono">−3 半音</span><button>+</button></span></span>
+              <span class="grp">
+                <button class="iconbtn" data-role="solo" aria-pressed="false">只看这条</button>
+                <button class="iconbtn" data-role="fold">折叠</button>
+                <button class="iconbtn danger" data-role="del">删除轨</button>
+              </span>
+            </div>
+            <div class="roll" data-track="1"><div class="rangebar"></div><div class="chip"><span class="cn"></span><button>删除选中段落</button></div></div>
+            <div class="strip"><span class="lbl">已折叠</span><span class="mini"></span></div>
+          </section>
+
+          <section class="lane a" data-track="2">
+            <div class="lhead">
+              <span class="num">03</span>
+              <span class="tname">贝斯</span>
+              <span class="ctl">音色 <select><option>指弹贝斯 · GM 34</option></select></span>
+              <span class="ctl">移调 <span class="stepper"><button>−</button><span class="val mono">0 半音</span><button>+</button></span></span>
+              <span class="grp">
+                <button class="iconbtn" data-role="solo" aria-pressed="false">只看这条</button>
+                <button class="iconbtn" data-role="fold">折叠</button>
+                <button class="iconbtn danger" data-role="del">删除轨</button>
+              </span>
+            </div>
+            <div class="roll" data-track="2"><div class="rangebar"></div><div class="chip"><span class="cn"></span><button>删除选中段落</button></div></div>
+            <div class="strip"><span class="lbl">已折叠</span><span class="mini"></span></div>
+          </section>
+
+          <section class="lane b" data-track="3">
+            <div class="lhead">
+              <span class="num">04</span>
+              <span class="tname">鼓点</span>
+              <span class="ctl">音色 <select><option>标准鼓组 · 通道 10</option></select></span>
+              <span class="ctl">移调 <span class="stepper"><button>−</button><span class="val mono">— 不适用</span><button>+</button></span></span>
+              <span class="grp">
+                <button class="iconbtn" data-role="solo" aria-pressed="false">只看这条</button>
+                <button class="iconbtn" data-role="fold">折叠</button>
+                <button class="iconbtn danger" data-role="del">删除轨</button>
+              </span>
+            </div>
+            <div class="roll" data-track="3"><div class="rangebar"></div><div class="chip"><span class="cn"></span><button>删除选中段落</button></div></div>
+            <div class="strip"><span class="lbl">已折叠</span><span class="mini"></span></div>
+          </section>
+        </div>
+      </div>
+
+      <div class="nav">
+        <span class="nl">小节导航</span>
+        <div class="navtrack" id="navtrack" title="点击或拖动定位">
+          <canvas id="navcv"></canvas>
+          <div class="navthumb" id="navthumb"></div>
+        </div>
+        <span class="navpos mono" id="navlabel">第 1–4 小节 / 共 24</span>
+        <label class="jump">跳到 <input type="text" id="jump" class="mono" value="1"> 小节</label>
+      </div>
+
+      <div class="readout">
+        <span><span class="k">悬停</span> <span class="v" id="ro-pitch">—</span></span>
+        <span><span class="k">小节</span> <span class="v mono" id="ro-bar">—</span></span>
+        <span><span class="k">拍位</span> <span class="v mono" id="ro-pos">—</span></span>
+        <span><span class="k">选中</span> <span class="v mono" id="ro-sel">—</span></span>
+        <span class="hint">拖音符改音高和位置 · 拖右边缘改时值 · 空白处横向拖拽选中一段时间 · 选中后用 <kbd>←</kbd><kbd>→</kbd><kbd>↑</kbd><kbd>↓</kbd> 微调，<kbd>Shift</kbd>+<kbd>←</kbd><kbd>→</kbd> 改时值</span>
+      </div>
+
+      <div class="transport">
+        <button class="tbtn play" id="btnplay">▶ 从当前位置播放</button>
+        <button class="tbtn" id="btnstop">■ 停止</button>
+        <span class="bpm">速度 <input type="text" id="bpm" class="mono" value="76"> <span class="unit">拍/分</span></span>
+        <span class="bpm" style="gap:5px">位置 <b class="mono" id="clk" style="color:var(--ink)">1 / 24 小节</b></span>
+        <span class="noloop"><b>没有循环</b> · 放完自动停止并松开所有按键</span>
+      </div>
+    </div>
+
+    <div class="annots">
+      <div class="annot">
+        <span class="n">1</span><span class="t">固定 4 小节，不缩放</span>
+        <p>每屏恒定 4 小节，窗口变宽是每小节变宽（不是显示更多小节）。没有缩放级别，手有肌肉记忆，一屏就是 4 小节。代价是密集段落点不准 —— 用第 2 条解决。</p>
+      </div>
+      <div class="annot">
+        <span class="n">2</span><span class="t">键盘微调替代缩放</span>
+        <p>点音符不需要点准，选中后 <kbd>←</kbd><kbd>→</kbd> 挪时间（按 16 分音符）、<kbd>↑</kbd><kbd>↓</kbd> 挪音高、<kbd>Shift</kbd>+<kbd>←</kbd><kbd>→</kbd> 改时值。概览交给固定视图，精确交给键盘，两者不互相拖累。</p>
+      </div>
+      <div class="annot">
+        <span class="n">3</span><span class="t">导航条按小节吸附</span>
+        <p>下方那条是整曲缩略图，柱子高度＝该小节音符多少，所以看密度就知道副歌在哪。拖动时吸附到小节线，不会停在半小节上，而且<b>拖动过程中红线（播放头）会隐藏</b>——不然它跟着吸附一格格跳，很烦。松手后红线回到落点。右边可以直接输入小节号跳过去。</p>
+      </div>
+      <div class="annot">
+        <span class="n">4</span><span class="t">按播放看它自己流过去</span>
+        <p>播放时视图连续滚动，把播放头保持在屏幕左侧约 1/3 处（留出前瞻）。停止时视图自动对齐到小节线——你按停止就是要改东西，不该让你面对半截小节。把速度改成 152 再按播放，播放头会走两倍快。</p>
+      </div>
+      <div class="annot">
+        <span class="n">5</span><span class="t">垂直方向也固定</span>
+        <p>每条轨行高恒定，并且只显示这条轨<b>实际用到的音域</b>（自动裁到最低音到最高音）。所以一个只用 8 个音的贝斯轨不会白占 3 个八度的高度，4 条堆叠也塞得下。</p>
+      </div>
+      <div class="annot">
+        <span class="n">6</span><span class="t">悬停显示音高</span>
+        <p>鼠标移到音符上，读数条显示音名、小节、拍位、时值。需求 1.5 明确要的。</p>
+      </div>
+      <div class="annot">
+        <span class="n">7</span><span class="t">删除某一段落</span>
+        <p>在卷帘空白处横向拖拽框出一段时间，弹出「删除选中段落」。五个参考仓库里<b>没有一个</b>实现了这个，是全新功能。</p>
+      </div>
+      <div class="annot">
+        <span class="n">8</span><span class="t">BPM 是数字，不是百分比</span>
+        <p>写 <code>76</code>，单位是拍/分。音符内部存 tick，改这个数字只改开头那一个速度值，音符本身一动不动。</p>
+      </div>
+      <div class="annot">
+        <span class="n">9</span><span class="t">变调是每条轨的偏移量</span>
+        <p>改这个值<b>不改动音符</b>，只在播放和导出时应用。可以随便拖、随时归零，不会毁掉原曲。鼓轨不适用（打击乐没有音高）。</p>
+      </div>
+      <div class="annot">
+        <span class="n">10</span><span class="t">播放留在编辑器，演奏搬出去</span>
+        <p>底部播放条保留（改完能马上试听）。<b>演奏</b>那套搬到了右上角「演奏器…」打开的独立窗口。</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= 演奏器 ================= -->
+  <section class="sect">
+    <h2>窗口二 · 演奏器（独立窗口，置顶）</h2>
+
+    <div class="perfwrap">
+      <div class="perf">
+        <div class="wintitle">
+          <span class="name">演奏器</span>
+          <span class="dots"><i></i><i></i><i></i></span>
+        </div>
+
+        <div class="perfbody">
+          <div class="prow">
+            <span class="lb">曲目</span>
+            <span class="val">起风了</span>
+            <button class="mini-btn">换一首…</button>
+          </div>
+          <div class="prow">
+            <span class="lb">演奏轨</span>
+            <select>
+              <option>01 主旋律 · 128 音</option>
+              <option>03 低音线 · 96 音</option>
+            </select>
+          </div>
+          <div class="phint">只列出单声部轨 · 4 条轨里 2 条可演奏</div>
+          <div class="prow">
+            <span class="lb">目标窗口</span>
+            <select><option>三角洲行动</option></select>
+          </div>
+          <div class="prow">
+            <span class="lb">倒计时</span>
+            <select><option>3 秒</option><option>5 秒</option><option>10 秒</option></select>
+          </div>
+
+          <div class="rule"></div>
+
+          <button class="big start">▶ 开始演奏 <span class="hint">F6</span></button>
+          <button class="big stop">■ 急停</button>
+
+          <div class="status" data-state="ready">
+            <span class="dot"></span>
+            <span>就绪 · <b>4:32</b> · 共 <b>312</b> 个音 · 音域 <b class="mono">C4 – A5</b></span>
+          </div>
+
+          <div class="risk">
+            <span>⚠</span>
+            <span><b>虚拟输入违反游戏规则，可能导致封号，风险自负。</b>演奏期间随时按 <b>F6</b> 急停。</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="gamewin">
+        <div class="gbar">
+          <span class="gt">三角洲行动</span>
+          <span>（游戏窗口示意）</span>
+          <span class="gd"><i></i><i></i><i></i></span>
+        </div>
+        <div class="ghud">
+          <div class="row">
+            <div class="blk tall"></div>
+            <div class="blk tall"></div>
+          </div>
+          <div class="row">
+            <div class="blk"></div>
+            <div class="blk"></div>
+            <div class="blk"></div>
+          </div>
+          <div class="hintline">悬浮层置顶显示在游戏画面上，不抢焦点</div>
+        </div>
+
+        <div class="ovl">
+          <div class="big-num">3</div>
+          <div class="cap">准备演奏 · 切到游戏窗口</div>
+          <div class="panic-hint">按 <b>F6</b> 取消 / 急停</div>
+        </div>
+      </div>
+
+      <div class="perf empty">
+        <div class="wintitle">
+          <span class="name">演奏器 · 空状态</span>
+          <span class="dots"><i></i><i></i><i></i></span>
+        </div>
+        <div class="perfbody">
+          <div class="prow">
+            <span class="lb">演奏轨</span>
+            <select disabled><option>— 无可演奏的轨 —</option></select>
+          </div>
+          <div class="emptybox">
+            <b>这首歌没有可演奏的单声部轨。</b>
+            <span>游戏乐器同时只能响一个音，多声部轨发出去会糊成一片，所以不列出来。<br>
+            回编辑器里删掉多余声部，或者换一首。</span>
+            <button class="mini-btn">去编辑器…</button>
+          </div>
+          <button class="big start" disabled>▶ 开始演奏 <span class="hint">F6</span></button>
+        </div>
+      </div>
+    </div>
+
+    <div class="ovlrow">
+      <div class="ovldemo">
+        <span class="lab">悬浮层 · 倒计时</span>
+        <div class="ovl">
+          <div class="big-num">3</div>
+          <div class="cap">准备演奏</div>
+          <div class="panic-hint">按 <b>F6</b> 取消</div>
+        </div>
+      </div>
+      <div class="ovldemo">
+        <span class="lab">悬浮层 · 演奏中</span>
+        <div class="ovl">
+          <div class="now">♪ G4</div>
+          <div class="track"><i></i></div>
+          <div class="tsec">0:42 / 4:32</div>
+          <div class="panic-hint">按 <b>F6</b> 急停</div>
+        </div>
+      </div>
+      <div class="ovldemo" style="justify-content:center;text-align:center">
+        <span class="lab">悬浮层 · 已停止</span>
+        <div class="ovl">
+          <div class="now" style="font-size:17px;color:#C8D6E4">已停止</div>
+          <div class="tsec" style="margin-top:7px">已松开所有按键</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="annots">
+      <div class="annot">
+        <span class="n">11</span><span class="t">没有循环，放完就停</span>
+        <p>循环控件整个去掉了。发出去的是真实按键事件，循环失控等于往游戏里持续灌输入。播到曲尾自动停止，并<b>主动松开所有按键和鼠标</b>。</p>
+      </div>
+      <div class="annot">
+        <span class="n">12</span><span class="t">看门狗兜底</span>
+        <p>去掉循环不等于安全——单次播放也会卡（F6 线程挂了、note-off 丢了）。所以：F6 挂在独立的低级钩子线程上，UI 卡死也能响应；另有一个硬超时，曲长 +5 秒后无条件停并松键。</p>
+      </div>
+      <div class="annot">
+        <span class="n">13</span><span class="t">不读游戏进程</span>
+        <p>程序全程只做一件事：往系统里发按键。不枚举进程、不查前台窗口、不碰游戏内存。代价是没有「失焦自动急停」这条兜底（它需要知道谁在前台），发错窗口只能靠你在倒计时结束前切好。</p>
+      </div>
+      <div class="annot">
+        <span class="n">14</span><span class="t">只发一条轨</span>
+        <p>游戏乐器同时只能响一个音，所以多轨可以一起<b>播</b>给你听，但<b>发按键</b>时只能挑一条。<br>
+        「演奏轨」下拉框<b>只列出单声部轨</b>——判定看的是<b>起音是否撞在一起</b>（同一瞬间 ±30ms 内有两个音 = 和弦），不是看时值有没有重叠，否则连奏的旋律会被误判成多声部。<br>
+        一条都没有时下拉框锁死，直接告诉你去编辑器删声部。</p>
+      </div>
+      <div class="annot">
+        <span class="n">15</span><span class="t">悬浮倒计时，不抢焦点</span>
+        <p>你按下开始就会切到游戏，所以演奏器窗口本身看不见。<b>倒计时必须浮在游戏画面上</b>。悬浮层始终置顶，但绝不抢走游戏窗口的焦点（否则按键会发错地方）。</p>
+      </div>
+      <div class="annot">
+        <span class="n">16</span><span class="t">启动前自检</span>
+        <p>点「开始演奏」前检查两件事：程序是否以管理员运行（否则按键会被系统拦掉）、输入法是否在中文状态（中文输入法会吞掉按键）。这两条是参考实现踩过的坑。</p>
+      </div>
+    </div>
+  </section>
+
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  var NOTE_NAMES = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
+  function pitchName(p){ return NOTE_NAMES[((p % 12) + 12) % 12] + (Math.floor(p / 12) - 1); }
+
+  var SONG_BARS = 24, STEPS_PER_BAR = 16;
+  var SONG_STEPS = SONG_BARS * STEPS_PER_BAR;
+  var BARS_VISIBLE = 4, VIS_STEPS = BARS_VISIBLE * STEPS_PER_BAR;
+  var RULER_H = 18, ROW_H = 7;
+
+  // 每条轨只画它实际用到的音域（标注 5）
+  var RANGES = [ {lo:52,hi:80}, {lo:40,hi:56}, {lo:28,hi:38}, {lo:35,hi:44} ];
+
+  // ---- 示例数据（程序生成，非真实曲目） ----
+  var CHORDS = [
+    [0,4,7],[0,4,7],[-3,0,4],[-3,0,4],
+    [-5,-1,2],[-5,-1,2],[-7,-3,0],[-7,-3,0],
+    [-5,-1,2],[-5,-1,2],[-3,0,4],[-3,0,4],
+    [-5,-1,2],[-5,-1,2],[-3,0,4],[-3,0,4],
+    [0,4,7],[0,4,7],[-3,0,4],[-3,0,4],
+    [-5,-1,2],[-5,-1,2],[-3,0,4],[0,4,7]
+  ];
+  var MEL = [
+    [[0,4,0],[4,4,1],[8,8,2]],
+    [[0,6,2],[6,2,1],[8,4,0],[12,4,1]],
+    [[0,8,1],[8,8,2]],
+    [[0,4,0],[4,2,1],[6,2,2],[8,8,0]],
+    [[0,2,2],[2,2,1],[4,4,0],[8,4,1],[12,4,2]],
+    [[0,4,1],[4,4,2],[8,4,0],[12,4,1]]
+  ];
+  var ROOT = 60;
+
+  var TRACKS = (function(){
+    var melody = [], chords = [], bass = [], drums = [];
+    for (var b = 0; b < SONG_BARS; b++){
+      var ch = CHORDS[b], s = b * STEPS_PER_BAR;
+      var oct = (((b / 4) | 0) % 2) ? 0 : 12;
+      var mel = MEL[b % MEL.length];
+      for (var i = 0; i < mel.length; i++){
+        melody.push([ROOT + oct + ch[mel[i][2]], s + mel[i][0], mel[i][1]]);
+      }
+      for (var j = 0; j < 3; j++) chords.push([ROOT - 12 + ch[j], s, 16]);
+      bass.push([ROOT - 24 + ch[0], s, 8]);
+      bass.push([ROOT - 24 + ch[0], s + 8, 8]);
+      for (var k = 0; k < 8; k++) drums.push([42, s + k * 2, 2]);
+      drums.push([36, s, 2]);     drums.push([38, s + 4, 2]);
+      drums.push([36, s + 8, 2]); drums.push([38, s + 12, 2]);
+    }
+    return [melody, chords, bass, drums];
+  })();
+
+  var ALL_NOTES = TRACKS.reduce(function(a, t){ return a.concat(t); }, []);
+
+  // ---- 状态 ----
+  var posStep = 0;      // 播放头（16 分音符为单位）
+  var viewStep = 0;     // 屏幕左边缘的时间位置（浮点）
+  var bpm = 76;
+  var playing = false, rafId = 0, lastTs = 0;
+  var hidePlayhead = false;   // 拖导航条时藏起红线，免得跟着吸附一起跳
+
+  var navtrack  = document.getElementById("navtrack");
+  var navcv     = document.getElementById("navcv");
+  var navthumb  = document.getElementById("navthumb");
+  var navlabel  = document.getElementById("navlabel");
+  var jumpInput = document.getElementById("jump");
+  var bpmInput  = document.getElementById("bpm");
+  var clkEl     = document.getElementById("clk");
+  var btnPlay   = document.getElementById("btnplay");
+  var btnStop   = document.getElementById("btnstop");
+
+  var rollEls = Array.prototype.slice.call(document.querySelectorAll(".roll"));
+
+  function css(n){ return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
+  function clampView(v){ return Math.max(0, Math.min(SONG_STEPS - VIS_STEPS, v)); }
+  function stepW(el){ return el.clientWidth / VIS_STEPS; }
+  function songStepAt(el, clientX){
+    return viewStep + (clientX - el.getBoundingClientRect().left) / stepW(el);
+  }
+
+  // ---- 卷帘 ----
+  function renderRoll(rollEl){
+    var idx = +rollEl.dataset.track;
+    var lo = RANGES[idx].lo, hi = RANGES[idx].hi;
+    var pitches = hi - lo + 1;
+    var w = rollEl.clientWidth;
+    if (w < 40) return;
+    var sw = w / VIS_STEPS;
+    var h = RULER_H + pitches * ROW_H;
+    var dpr = window.devicePixelRatio || 1;
+
+    var cv = rollEl._cv;
+    if (!cv){
+      cv = document.createElement("canvas");
+      rollEl.insertBefore(cv, rollEl.firstChild);
+      rollEl._cv = cv;
+    }
+    if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)){
+      cv.width = Math.round(w * dpr);
+      cv.height = Math.round(h * dpr);
+    }
+    cv.style.width = w + "px";
+    cv.style.height = h + "px";
+
+    var g = cv.getContext("2d");
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, w, h);
+
+    var cGridBar = css("--grid-bar"), cGridBeat = css("--grid-beat");
+    var cNote = css("--note"), cEdge = css("--note-edge");
+    var cFaint = css("--ink-faint"), cPlay = css("--stop"), cLine = css("--line");
+
+    for (var p = lo; p <= hi; p++){
+      if ([1,3,6,8,10].indexOf(((p % 12) + 12) % 12) !== -1){
+        g.fillStyle = "rgba(128,140,155,.075)";
+        g.fillRect(0, RULER_H + (hi - p) * ROW_H, w, ROW_H);
+      }
+    }
+
+    var firstBar = Math.floor(viewStep / STEPS_PER_BAR);
+    for (var b = firstBar; b <= firstBar + BARS_VISIBLE + 1 && b <= SONG_BARS; b++){
+      var x = (b * STEPS_PER_BAR - viewStep) * sw;
+      if (x < -1 || x > w + 1) continue;
+      g.strokeStyle = cGridBar; g.lineWidth = 1;
+      g.beginPath(); g.moveTo(x + .5, 0); g.lineTo(x + .5, h); g.stroke();
+      for (var q = 1; q < 4; q++){
+        var bx = x + q * 4 * sw;
+        if (bx < 0 || bx > w) continue;
+        g.strokeStyle = cGridBeat; g.lineWidth = .7;
+        g.beginPath(); g.moveTo(bx + .5, RULER_H); g.lineTo(bx + .5, h); g.stroke();
+      }
+    }
+
+    g.font = '10px "Cascadia Mono", Consolas, monospace';
+    g.fillStyle = cFaint;
+    g.textBaseline = "middle";
+    for (var bb = firstBar; bb <= firstBar + BARS_VISIBLE + 1 && bb < SONG_BARS; bb++){
+      var lx = (bb * STEPS_PER_BAR - viewStep) * sw + 4;
+      if (lx < 0 || lx > w - 12) continue;
+      g.fillText(String(bb + 1), lx, RULER_H / 2 + .5);
+    }
+    g.strokeStyle = cLine; g.lineWidth = 1;
+    g.beginPath(); g.moveTo(0, RULER_H + .5); g.lineTo(w, RULER_H + .5); g.stroke();
+
+    var notes = TRACKS[idx], rects = [], viewEnd = viewStep + VIS_STEPS;
+    for (var n = 0; n < notes.length; n++){
+      var note = notes[n], pitch = note[0], start = note[1], dur = note[2];
+      if (start + dur <= viewStep || start >= viewEnd) continue;
+      if (pitch < lo || pitch > hi) continue;
+      var nx = (start - viewStep) * sw;
+      var nw = Math.max(2, dur * sw - 1);
+      var ny = RULER_H + (hi - pitch) * ROW_H;
+      g.fillStyle = cNote; g.fillRect(nx, ny + .8, nw, ROW_H - 1.6);
+      g.fillStyle = cEdge; g.fillRect(nx, ny + .8, nw, 1);
+      rects.push({ x: nx, y: ny, w: nw, h: ROW_H, pitch: pitch, start: start, dur: dur });
+    }
+    rollEl._rects = rects;
+
+    if (!hidePlayhead){
+      var px = (posStep - viewStep) * sw;
+      if (px >= 0 && px <= w){
+        g.fillStyle = cPlay;
+        g.fillRect(px - 1, 0, 2, h);
+      }
+    }
+  }
+
+  // ---- 导航条 ----
+  var barCounts = (function(){
+    var c = [];
+    for (var i = 0; i < SONG_BARS; i++) c.push(0);
+    for (var n = 0; n < ALL_NOTES.length; n++){
+      var b = Math.floor(ALL_NOTES[n][1] / STEPS_PER_BAR);
+      if (b >= 0 && b < SONG_BARS) c[b]++;
+    }
+    return c;
+  })();
+  var maxCount = Math.max.apply(null, barCounts) || 1;
+
+  function renderNav(){
+    var w = navtrack.clientWidth, h = navtrack.clientHeight;
+    if (w < 20 || h < 6) return;
+    var dpr = window.devicePixelRatio || 1;
+    if (navcv.width !== Math.round(w * dpr) || navcv.height !== Math.round(h * dpr)){
+      navcv.width = Math.round(w * dpr);
+      navcv.height = Math.round(h * dpr);
+    }
+    var g = navcv.getContext("2d");
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, w, h);
+
+    var perBar = w / SONG_BARS;
+    g.fillStyle = css("--line-soft");
+    for (var b = 0; b < SONG_BARS; b += 4){
+      g.fillRect(Math.round(b * perBar), 0, 1, h);
+    }
+    g.fillStyle = css("--note");
+    g.globalAlpha = .5;
+    for (var i = 0; i < SONG_BARS; i++){
+      var bh = Math.max(2, (barCounts[i] / maxCount) * (h - 7));
+      g.fillRect(i * perBar + 1, h - bh - 3, Math.max(1, perBar - 2), bh);
+    }
+    g.globalAlpha = 1;
+  }
+
+  function updateNav(){
+    navthumb.style.left = (viewStep / SONG_STEPS * 100) + "%";
+    navthumb.style.width = Math.min(100, VIS_STEPS / SONG_STEPS * 100) + "%";
+    var a = Math.floor(viewStep / STEPS_PER_BAR) + 1;
+    var b = Math.min(SONG_BARS, a + BARS_VISIBLE - 1);
+    navlabel.textContent = "第 " + a + "–" + b + " 小节 / 共 " + SONG_BARS;
+    if (document.activeElement !== jumpInput) jumpInput.value = String(a);
+  }
+
+  function renderAll(){
+    for (var i = 0; i < rollEls.length; i++) renderRoll(rollEls[i]);
+    updateNav();
+    clkEl.textContent = (Math.floor(posStep / STEPS_PER_BAR) + 1) + " / " + SONG_BARS + " 小节";
+  }
+
+  function setView(v, snap){
+    viewStep = clampView(snap ? Math.round(v / STEPS_PER_BAR) * STEPS_PER_BAR : v);
+    renderAll();
+  }
+
+  // ---- 播放：没有循环，放完即停 ----
+  function playFrame(ts){
+    if (!playing) return;
+    if (!lastTs) lastTs = ts;
+    var dt = (ts - lastTs) / 1000;
+    lastTs = ts;
+
+    posStep += dt * (bpm / 60) * 4;
+
+    if (posStep >= SONG_STEPS - 0.001){
+      posStep = SONG_STEPS - 0.001;
+      stopPlay(true);
+      return;
+    }
+    var target = posStep - VIS_STEPS * 0.32;
+    if (target > viewStep) viewStep = clampView(target);
+    renderAll();
+    rafId = requestAnimationFrame(playFrame);
+  }
+
+  function startPlay(){
+    if (playing) return;
+    posStep = viewStep;
+    playing = true; lastTs = 0;
+    btnPlay.setAttribute("aria-pressed", "true");
+    btnPlay.textContent = "▶ 播放中…";
+    rafId = requestAnimationFrame(playFrame);
+  }
+
+  function stopPlay(finished){
+    if (playing){ playing = false; cancelAnimationFrame(rafId); }
+    btnPlay.setAttribute("aria-pressed", "false");
+    btnPlay.textContent = "▶ 从当前位置播放";
+    viewStep = clampView(Math.round(viewStep / STEPS_PER_BAR) * STEPS_PER_BAR);
+    renderAll();
+    if (finished) btnPlay.focus();
+  }
+
+  btnPlay.addEventListener("click", startPlay);
+  btnStop.addEventListener("click", function(){ stopPlay(false); });
+
+  bpmInput.addEventListener("change", function(){
+    var v = parseFloat(bpmInput.value);
+    if (!isFinite(v)){ bpmInput.value = String(bpm); return; }
+    bpm = Math.max(20, Math.min(300, v));
+    bpmInput.value = String(bpm);
+  });
+
+  // ---- 导航交互 ----
+  function seekFromClientX(clientX){
+    var r = navtrack.getBoundingClientRect();
+    var step = ((clientX - r.left) / r.width) * SONG_STEPS;
+    posStep = Math.max(0, Math.min(SONG_STEPS - 1, step));
+    setView(step - VIS_STEPS / 2, true);
+  }
+
+  navtrack.addEventListener("mousedown", function(e){
+    hidePlayhead = true;
+    seekFromClientX(e.clientX);
+    function mv(ev){ seekFromClientX(ev.clientX); }
+    function up(){
+      window.removeEventListener("mousemove", mv);
+      window.removeEventListener("mouseup", up);
+      hidePlayhead = false;      // 松手后红线回到新位置
+      renderAll();
+    }
+    window.addEventListener("mousemove", mv);
+    window.addEventListener("mouseup", up);
+    e.preventDefault();
+  });
+
+  jumpInput.addEventListener("change", function(){
+    var v = parseInt(jumpInput.value, 10);
+    if (!isFinite(v)){ updateNav(); return; }
+    v = Math.max(1, Math.min(SONG_BARS - BARS_VISIBLE + 1, v));
+    posStep = (v - 1) * STEPS_PER_BAR;
+    setView(posStep, true);
+  });
+
+  // ---- 卷帘交互 ----
+  var readPitch = document.getElementById("ro-pitch");
+  var readBar   = document.getElementById("ro-bar");
+  var readPos   = document.getElementById("ro-pos");
+  var readSel   = document.getElementById("ro-sel");
+  function clearReadout(){
+    readPitch.textContent = "—"; readBar.textContent = "—";
+    readPos.textContent = "—"; readSel.textContent = "—";
+  }
+
+  function hitNote(rollEl, x, y){
+    var rects = rollEl._rects || [];
+    for (var i = 0; i < rects.length; i++){
+      var q = rects[i];
+      if (x >= q.x - 1 && x <= q.x + q.w + 1 && y >= q.y && y <= q.y + q.h) return q;
+    }
+    return null;
+  }
+
+  rollEls.forEach(function(rollEl, idx){
+    var chip = rollEl.querySelector(".chip");
+    var bar  = rollEl.querySelector(".rangebar");
+    var dragging = null;
+
+    rollEl.addEventListener("mousemove", function(e){
+      if (dragging) return;
+      var r = rollEl.getBoundingClientRect();
+      var hit = hitNote(rollEl, e.clientX - r.left, e.clientY - r.top);
+      if (hit){
+        rollEl.style.cursor = "grab";
+        readPitch.textContent = pitchName(hit.pitch);
+        readBar.textContent = String(Math.floor(hit.start / STEPS_PER_BAR) + 1);
+        readPos.textContent = (((hit.start % STEPS_PER_BAR) / 4) + 1).toFixed(2) + " 拍";
+        readSel.textContent = "轨 " + (idx + 1) + " · 时值 " + (hit.dur / 4).toFixed(2) + " 拍";
+      } else {
+        rollEl.style.cursor = "default";
+        clearReadout();
+      }
+    });
+    rollEl.addEventListener("mouseleave", clearReadout);
+
+    rollEl.addEventListener("mousedown", function(e){
+      if (e.target.closest(".chip")) return;
+      var r = rollEl.getBoundingClientRect();
+      if (hitNote(rollEl, e.clientX - r.left, e.clientY - r.top)) return;  // 点在音符上（线框不实现拖动）
+      var s = songStepAt(rollEl, e.clientX);
+      dragging = { a: s, b: s, sa: null, sb: null };
+      bar.style.display = "block";
+      chip.dataset.show = "false";
+      e.preventDefault();
+    });
+
+    window.addEventListener("mousemove", function(e){
+      if (!dragging) return;
+      dragging.b = songStepAt(rollEl, e.clientX);
+      var sw = stepW(rollEl);
+      var a = Math.min(dragging.a, dragging.b), b = Math.max(dragging.a, dragging.b);
+      a = Math.max(viewStep, Math.floor(a / 4) * 4);
+      b = Math.min(viewStep + VIS_STEPS, Math.ceil(b / 4) * 4);
+      dragging.sa = a; dragging.sb = b;
+      bar.style.left = ((a - viewStep) * sw) + "px";
+      bar.style.width = Math.max(1, (b - a) * sw) + "px";
+    });
+
+    window.addEventListener("mouseup", function(){
+      if (!dragging) return;
+      var a = dragging.sa, b = dragging.sb;
+      dragging = null;
+      if (a == null || b - a < 8){ bar.style.display = "none"; chip.dataset.show = "false"; return; }
+      chip.dataset.show = "true";
+      chip.style.left = Math.min((a - viewStep) * stepW(rollEl) + 4,
+                                 Math.max(0, rollEl.clientWidth - 190)) + "px";
+      chip.querySelector(".cn").textContent =
+        "第 " + (Math.floor(a / STEPS_PER_BAR) + 1) + " 小节起 " + ((b - a) / 4).toFixed(2) + " 拍";
+    });
+
+    var lane = rollEl.closest(".lane");
+    lane.querySelector('[data-role="fold"]').addEventListener("click", function(){
+      var now = lane.dataset.collapsed === "true";
+      lane.dataset.collapsed = now ? "false" : "true";
+      this.textContent = now ? "折叠" : "展开";
+      renderAll();
+    });
+    lane.querySelector('[data-role="solo"]').addEventListener("click", function(){
+      var on = this.getAttribute("aria-pressed") === "true";
+      document.querySelectorAll('[data-role="solo"]').forEach(function(b2){
+        b2.setAttribute("aria-pressed", "false");
+      });
+      this.setAttribute("aria-pressed", on ? "false" : "true");
+    });
+    lane.querySelector('[data-role="del"]').addEventListener("click", function(){
+      if (!lane.parentNode) return;
+      lane.parentNode.removeChild(lane);
+      rollEls = rollEls.filter(function(x){ return x !== rollEl; });
+      renderAll();
+    });
+  });
+
+  // ---- 尺寸变化 ----
+  var pending = false;
+  window.addEventListener("resize", function(){
+    if (pending) return;
+    pending = true;
+    requestAnimationFrame(function(){
+      pending = false;
+      renderNav();
+      renderAll();
+    });
+  });
+
+  renderNav();
+  renderAll();
+})();
+</script>

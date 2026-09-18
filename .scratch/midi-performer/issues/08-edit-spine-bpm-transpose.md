@@ -1,4 +1,4 @@
-# 07: 编辑脊柱：改 BPM 与轨移调
+# 08: 编辑脊柱：改 BPM 与轨移调
 
 **What to build:** 一条**完整的编辑竖切**——从界面到模型再回到界面。这一块的价值不在于那两个命令，而在于把整条编辑脊柱立起来：接口、装饰器、撤销栈、重做栈、UI 接线、撤销后重绘。后面的编辑命令都是往这条脊柱上挂。
 
@@ -10,7 +10,7 @@
 
 编辑命令**不收 Request、不返回 Result**——直接收散参（BPM 数字、半音数、音符号），返回新的 `Song`。`Song` 不可变，「改没改」就等于「引用是不是同一个」，装饰器用 `ReferenceEquals` 判断就行，不需要 `Changed` 字段。全程序唯一值得打包成具名 Request 的是演奏那条链（`StartPerformanceRequest`，五六个参数），跟这一块无关。
 
-**Blocked by:** 06
+**Blocked by:** 07
 
 **Status:** ready-for-agent
 

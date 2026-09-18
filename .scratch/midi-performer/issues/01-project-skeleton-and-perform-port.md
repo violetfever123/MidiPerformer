@@ -65,4 +65,4 @@ P/Invoke 本身不需要引用。要机器强制得另加分析器，01 没做�
 
 **对拍覆盖不到的一条**：原版 `BuildScheduleForTest` 把 `startMods` 写死成 `ModState.None`，
 所以「起点已按着修饰键」「起点残留音键」这两条分支比不到（要覆盖就得调 `Play`，那会真发按键）。
-这两条待 03 用假 sink 直接测 `EventBuilder.Build`。
+这两条待 04 用假 sink 直接测 `EventBuilder.Build`。

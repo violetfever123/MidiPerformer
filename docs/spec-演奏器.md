@@ -254,6 +254,8 @@ C:\Users\cao17\Desktop\midiplayer\MidiPerformer\
 ├─ MidiPerformer.App/                  ⑤ 最外层
 │  ├─ Program.cs                        入口
 │  ├─ App.axaml.cs                      Main —— 唯一允许 new 具体实现的地方
+│  ├─ Styles/    Tokens.axaml           25 个颜色令牌，明暗两套 —— 外观的唯一来源
+│  │             Controls.axaml         按钮/输入框/下拉框/滑块/列表/滚动条
 │  └─ Views/                            Avalonia
 │
 └─ MidiPerformer.Tests/                 第二个 Main：FakeClock + RecordingEventSink

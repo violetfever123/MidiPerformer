@@ -1,4 +1,4 @@
-# 11: 内置自检与发布产物
+# 12: 内置自检与发布产物
 
 **What to build:** exe 开 `PublishTrimmed`，裁剪会改变行为，NUnit 跑的是没裁剪的构建，**证明不了发布产物**。所以照搬 midikey-player 的既有做法：exe 里内置一套自检。
 
@@ -8,7 +8,7 @@
 - 自检只覆盖几条事件表冒烟用例（全量在 NUnit 那边）
 - 发布单文件自包含 exe，`win-x64`，反射相关的程序集用 `TrimmerRootAssembly` 钉住
 
-**Blocked by:** 03
+**Blocked by:** 04
 
 **Status:** ready-for-agent
 
