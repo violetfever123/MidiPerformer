@@ -16,8 +16,18 @@ namespace MidiPerformer.Adapters.Controllers;
 /// 不会各算各的。
 ///
 /// 这一张是**只读**的：没有任何改谱面的方法，只有「看哪儿、选中谁」。
-/// 编辑命令从它旁边过去 —— 08 只借了 <see cref="RestoreSelection"/> 这一个口子
-/// （编辑之后控制器要重建，选中得能放回去），改谱面那些归 09。
+/// 编辑命令从它旁边过去，控制器只出三样东西给它们：
+/// <list type="bullet">
+/// <item><b>选中集</b>（<see cref="SelectedNotes"/> / <see cref="SetSelection"/>）——
+/// 命令收的是 <see cref="NoteRef"/> 列表，界面得先能把它算出来、编辑之后再重算一遍。</item>
+/// <item><b>区间查询</b>（<see cref="NotesInRange"/>）—— 「框住哪几个音」是几何问题，
+/// 命令那边不该知道像素，也不该知道框。</item>
+/// <item><b>带 ref 的命中判定</b>（<see cref="HitTestRef"/>）—— 点中的是谁，一步到位。</item>
+/// </list>
+///
+/// 控制器自己不改谱面，是因为它是照着某一份 <see cref="Song"/> 建出来的一次性对象：
+/// 命令换个引用就换了一份曲子，控制器跟着重建（见 <see cref="RestoreSelection"/>）。
+/// 它要是自己也改，就得同时维护「手上这份曲子」和「界面那份」两个真相源。
 /// </summary>
 public sealed class PianoRollController
 {
@@ -27,6 +37,15 @@ public sealed class PianoRollController
     private readonly (int Low, int High)[] _pitchRanges;
     private readonly int _ticksPerQuarterNote;
 
+    /// <summary>选中的一组音。**顺序有意义**：最后一个就是主选中（见 <see cref="Selection"/>）。</summary>
+    private readonly List<NoteRef> _selected = new();
+
+    /// <summary><see cref="_selected"/> 的只读活视图，建一次就够 —— 见 <see cref="SelectedNotes"/>。</summary>
+    private readonly IReadOnlyList<NoteRef> _selectedView;
+
+    /// <summary>没有这条轨（曲子被删光了轨）时给的音域。空轨用的也是它。</summary>
+    private static readonly (int Low, int High) EmptyPitchRange = PianoRollGeometry.FitPitchRange(60, 60);
+
     /// <summary>按曲子的节拍网格建一个卷帘控制器。视图位置从曲子开头开始。</summary>
     public PianoRollController(Song song)
     {
@@ -34,6 +53,9 @@ public sealed class PianoRollController
         TicksPerBar = PianoRollGeometry.BarTicks(song.TempoMap);
         _ticksPerQuarterNote = Math.Max(1, song.TempoMap.Division.TicksPerQuarterNote);
         BarCount = PianoRollGeometry.BarCount(song.EndTick, TicksPerBar);
+
+        _selectedView = _selected.AsReadOnly();
+        GridTicks = PianoRollGeometry.GridTicks(song.TempoMap);
 
         _inRange = new List<bool>[song.Tracks.Count];
         _pitchRanges = new (int, int)[song.Tracks.Count];
@@ -48,6 +70,14 @@ public sealed class PianoRollController
 
     /// <summary>一个小节多少 tick（按第一个拍号）。</summary>
     public long TicksPerBar { get; }
+
+    /// <summary>
+    /// 吸附网格多少 tick（一个十六分音符），构造时算一次。
+    ///
+    /// 曲子的分辨率在控制器活着的这一阵不会变（改分辨率要换一份 <see cref="Song"/>），
+    /// 所以算一次就够，也免得每帧拖动的每次移动都过一个 <see cref="TempoMap"/>。
+    /// </summary>
+    public long GridTicks { get; }
 
     /// <summary>整曲多少小节。视图、导航条、键盘定位都以它为上界。</summary>
     public int BarCount { get; }
@@ -70,8 +100,24 @@ public sealed class PianoRollController
     /// <summary>视图左边缘落在第几小节（0 起）。导航条的「第 a–b 小节」用它。</summary>
     public int ViewStartBar => PianoRollGeometry.BarAtTick(ViewStartTick, TicksPerBar);
 
-    /// <summary>当前选中的音符（轨下标, 音下标）。没选中是 null。</summary>
-    public (int Track, int Note)? Selection { get; private set; }
+    /// <summary>
+    /// 主选中（轨下标, 音下标）。读数条与滚动定位只认这一个；没选中是 null。
+    ///
+    /// **它永远是 <see cref="SelectedNotes"/> 里的某一个**（最后加进去的那个），不是另存的第二份状态 ——
+    /// 所以不存在「主选中指着一个已经不在选中集里的音」这种两张嘴对不上的情况。
+    /// 取最后一个，是因为它正好是用户最后点的那一个，也就是他此刻在看的那一个。
+    /// </summary>
+    public (int Track, int Note)? Selection
+        => _selected.Count > 0 ? (_selected[^1].Track, _selected[^1].Index) : null;
+
+    /// <summary>
+    /// 选中的一组音。09 起选中不再是一个音：框选一组、一组一起挪，命令那边要的就是这一串
+    /// （<c>MoveNotes</c> / <c>DeleteNotes</c> 收的都是 <see cref="NoteRef"/> 列表）。
+    ///
+    /// 返回的是**活视图**，不是每次调用现拷一份：一次重画要读它好几遍，拷出来就是白扔的分配；
+    /// 而 <c>ReadOnlyCollection</c> 让调用方拿不到那个可变列表，改不了这里面的东西。
+    /// </summary>
+    public IReadOnlyList<NoteRef> SelectedNotes => _selectedView;
 
     /// <summary>某个 tick 落在第几小节（**1 起**）。走带条那个「位置」用它。</summary>
     public int BarOfTick(long tick) => PianoRollGeometry.BarAtTick(tick, TicksPerBar) + 1;
@@ -88,10 +134,106 @@ public sealed class PianoRollController
     /// <param name="note">音在该轨音符数组里的下标。</param>
     public void RestoreSelection(int track, int note)
     {
-        bool valid = track >= 0 && track < _song.Tracks.Count
-            && note >= 0 && note < _song.Tracks[track].Notes.Count;
+        // 「选中一个音」就是「选中集里只有它」，走同一条路 —— 越界当没选中的规矩只有一份
+        SelectOnly(new NoteRef(track, note));
+    }
 
-        Selection = valid ? (track, note) : null;
+    /// <summary>
+    /// 清空再选一个（在卷帘上点某个音用它）。
+    ///
+    /// 越界的 ref 会被丢掉，于是等于清空 —— 和 <see cref="RestoreSelection"/> 一样不抛：
+    /// 曲子刚被换掉、轨刚被删掉的时候会碰上，那不是错误。
+    /// </summary>
+    public void SelectOnly(NoteRef note)
+    {
+        _selected.Clear();
+        if (IsValidNote(note)) _selected.Add(note);
+    }
+
+    /// <summary>
+    /// 整体替换选中集。框选，以及**每次编辑之后拿新曲子重新算一遍**都用它
+    /// （<see cref="NoteRef"/> 的下标只在算出来的那一份曲子上有效，改完必须重算）。
+    ///
+    /// 越界的 ref 丢掉、重复的 ref 只留一个。后者不是洁癖：这一串是要原样交给 <c>MoveNotes</c> 的，
+    /// 同一个音出现两次就会被挪两倍距离 —— 界面上「选中了两次」没有任何意义，不该被翻译成「动了两次」。
+    /// 顺序原样保留，于是主选中仍然是传进来的最后一个。
+    /// </summary>
+    public void SetSelection(IReadOnlyList<NoteRef> notes)
+    {
+        _selected.Clear();
+        foreach (var note in notes)
+        {
+            if (!IsValidNote(note) || _selected.Contains(note)) continue;
+            _selected.Add(note);
+        }
+    }
+
+    /// <summary>
+    /// 加一个进来（Shift 点选）。已经在里面就什么都不做 —— 否则主选中会被同一个音顶掉，
+    /// 而用户按 Shift 点一个已经选中的音，意思是「把它也留着」，不是「把主选中挪到它身上」。
+    /// </summary>
+    public void ExtendSelection(NoteRef note)
+    {
+        if (!IsValidNote(note) || _selected.Contains(note)) return;
+        _selected.Add(note);
+    }
+
+    /// <summary>清空选中集（主选中跟着变 null —— 它是这一串的尾巴）。</summary>
+    public void ClearSelection() => _selected.Clear();
+
+    /// <summary>
+    /// 这个音在不在选中集里。线性扫一遍，没建哈希表：框选出来的一次也就几十个
+    /// （一屏之内的音，再多也得先滚过去才框得到），扫一遍比建表快，
+    /// 而且**顺序得留着**（主选中 = 最后一个），哈希集正好把顺序丢了。
+    /// </summary>
+    public bool IsSelected(NoteRef note) => _selected.Contains(note);
+
+    /// <summary>这个 ref 指向的音在不在这份曲子里。选中集里的每个口子都要过它一道。</summary>
+    private bool IsValidNote(NoteRef note) =>
+        note.Track >= 0 && note.Track < _song.Tracks.Count
+        && note.Index >= 0 && note.Index < _song.Tracks[note.Track].Notes.Count;
+
+    // ==================== 区间查询 ====================
+
+    /// <summary>
+    /// 某条轨里**与这段区间相交**的音，按音符数组的顺序（也就是时间顺序）给出来。
+    ///
+    /// 判的是**相交**，不是「起点落在区间里」。用户框一段，要的是把盖住这段的音一起处理
+    /// （最要紧的是空白处横拖删音），而一个从框左边伸进来、一直盖到框中间的长音，
+    /// 只判起点的话会原地留着 —— 那恰恰是他框住它想干掉的东西。
+    ///
+    /// 区间取**左闭右开** <c>[startTick, endTick)</c>，右边缘跟着 <see cref="Note.EndTick"/>
+    /// 的「不含」走：一个音「在 960 结束」的意思是它占 <c>[480, 960)</c>，
+    /// 和一条从 960 起的框一丝都不重叠。这个取法还有个好处 —— 相邻的框不重不漏，
+    /// <c>[a,b)</c> 加 <c>[b,c)</c> 正好是 <c>[a,c)</c>，将来要把一次长拖切成几段也算得对。
+    ///
+    /// <c>endTick &lt;= startTick</c> 是**空区间**，按集合的定义就该什么都不相交 ——
+    /// 这不是特例，是兜底：空白处横拖删音时，「点了空白但没拖」是一次零长度的手势，
+    /// 要是让它把光标底下那个音算进来，一次误点就删掉了一个音。
+    ///
+    /// 越界的轨下标返回空集而不抛，理由同 <see cref="RestoreSelection"/>。
+    /// </summary>
+    /// <param name="trackIndex">轨下标（0 起）。</param>
+    /// <param name="startTick">区间起点（含）。</param>
+    /// <param name="endTick">区间终点（不含）。</param>
+    public IReadOnlyList<NoteRef> NotesInRange(int trackIndex, long startTick, long endTick)
+    {
+        if (trackIndex < 0 || trackIndex >= _song.Tracks.Count) return Array.Empty<NoteRef>();
+        if (endTick <= startTick) return Array.Empty<NoteRef>();
+
+        var notes = _song.Tracks[trackIndex].Notes;
+        var hits = new List<NoteRef>();
+        for (int i = 0; i < notes.Count; i++)
+        {
+            var note = notes[i];
+            // 音符数组按起点升序（Track.Notes 的承诺，命中判定也吃这条），
+            // 所以起点已经够到右边缘之后，后面全是更靠后的，直接收工
+            if (note.StartTick >= endTick) break;
+            if (note.EndTick <= startTick) continue;
+            hits.Add(new NoteRef(trackIndex, i));
+        }
+
+        return hits;
     }
 
     // ==================== 视图位置 ====================
@@ -158,15 +300,22 @@ public sealed class PianoRollController
         return new PianoRollGeometry.Viewport(width, height, ViewStartTick, TicksPerBar, low, high);
     }
 
-    /// <summary>这条轨显示用的音高范围（含余量），只算一次。</summary>
+    /// <summary>
+    /// 这条轨显示用的音高范围（含余量），只算一次。
+    ///
+    /// 越界的轨下标给一个中性音域而不抛：删光所有轨之后 <see cref="Song.Tracks"/> 是空的，
+    /// 而界面手里那张刚建出来的控制器这一帧还会被问一次（重画那条轨），
+    /// 那不是错误，是「谱面空了」。空轨与无轨给的是同一个音域 —— 两边都只是「没什么可显示」。
+    /// </summary>
     public (int Low, int High) PitchRangeOf(int trackIndex)
     {
+        if (trackIndex < 0 || trackIndex >= _song.Tracks.Count) return EmptyPitchRange;
         if (_pitchRanges[trackIndex].Low >= 0) return _pitchRanges[trackIndex];
 
         var track = _song.Tracks[trackIndex];
         if (track.Notes.Count == 0)
         {
-            _pitchRanges[trackIndex] = PianoRollGeometry.FitPitchRange(60, 60);
+            _pitchRanges[trackIndex] = EmptyPitchRange;
             return _pitchRanges[trackIndex];
         }
 
@@ -192,6 +341,9 @@ public sealed class PianoRollController
     /// </summary>
     public IReadOnlyList<bool> InRangeFlagsOf(int trackIndex)
     {
+        // 越界的轨下标给空表：删光所有轨之后还会被问一次，见 PitchRangeOf 的说明。
+        // 空表不会让调用方越界 —— 用它的地方（命中判定）本来就是 `i < flags.Count && flags[i]` 地取
+        if (trackIndex < 0 || trackIndex >= _song.Tracks.Count) return Array.Empty<bool>();
         if (_inRange[trackIndex] is { } cached) return cached;
 
         var track = _song.Tracks[trackIndex];
@@ -223,25 +375,53 @@ public sealed class PianoRollController
     public PianoRollGeometry.RollHit HitTest(
         int trackIndex, in PianoRollGeometry.Viewport viewport, double x, double y, out int noteIndex)
     {
-        noteIndex = -1;
+        var hit = HitTestRef(trackIndex, viewport, x, y, out var note);
+        // 没命中时不给 `note.Index`（那是 -1，和这个约定的 -1 撞不出问题，但别让两条路各自算一遍）
+        noteIndex = hit == PianoRollGeometry.RollHit.None ? -1 : note.Index;
+        return hit;
+    }
+
+    /// <summary>
+    /// 和 <see cref="HitTest"/> 是**同一次判定**，只是给的是 <see cref="NoteRef"/> 而不是一个下标。
+    ///
+    /// 09 的编辑命令收的都是 ref（<c>MoveNotes</c> / <c>SetNoteSpan</c> / <c>DeleteNotes</c>），
+    /// 让界面自己拿下标拼一个出来，等于把「下标是从哪个数组来的」这件事又抄一遍。
+    /// 两者共用同一段循环（老的转发到新的），所以同一个点永远得到同一个答案。
+    ///
+    /// 没命中时 <paramref name="note"/> 是 <c>(-1, -1)</c>：和 <see cref="HitTest"/> 那边的 <c>-1</c>
+    /// 一个意思，是个**明确不存在的**坐标。不返回 <c>default</c>，是因为 <c>default(NoteRef)</c>
+    /// 正好是 <c>(0, 0)</c> —— 一个完全合法的音，谁忘了判就会默默选中第一个音。
+    ///
+    /// **多个音在屏幕上叠着的时候，给的是数组里靠前的那个**（也就是起点更早的那个）。
+    /// 这不是「对」，是**和现有 <see cref="HitTest"/> 保持一致**：两个方法必须给同一个答案，
+    /// 否则界面高亮的那个和命令动的那个会是两个音。要改成「取视觉上压在最上面的」，
+    /// 得两处一起改，而且要先想清楚「画在最上面的」在同一个音高上是不是真的更符合直觉。
+    /// </summary>
+    public PianoRollGeometry.RollHit HitTestRef(
+        int trackIndex, in PianoRollGeometry.Viewport viewport, double x, double y, out NoteRef note)
+    {
+        note = new NoteRef(-1, -1);
+        // 越界的轨下标当没命中：删光所有轨之后还会被问一次，见 PitchRangeOf 的说明
+        if (trackIndex < 0 || trackIndex >= _song.Tracks.Count) return PianoRollGeometry.RollHit.None;
+
         var track = _song.Tracks[trackIndex];
         var flags = InRangeFlagsOf(trackIndex);
 
         for (int i = 0; i < track.Notes.Count; i++)
         {
-            var note = track.Notes[i];
+            var model = track.Notes[i];
             // 先用 tick 粗筛：一屏最多几十个音，但一首曲子可能上万，一个一个建块太浪费
-            if (note.StartTick > viewport.ViewStartTick + viewport.TicksVisible) break;
-            if (note.EndTick < viewport.ViewStartTick) continue;
+            if (model.StartTick > viewport.ViewStartTick + viewport.TicksVisible) break;
+            if (model.EndTick < viewport.ViewStartTick) continue;
 
             var box = PianoRollGeometry.BoxOf(
-                viewport, i, note.StartTick, note.LengthTicks, note.Pitch + track.Transpose,
+                viewport, i, model.StartTick, model.LengthTicks, model.Pitch + track.Transpose,
                 i < flags.Count && flags[i]);
 
             var hit = PianoRollGeometry.HitTest(box, x, y);
             if (hit == PianoRollGeometry.RollHit.None) continue;
 
-            noteIndex = i;
+            note = new NoteRef(trackIndex, i);
             return hit;
         }
 
@@ -291,6 +471,10 @@ public sealed class PianoRollController
     /// 这一张只定位，不移动 —— 方向键选中它、把视图带过去，
     /// 到曲子头尾就停住（不绕回去：绕回去会让人以为自己按错了方向）。
     /// 返回新的选中项；一个音都没有时返回 null。
+    ///
+    /// **跳到哪儿就是只选中那一个**：这是「换个音看看」，不是「再加上一个」。
+    /// 手上的一串选中（框选出来的一组）在这里被收掉，否则主选中换了地方、
+    /// 选中集还是旧的那一组，两边指的就不是一回事了。
     /// </summary>
     public NoteInfo? MoveSelection(int delta)
     {
@@ -302,7 +486,7 @@ public sealed class PianoRollController
         int next = Math.Clamp(current + delta, 0, _ordered.Count - 1);
         if (next == current && Selection is not null) return DescribeSelection();
 
-        Selection = _ordered[next];
+        SelectOnly(new NoteRef(_ordered[next].Track, _ordered[next].Note));
 
         var (trackIndex, noteIndex) = _ordered[next];
         long startTick = _song.Tracks[trackIndex].Notes[noteIndex].StartTick;
@@ -312,6 +496,56 @@ public sealed class PianoRollController
             PianoRollGeometry.BarAtTick(startTick, TicksPerBar), TicksPerBar));
 
         return DescribeSelection();
+    }
+
+    /// <summary>
+    /// 把一组音的**整组位移**夹到合法范围内，返回真正能生效的那个增量。
+    ///
+    /// <b>这是全程序唯一一份「整组一起夹」的算法。</b>三条路都走它：
+    /// <c>SongEditor.MoveNotes</c> 是规矩的出处，界面拖动那一路拿它算预览
+    /// （预览画到命令去不了的地方，松手那一下整块会跳回来一次），
+    /// 窗口的方向键微调拿它算「挪完的新位置」—— 微调没有拖动那个「先夹再发」的前置，
+    /// 不在这儿夹一次的话，顶到边界那一下算出来的新位置是不存在的，
+    /// 重算选中集就会把选中集弄丢。
+    ///
+    /// 规矩和命令那边一模一样：时间不挪到 0 之前、音高出不了 0..127，
+    /// 两头都按**整组最小的那个可挪量**缩 —— 形状保住，
+    /// 不是把每个音各自夹回去压成一摞（那样相对位置就没了）。
+    ///
+    /// 认不出的 <see cref="NoteRef"/>（下标越界，或者手里那份 <see cref="Song"/> 已经过期）
+    /// 当它不存在；一个都认不出时原样返回 —— 空组本来就没得夹。
+    /// </summary>
+    public (long DeltaTicks, int DeltaPitch) ClampMoveDelta(
+        IReadOnlyList<NoteRef> notes, long deltaTicks, int deltaPitch)
+    {
+        long minStart = long.MaxValue;
+        int minPitch = int.MaxValue, maxPitch = int.MinValue;
+
+        foreach (var reference in notes)
+        {
+            if (!IsValidNote(reference)) continue;
+            var note = _song.Tracks[reference.Track].Notes[reference.Index];
+            if (note.StartTick < minStart) minStart = note.StartTick;
+            if (note.Pitch < minPitch) minPitch = note.Pitch;
+            if (note.Pitch > maxPitch) maxPitch = note.Pitch;
+        }
+
+        if (minStart == long.MaxValue) return (deltaTicks, deltaPitch);
+
+        // 这里要的是「最大能挪多远」（一个增量），命令那边要的是「挪完之后落在哪个 tick」
+        // （一个位置）—— 问的不是同一件事，所以这边比门槛、那边做饱和加法。
+        //
+        // 单说溢出：SaturatingAdd 本身**不会**绕圈（它就是为这个写的），
+        // 这个式子里唯一会绕的是 -minStart，而那只在 minStart == long.MinValue 时发生
+        //（绕回自己，比较恒为假，这道夹取整个失效）。真要有那么一个音，得先有一份
+        // StartTick 是 long.MinValue 的谱面 —— 两条导入路径都给不出来：工程文件那条
+        // 显式拒负数（SongProject 的 NoteConverter），MIDI 那条的 tick 是从非负增量累加出来的。
+        // 所以这里不为它加一道分支：挡的是一个谁也造不出来的值。
+        if (deltaTicks < -minStart) deltaTicks = -minStart;
+        if (deltaPitch < -minPitch) deltaPitch = -minPitch;
+        if (deltaPitch > 127 - maxPitch) deltaPitch = 127 - maxPitch;
+
+        return (deltaTicks, deltaPitch);
     }
 
     // ==================== 内部 ====================

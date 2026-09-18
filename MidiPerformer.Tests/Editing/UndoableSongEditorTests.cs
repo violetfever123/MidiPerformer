@@ -399,6 +399,13 @@ public class UndoableSongEditorTests
         public double LastBpm { get; private set; }
         public int LastTrack { get; private set; }
         public int LastSemitones { get; private set; }
+        public IReadOnlyList<NoteRef>? LastNotes { get; private set; }
+        public NoteRef LastNote { get; private set; }
+        public long LastDeltaTicks { get; private set; }
+        public int LastDeltaPitch { get; private set; }
+        public long LastStartTick { get; private set; }
+        public long LastLengthTicks { get; private set; }
+        public string? LastName { get; private set; }
 
         public Song SetBpm(Song song, double beatsPerMinute)
         {
@@ -412,6 +419,50 @@ public class UndoableSongEditorTests
             LastSong = song;
             LastTrack = trackIndex;
             LastSemitones = semitones;
+            return LastResult = new Song(song.Tracks, song.TempoMap);
+        }
+
+        // 音符那几条命令的记账（挪 / 改时值 / 删音 / 改名 / 删轨）。这里只留下「收到了什么」，
+        // 行为归 SongEditorNoteCommandTests 盯着 —— 假编辑器存在的唯一理由是看转发，
+        // 让它自己也算一份谱面，就等于在这一层又实现了一遍要被验的东西。
+
+        public Song MoveNotes(Song song, IReadOnlyList<NoteRef> notes, long deltaTicks, int deltaPitch)
+        {
+            LastSong = song;
+            LastNotes = notes;
+            LastDeltaTicks = deltaTicks;
+            LastDeltaPitch = deltaPitch;
+            return LastResult = new Song(song.Tracks, song.TempoMap);
+        }
+
+        public Song SetNoteSpan(Song song, NoteRef note, long startTick, long lengthTicks)
+        {
+            LastSong = song;
+            LastNote = note;
+            LastStartTick = startTick;
+            LastLengthTicks = lengthTicks;
+            return LastResult = new Song(song.Tracks, song.TempoMap);
+        }
+
+        public Song DeleteNotes(Song song, IReadOnlyList<NoteRef> notes)
+        {
+            LastSong = song;
+            LastNotes = notes;
+            return LastResult = new Song(song.Tracks, song.TempoMap);
+        }
+
+        public Song RenameTrack(Song song, int trackIndex, string name)
+        {
+            LastSong = song;
+            LastTrack = trackIndex;
+            LastName = name;
+            return LastResult = new Song(song.Tracks, song.TempoMap);
+        }
+
+        public Song DeleteTrack(Song song, int trackIndex)
+        {
+            LastSong = song;
+            LastTrack = trackIndex;
             return LastResult = new Song(song.Tracks, song.TempoMap);
         }
     }

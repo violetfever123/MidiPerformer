@@ -352,6 +352,12 @@ public partial class MainWindow : Window
             var lane = new TrackLaneView(_controller, i, _tokens);
             lane.HoverChanged += OnLaneHover;
             lane.TransposeRequested += OnTransposeRequested;
+            lane.NotesMoved += OnNotesMoved;
+            lane.NoteResized += OnNoteResized;
+            lane.NotesDeleted += OnNotesDeleted;
+            lane.SelectionChanged += OnLaneSelectionChanged;
+            lane.RenameRequested += OnTrackRenameRequested;
+            lane.DeleteRequested += OnTrackDeleteRequested;
             _lanes.Add(lane);
             LanesHost.Children.Add(lane);
         }
@@ -658,23 +664,37 @@ public partial class MainWindow : Window
     ///
     /// <b>「改没改」比引用</b>：跟装饰器同一条判据。一次「改成和现在一样」不该把上面这些全部重置一遍。
     /// </summary>
-    private void ApplySong(Song edited)
+    /// <param name="selectionAfter">
+    /// 编辑**之后**该选中的那组音，按**值**给。null（默认）表示「这次的编辑没动音符的值」——
+    /// 改速度、改移调、撤销、重做都是这种，照当前的选中集原样留一份下来就行。
+    ///
+    /// 为什么要按值：<see cref="NoteRef"/> 是下标，而挪音符和改时值都会把音符数组重排
+    /// （见它自己的注释），编辑之前算的下标编辑之后可能指着另一个音。
+    /// 值在一份曲子里是对得上的；两个一模一样的音对不上号，那是已知的短处，仍然比指错音强。
+    ///
+    /// **注意增量那一侧要是夹过的**：按值算新位置等于假设「新值 = 旧值 + 增量」，
+    /// 命令在边界上会把这个增量缩一截，增量没夹过就对不上了。
+    /// （拖动那一路在 <c>PianoRollLane</c> 里夹过，方向键那一路在 <see cref="NudgeNotes"/> 里夹，
+    /// 共用 <see cref="PianoRollController.ClampMoveDelta"/>。）
+    /// </param>
+    private void ApplySong(Song edited, IReadOnlyList<SelectedNote>? selectionAfter = null)
     {
         if (ReferenceEquals(edited, _song)) return;
 
         long playheadTick = _playback.PlayheadTick;
         long viewStartTick = _controller?.ViewStartTick ?? 0;
-        var selection = _controller?.Selection;
+        // 必须在 RebuildLanes 之前取：下面换掉控制器，旧下标当场作废
+        var selection = selectionAfter ?? CaptureSelectionValues();
 
         _song = edited;
         // 粘性标记：动过就是动过。撤销回原样也不清它（见 _edited 的说明），存盘也不清
         _edited = true;
         RebuildLanes();
 
-        // 音符的 tick 与小节刻度都不受这两条命令影响（BPM 只动速度表，移调只动轨属性），
-        // 所以视口和选中照旧有效；控制器自己的 SetViewStart 仍会夹一次，曲子变短也不会越界
+        // 视口照旧有效：小节刻度不受任何一条编辑命令影响（改速度只动速度表，其余只动音符），
+        // 控制器自己的 SetViewStart 还会夹一次，曲子变短也不会越界
         _controller?.SetViewStart(viewStartTick);
-        if (selection is { } s) _controller?.RestoreSelection(s.Track, s.Note);
+        RestoreSelection(selection);
 
         _playback.Load(edited);
         _playback.SeekSeconds(edited.TempoMap.SecondsAt(playheadTick));
@@ -728,6 +748,173 @@ public partial class MainWindow : Window
     {
         if (_song is not { } song || sender is not TrackLaneView lane) return;
         ApplySong(_editor.SetTranspose(song, lane.TrackIndex, semitones));
+    }
+
+    // ==================== 卷帘编辑：事件 → 命令 ====================
+
+    /// <summary>
+    /// 卷帘上拖完一组音符（方向键微调也走这一条）。
+    ///
+    /// 位移是**已经夹过**的：<c>PianoRollLane</c> 在发事件之前夹一次（预览不能画到命令去不了的地方），
+    /// <see cref="NudgeNotes"/> 在调命令之前夹一次。所以下面按「旧值 + 位移」算新选中集是精确的。
+    /// </summary>
+    private void OnNotesMoved(object? sender, NoteMoveRequest request)
+    {
+        if (_song is not { } song) return;
+
+        ApplySong(
+            _editor.MoveNotes(song, request.Notes, request.DeltaTicks, request.DeltaPitch),
+            SelectionAfterMove(request.Notes, request.DeltaTicks, request.DeltaPitch));
+    }
+
+    /// <summary>卷帘上拖完某条边。请求里是**绝对**的起点与时值，不是增量。</summary>
+    private void OnNoteResized(object? sender, NoteResizeRequest request)
+    {
+        if (_song is not { } song) return;
+
+        ApplySong(
+            _editor.SetNoteSpan(song, request.Note, request.StartTick, request.LengthTicks),
+            SelectionAfterResize(request.Note, request.StartTick, request.LengthTicks));
+    }
+
+    /// <summary>
+    /// 卷帘空白处横拖划掉一段（落在区间里的是哪几个音，<c>PianoRollLane</c> 已经算好了）。
+    ///
+    /// 删完**明确清空选中**，不靠按值去找：被删的音不该还选着，
+    /// 而同一个值在别处可能还有一份，按值找会把那个不相干的音捡回来选上。
+    /// </summary>
+    private void OnNotesDeleted(object? sender, IReadOnlyList<NoteRef> notes)
+    {
+        if (_song is not { } song || notes.Count == 0) return;
+        ApplySong(_editor.DeleteNotes(song, notes), Array.Empty<SelectedNote>());
+    }
+
+    private void OnTrackRenameRequested(object? sender, string name)
+    {
+        if (_song is not { } song || sender is not TrackLaneView lane) return;
+        ApplySong(_editor.RenameTrack(song, lane.TrackIndex, name));
+    }
+
+    /// <summary>
+    /// 删掉一整条轨（轨头上那个二次确认已经按过了）。
+    ///
+    /// 删完**明确清空选中**：<see cref="Song.Tracks"/> 的下标整体前移，
+    /// 存下来的选中集（里面带着轨下标）当场作废，按值找也会整片错位。
+    /// </summary>
+    private void OnTrackDeleteRequested(object? sender, EventArgs e)
+    {
+        if (_song is not { } song || sender is not TrackLaneView lane) return;
+        ApplySong(_editor.DeleteTrack(song, lane.TrackIndex), Array.Empty<SelectedNote>());
+    }
+
+    /// <summary>
+    /// 卷帘上的选中变了。
+    ///
+    /// 选中集是**全局**的（一个控制器管所有轨），所以别的轨的高亮也得跟着变 —— 整窗重画一遍。
+    /// </summary>
+    private void OnLaneSelectionChanged(object? sender, IReadOnlyList<NoteRef> selected)
+    {
+        ShowSelection();
+        RefreshView();
+    }
+
+    // ==================== 编辑之后的选中集 ====================
+
+    /// <summary>「编辑之后该选中哪个音」记的是**值**：哪条轨 + 音符本身（见 <see cref="ApplySong"/>）。</summary>
+    private readonly record struct SelectedNote(int Track, Note Note);
+
+    /// <summary>
+    /// 此刻选中的那组音，连**下标带值**一起抄下来。
+    ///
+    /// 必须在换曲子（<see cref="RebuildLanes"/>）之前调 —— 下标只对它算出来的那份曲子有效。
+    /// 顺手丢掉越界的：ref 过期不是错误，轨刚被删掉那一下就会碰上。
+    /// </summary>
+    private List<(NoteRef Ref, Note Note)> CaptureSelection()
+    {
+        var captured = new List<(NoteRef, Note)>();
+        if (_song is not { } song || _controller is null) return captured;
+
+        foreach (var reference in _controller.SelectedNotes)
+        {
+            if (NoteAt(song, reference) is { } note) captured.Add((reference, note));
+        }
+        return captured;
+    }
+
+    /// <summary>同上，只要值那一半 —— 「这次编辑没动音符」时直接扔给 <see cref="ApplySong"/>。</summary>
+    private List<SelectedNote> CaptureSelectionValues()
+    {
+        var values = new List<SelectedNote>();
+        foreach (var (reference, note) in CaptureSelection()) values.Add(new SelectedNote(reference.Track, note));
+        return values;
+    }
+
+    /// <summary>选中集挪过 (deltaTicks, deltaPitch) 之后的样子 —— 挪完拿它放回选中。</summary>
+    private List<SelectedNote> SelectionAfterMove(IReadOnlyList<NoteRef> moved, long deltaTicks, int deltaPitch)
+    {
+        var movedSet = new HashSet<NoteRef>(moved);
+        var wanted = new List<SelectedNote>();
+
+        foreach (var (reference, note) in CaptureSelection())
+        {
+            // 没被挪的那些原样留着：一组音挪的是同一个量，但「选中的」未必就是「被挪的那几个」
+            wanted.Add(movedSet.Contains(reference)
+                ? new SelectedNote(reference.Track,
+                    note with { Pitch = note.Pitch + deltaPitch, StartTick = note.StartTick + deltaTicks })
+                : new SelectedNote(reference.Track, note));
+        }
+        return wanted;
+    }
+
+    /// <summary>改完时值之后的样子：只把那一个音换成新值，选中集里其余的原样。</summary>
+    private List<SelectedNote> SelectionAfterResize(NoteRef target, long startTick, long lengthTicks)
+    {
+        var wanted = new List<SelectedNote>();
+        foreach (var (reference, note) in CaptureSelection())
+        {
+            wanted.Add(reference == target
+                ? new SelectedNote(reference.Track, note with { StartTick = startTick, LengthTicks = lengthTicks })
+                : new SelectedNote(reference.Track, note));
+        }
+        return wanted;
+    }
+
+    /// <summary>
+    /// 把「编辑后该选中的那组音」放回选中集：拿**值**在新曲子里找下标。
+    ///
+    /// 按值找，是因为下标会被重排打乱（<see cref="ApplySong"/> 的说明里讲了为什么）。
+    /// 找不到的（音被删了、撤销把它挪回原位了）跳过就行 —— 选中集缩水好过指错音。
+    /// 扫一遍而不是建一张索引表：一屏之内音就那么多，而且**顺序得留着**
+    /// （主选中 = 最后加进去的那个），哈希表正好把顺序丢了。
+    /// </summary>
+    private void RestoreSelection(IReadOnlyList<SelectedNote> wanted)
+    {
+        if (_controller is not { } controller || _song is not { } song) return;
+
+        var references = new List<NoteRef>(wanted.Count);
+        foreach (var target in wanted)
+        {
+            if (target.Track < 0 || target.Track >= song.Tracks.Count) continue;
+
+            var notes = song.Tracks[target.Track].Notes;
+            for (int i = 0; i < notes.Count; i++)
+            {
+                if (notes[i] != target.Note) continue;
+                references.Add(new NoteRef(target.Track, i));
+                break;
+            }
+        }
+
+        controller.SetSelection(references);
+    }
+
+    /// <summary>那份曲子里的这个音；ref 过期（下标越界、曲子已经换过）时给 null。</summary>
+    private static Note? NoteAt(Song song, NoteRef reference)
+    {
+        if (reference.Track < 0 || reference.Track >= song.Tracks.Count) return null;
+
+        var notes = song.Tracks[reference.Track].Notes;
+        return reference.Index >= 0 && reference.Index < notes.Count ? notes[reference.Index] : null;
     }
 
     // ==================== 改速度 ====================
@@ -951,7 +1138,13 @@ public partial class MainWindow : Window
     // ==================== 键盘 ====================
 
     /// <summary>
-    /// 窗口级快捷键：撤销 / 重做（Ctrl+Z、Ctrl+Y、Ctrl+Shift+Z）与 ← → 定位。
+    /// 窗口级快捷键：撤销 / 重做（Ctrl+Z、Ctrl+Y、Ctrl+Shift+Z）、方向键微调、Ctrl+←/→ 定位。
+    ///
+    /// 方向键按**方案 A**（工单 09）：<c>←/→</c> 移时间、<c>↑/↓</c> 移音高、
+    /// <c>Shift+←/→</c> 改时值、<c>Ctrl+←/→</c> 在所有轨的音符之间前后跳。
+    /// 07 原本把裸 <c>←/→</c> 绑成「前后跳」，09 把裸键让给了微调 ——
+    /// <b>能力没砍，挪到 Ctrl 上了</b>：07 那两条测试测的是控制器上的 <c>MoveSelection</c>，
+    /// 那条路一个字节都没动，所以不会红，变的只是这里把哪个键绑到它上面。
     ///
     /// 隧道阶段接进来，先于任何控件拿到按键。
     /// <b>焦点在输入框里时整个让开</b> —— 那时左右键归光标用、Ctrl+Z 归输入框自己的撤销，
@@ -962,24 +1155,72 @@ public partial class MainWindow : Window
         if (e.Handled) return;
         if (FocusManager?.GetFocusedElement() is TextBox) return;
 
-        if (e.KeyModifiers.HasFlag(KeyModifiers.Control))
+        // Esc：收掉「删掉这条轨？」那一问。它不是弹窗（只是轨道头上换了一排按钮），
+        // 收不掉的话键盘用户除了再点一次「取消」没有别的退路。
+        // 焦点在改名框里时上面那一句已经让开了 —— 那时 Esc 归输入框自己用（取消改名）。
+        if (e.Key == Key.Escape)
         {
-            bool shift = e.KeyModifiers.HasFlag(KeyModifiers.Shift);
+            bool dismissed = false;
+            foreach (var lane in _lanes) dismissed |= lane.CancelPendingDelete();
+            e.Handled = dismissed;
+            return;
+        }
+
+        bool ctrl = e.KeyModifiers.HasFlag(KeyModifiers.Control);
+        bool shift = e.KeyModifiers.HasFlag(KeyModifiers.Shift);
+
+        if (ctrl)
+        {
             if (e.Key == Key.Z && !shift) { e.Handled = true; Undo(); return; }
             if (e.Key == Key.Y || (e.Key == Key.Z && shift)) { e.Handled = true; Redo(); return; }
         }
 
         if (_controller is null) return;
 
-        int delta = e.Key switch
+        // Ctrl + ←/→ ：在音符之间前后跳（只定位，不动音符）
+        if (ctrl && e.Key is Key.Left or Key.Right)
         {
-            Key.Left => -1,
-            Key.Right => 1,
-            _ => 0
-        };
-        if (delta == 0) return;
+            e.Handled = true;
+            JumpSelection(e.Key == Key.Left ? -1 : 1);
+            return;
+        }
 
-        e.Handled = true;
+        if (ctrl) return;
+
+        // 一步一格 = 一个十六分音符，和拖动吸的是同一个格（控制器算好放在那儿）
+        long grid = _controller.GridTicks;
+        switch (e.Key)
+        {
+            case Key.Left when shift:
+            case Key.Right when shift:
+                e.Handled = true;
+                NudgeLength(e.Key == Key.Right ? grid : -grid);
+                break;
+
+            case Key.Left:
+                e.Handled = true;
+                NudgeNotes(-grid, 0);
+                break;
+            case Key.Right:
+                e.Handled = true;
+                NudgeNotes(grid, 0);
+                break;
+            case Key.Up:
+                e.Handled = true;
+                NudgeNotes(0, 1);
+                break;
+            case Key.Down:
+                e.Handled = true;
+                NudgeNotes(0, -1);
+                break;
+        }
+    }
+
+    /// <summary>在音符之间前后跳一个（Ctrl + ←/→）。只定位，不动音符。</summary>
+    private void JumpSelection(int delta)
+    {
+        if (_controller is null) return;
+
         var info = _controller.MoveSelection(delta);
         if (info is not { } note) return;
 
@@ -988,6 +1229,51 @@ public partial class MainWindow : Window
         if (note.Track >= 0 && note.Track < _lanes.Count) _lanes[note.Track].BringIntoView();
 
         RefreshView();
+    }
+
+    /// <summary>
+    /// 方向键微调：把选中的一组音整体挪一格（时间）或一个半音（音高）。
+    ///
+    /// 夹在这儿做一次，夹完的增量才是真正会生效的那个 —— 下面按「旧值 + 增量」算新选中集，
+    /// 拿没夹过的增量算出来的位置在边界上根本不存在，选中集那一下就丢了。
+    /// 命令那边还会再夹一次，夹的是已经合法的值，等于没夹。
+    /// </summary>
+    private void NudgeNotes(long deltaTicks, int deltaPitch)
+    {
+        if (_song is not { } song || _controller is not { } controller) return;
+
+        var selected = controller.SelectedNotes.ToArray();
+        if (selected.Length == 0) return;
+
+        (deltaTicks, deltaPitch) = controller.ClampMoveDelta(selected, deltaTicks, deltaPitch);
+        if (deltaTicks == 0 && deltaPitch == 0) return;
+
+        ApplySong(
+            _editor.MoveNotes(song, selected, deltaTicks, deltaPitch),
+            SelectionAfterMove(selected, deltaTicks, deltaPitch));
+    }
+
+    /// <summary>
+    /// Shift + ←/→ ：改时值，一步一格；缩到头也不小于 1 个 tick（时值不能是 0）。
+    ///
+    /// 只动**主选中**那一个。一组音一起改时值本来该是一条命令，而 <c>SetNoteSpan</c> 只收一个音：
+    /// 选中一组按一下就会记 N 格撤销，得按 N 次才回到原样，那是坑不是功能。
+    /// 主选中就是用户最后点的那个（读数条报的也是它），按一下只改它一个说得通。
+    /// </summary>
+    private void NudgeLength(long deltaLength)
+    {
+        if (_song is not { } song || _controller is not { } controller) return;
+        if (controller.Selection is not { } primary) return;
+
+        var target = new NoteRef(primary.Track, primary.Note);
+        if (NoteAt(song, target) is not { } note) return;
+
+        long length = Math.Max(1, note.LengthTicks + deltaLength);
+        if (length == note.LengthTicks) return;
+
+        ApplySong(
+            _editor.SetNoteSpan(song, target, note.StartTick, length),
+            SelectionAfterResize(target, note.StartTick, length));
     }
 
     // ==================== 读数条 ====================

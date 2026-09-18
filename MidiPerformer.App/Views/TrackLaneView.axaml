@@ -5,9 +5,10 @@
   <!--
     一条轨 = 轨道头 + 卷帘。
 
-    轨道头到 08 为止只有**移调**那一格是活的（四个步进按钮夹着当前值），
-    其余三样（音色下拉、只看这条、折叠）还没有归属的切片，所以右边那行灰字如实写着它们还没做 ——
-    摆一排按了没反应的控件比不摆更坏，人会以为是自己没点对。
+    轨道头到 09 有三样是活的：**移调**那一格（四个步进按钮夹着当前值）、**改名**、
+    **删除**（两下：先问一句，再删）。音色下拉、只看这条、折叠还没有归属的切片，
+    所以右边那行灰字如实写着它们还没做 —— 摆一排按了没反应的控件比不摆更坏，
+    人会以为是自己没点对。
 
     底色 / 边框一律取令牌，这里不出现任何颜色字面值。
   -->
@@ -50,6 +51,79 @@
       <Setter Property="HorizontalAlignment" Value="Center" />
       <Setter Property="VerticalAlignment" Value="Center" />
     </Style>
+
+    <!--
+      轨头上的小动作按钮（改名 / 删除 / 取消）：比普通按钮小一号、平时不抢眼。
+      常驻的删除**故意不红**：一屏有 8 条轨，8 个红按钮压在那里，播放头红线和选中圈的
+      那点红就淹了。红留给「真的要删了」那一步（下面 .danger），那才是不可逆的那一下。
+    -->
+    <Style Selector="Button.head-action">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderBrush" Value="{DynamicResource TokenLine}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="{DynamicResource TokenRadiusControl}" />
+      <Setter Property="Padding" Value="7,2" />
+      <Setter Property="FontSize" Value="11.5" />
+      <Setter Property="MinHeight" Value="0" />
+      <Setter Property="Foreground" Value="{DynamicResource TokenInkMuted}" />
+    </Style>
+
+    <!--
+      hover / pressed 要打在模板的 ContentPresenter 上：Fluent 那些状态是**直接设在那个元素上**的，
+      绕过了 TemplateBinding，只设 Button 自己的属性盖不住。这几条能生效，是因为控件自己的
+      Styles 排在 Application.Styles 之后 —— Controls.axaml 开头解释了这件事。
+    -->
+    <Style Selector="Button.head-action:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource TokenSurface3}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource TokenLine}" />
+      <Setter Property="Foreground" Value="{DynamicResource TokenInk}" />
+    </Style>
+
+    <Style Selector="Button.head-action:pressed /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource TokenSurface3}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource TokenAccent}" />
+      <Setter Property="Foreground" Value="{DynamicResource TokenInk}" />
+    </Style>
+
+    <!--
+      红色那一步。取 Stop 而不是 Controls.axaml 里 Button.danger 的 Warn：
+      Warn 是「注意」（试听、风险提示那种），Stop 才是「会没」——
+      和演奏窗口的 big-stop 一个色系。类名仍然带 danger（意思一样），
+      这几条按选择器优先级压过应用级那两条，所以悬停不会变成橙色。
+    -->
+    <Style Selector="Button.head-action.danger">
+      <Setter Property="Background" Value="{DynamicResource TokenStopSoft}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource TokenStopLine}" />
+      <Setter Property="Foreground" Value="{DynamicResource TokenStop}" />
+    </Style>
+
+    <Style Selector="Button.head-action.danger /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource TokenStopSoft}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource TokenStopLine}" />
+      <Setter Property="Foreground" Value="{DynamicResource TokenStop}" />
+    </Style>
+
+    <Style Selector="Button.head-action.danger:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource TokenStopSoft}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource TokenStop}" />
+      <Setter Property="Foreground" Value="{DynamicResource TokenStop}" />
+    </Style>
+
+    <Style Selector="Button.head-action.danger:pressed /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource TokenStopSoft}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource TokenStop}" />
+      <Setter Property="Foreground" Value="{DynamicResource TokenStop}" />
+    </Style>
+
+    <!-- 就地的改名输入框：和它顶替掉的那行名字同一个字号字重，换上去的时候整行不跳 -->
+    <Style Selector="TextBox.rename">
+      <Setter Property="FontSize" Value="12.5" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="MinWidth" Value="62" />
+      <Setter Property="Padding" Value="3,3" />
+      <Setter Property="CornerRadius" Value="{DynamicResource TokenRadiusSmall}" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
   </UserControl.Styles>
 
   <StackPanel>
@@ -57,7 +131,12 @@
             BorderBrush="{DynamicResource TokenLineSoft}"
             BorderThickness="0,0,0,1"
             Padding="10,6">
-      <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,*">
+      <!--
+        列从头到尾：轨号 / 名字 / 音色 / 移调 / 改名 / 删除 / 音数 / 右边那行灰字。
+        名字那格叠着两个控件（TextBlock 与 TextBox），同一时刻只亮一个 —— 改名是**就地**换的，
+        不另开一格，否则一按改名整行会横向错位一下。
+      -->
+      <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,*">
         <TextBlock x:Name="NumberText"
                    Grid.Column="0"
                    FontSize="11" FontWeight="Bold"
@@ -67,6 +146,13 @@
                    Grid.Column="1"
                    FontSize="12.5" FontWeight="SemiBold"
                    MinWidth="62" VerticalAlignment="Center" />
+        <!-- 改名用的输入框，平时藏着（见上面那一格为什么和 NameText 同列） -->
+        <TextBox x:Name="NameBox"
+                 Grid.Column="1"
+                 Classes="rename"
+                 IsVisible="False"
+                 KeyDown="OnNameBoxKeyDown"
+                 LostFocus="OnNameBoxLostFocus" />
         <TextBlock x:Name="TimbreText"
                    Grid.Column="2"
                    FontSize="11.5"
@@ -100,13 +186,49 @@
           </Border>
         </StackPanel>
 
+        <Button x:Name="RenameButton"
+                Grid.Column="4"
+                Classes="head-action"
+                Margin="10,0,0,0"
+                Content="改名"
+                Click="OnRenameClick"
+                ToolTip.Tip="改这条轨的名字（回车确定，Esc 取消）" />
+
+        <!-- 删除那一格：平时只有一个按钮；按下去换成一句「删掉这条轨？」+ 删除 / 取消 -->
+        <StackPanel Grid.Column="5" Orientation="Horizontal" Spacing="6"
+                    Margin="6,0,0,0" VerticalAlignment="Center">
+          <Button x:Name="DeleteButton"
+                  Classes="head-action"
+                  Content="删除"
+                  Click="OnDeleteClick"
+                  ToolTip.Tip="删掉这条轨（会先问一句，可以撤销）" />
+          <StackPanel x:Name="DeleteConfirm" Orientation="Horizontal" Spacing="6"
+                      IsVisible="False" VerticalAlignment="Center">
+            <TextBlock Text="删掉这条轨？"
+                       FontSize="11.5"
+                       Foreground="{DynamicResource TokenStop}"
+                       VerticalAlignment="Center" />
+            <Button x:Name="DeleteYesButton"
+                    Classes="head-action danger"
+                    Content="删除"
+                    Click="OnDeleteConfirmClick"
+                    ToolTip.Tip="真的删掉（Ctrl+Z 可以撤销）" />
+            <Button x:Name="DeleteCancelButton"
+                    Classes="head-action"
+                    Content="取消"
+                    Click="OnDeleteCancelClick"
+                    ToolTip.Tip="不删了" />
+          </StackPanel>
+        </StackPanel>
+
         <TextBlock x:Name="CountText"
-                   Grid.Column="4"
+                   Grid.Column="6"
                    FontSize="11.5"
+                   Margin="12,0,0,0"
                    Foreground="{DynamicResource TokenInkMuted}"
                    VerticalAlignment="Center" />
         <TextBlock x:Name="LaterText"
-                   Grid.Column="5"
+                   Grid.Column="7"
                    FontSize="11"
                    Foreground="{DynamicResource TokenInkFaint}"
                    HorizontalAlignment="Right" VerticalAlignment="Center"

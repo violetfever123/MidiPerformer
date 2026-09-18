@@ -273,4 +273,170 @@ public class PianoRollPresenterTests
 
         Assert.That(scene.ThumbWidth, Is.EqualTo(1000), "框不能比导航条还宽");
     }
+
+    // ==================== 拖动预览（幽灵块）与框选 ====================
+
+    /// <summary>建一张带拖动预览 / 框选 / 多选的场景。位移是**增量**，和命令收的是同一个说法。</summary>
+    private static PianoRollPresenter.LaneScene BuildDragging(
+        Track track,
+        PianoRollGeometry.Viewport view,
+        int[]? dragging = null,
+        long startDelta = 0,
+        long lengthDelta = 0,
+        int pitchDelta = 0,
+        PianoRollPresenter.MarqueeRange? marquee = null,
+        IReadOnlyList<int>? selected = null)
+        => PianoRollPresenter.BuildLane(
+            track, view, 8, TicksPerQuarter,
+            Array.Empty<bool>(),
+            new PianoRollPresenter.RollOverlay(
+                0, false, selected ?? Array.Empty<int>(),
+                dragging is null
+                    ? null
+                    : new PianoRollPresenter.DragPreview(dragging, startDelta, lengthDelta, pitchDelta),
+                marquee));
+
+    [Test]
+    public void 没在拖的时候没有幽灵块()
+    {
+        var scene = Build(Lane(new Note(60, 0, 240, 100)), View());
+
+        Assert.That(scene.GhostNotes, Is.Empty);
+    }
+
+    [Test]
+    public void 幽灵块只给正在拖的那几个音()
+    {
+        var track = Lane(new Note(60, 0, 240, 100), new Note(62, 480, 240, 100));
+
+        var scene = BuildDragging(track, View(), dragging: new[] { 1 }, startDelta: 480);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(scene.GhostNotes, Has.Count.EqualTo(1));
+            Assert.That(scene.GhostNotes[0].Index, Is.EqualTo(1), "拖的是第二个，幽灵也只有第二个");
+        });
+    }
+
+    /// <summary>
+    /// 这条是幽灵块存在的全部理由：预览要是不等于落点，用户就是照着一幅假象在拖。
+    ///
+    /// 拿一个**窄到被 <c>MinNoteWidth</c> 托住**的极短音来试，两种写法在这儿会分道扬镳：
+    /// 「真块宽度 + 位移像素」算出来是一截偏宽的，而「拿新 tick 重算一遍」和落点严丝合缝。
+    /// 末一条断言盯的就是这一点 —— 落点得真的宽过下限，不然这个用例量的是下限、两种写法都能过。
+    /// </summary>
+    [Test]
+    public void 幽灵块和这个音改完之后真画出来的块一模一样()
+    {
+        var before = Lane(new Note(60, 0, 1, 100));
+        var after = Lane(new Note(60, 480, 481, 100));
+
+        var ghost = BuildDragging(before, View(), dragging: new[] { 0 }, startDelta: 480, lengthDelta: 480)
+            .GhostNotes.Single();
+        var landed = Build(after, View()).Notes.Single();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(ghost.X, Is.EqualTo(landed.X).Within(1e-9));
+            Assert.That(ghost.Width, Is.EqualTo(landed.Width).Within(1e-9));
+            Assert.That(landed.Width, Is.GreaterThan(PianoRollGeometry.MinNoteWidth + 40),
+                "落点得真的在量宽度，不是坐在下限上 —— 否则这个用例区分不出两种写法");
+        });
+    }
+
+    [Test]
+    public void 幽灵块跟着音高位移换行()
+    {
+        var ghost = BuildDragging(Lane(new Note(60, 0, 240, 100)), View(),
+            dragging: new[] { 0 }, pitchDelta: 2).GhostNotes.Single();
+        var landed = Build(Lane(new Note(62, 0, 240, 100)), View()).Notes.Single();
+
+        Assert.That(ghost.Y, Is.EqualTo(landed.Y).Within(1e-9), "幽灵得落在升两个半音那一行上");
+    }
+
+    [Test]
+    public void 没在框选时没有带子()
+        => Assert.That(Build(Lane(new Note(60, 0, 240, 100)), View()).Marquee, Is.Null);
+
+    [Test]
+    public void 框选那把带子往左拖也是正的宽()
+    {
+        // 起止是反的（从右往左拖）—— 谁算像素谁负责归一
+        var view = View();
+        var rect = BuildDragging(Lane(new Note(60, 0, 240, 100)), view,
+            marquee: new PianoRollPresenter.MarqueeRange(Bar, 0)).Marquee!.Value;
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(rect.X, Is.EqualTo(PianoRollGeometry.XAtTick(view, 0)).Within(1e-9), "左边缘取小的那头");
+            Assert.That(rect.Width, Is.EqualTo(PianoRollGeometry.XAtTick(view, Bar)).Within(1e-9));
+        });
+    }
+
+    [Test]
+    public void 框选那把带子铺满标尺以下的整条轨()
+    {
+        // 框的纵向不参与判定（删的是「这段区间里的所有音」，与音高无关），
+        // 所以画矮了就是在撒谎：只盖住两行、结果删了三行的音
+        var view = View();
+        var rect = BuildDragging(Lane(new Note(60, 0, 240, 100)), view,
+            marquee: new PianoRollPresenter.MarqueeRange(0, Bar)).Marquee!.Value;
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(rect.Y, Is.EqualTo(PianoRollGeometry.RulerHeight));
+            Assert.That(rect.Height, Is.EqualTo(view.Height - PianoRollGeometry.RulerHeight));
+        });
+    }
+
+    [Test]
+    public void 多选时主选中是最后加进去的那个()
+    {
+        var track = Lane(new Note(60, 0, 240, 100), new Note(62, 480, 240, 100));
+
+        var scene = BuildDragging(track, View(), selected: new[] { 0, 1 });
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(scene.SelectedNotes, Is.EqualTo(new[] { 0, 1 }));
+            Assert.That(scene.SelectedNote, Is.EqualTo(1), "主选中 = 选中集的尾巴，不是另存的第二份状态");
+        });
+    }
+
+    /// <summary>
+    /// 选中集**按加进来的先后**留着，不被排成升序。
+    ///
+    /// 这条挡的是「顺手把它排一下」：<see cref="PianoRollPresenter.LaneScene.SelectedNote"/>
+    /// 取的是尾巴，排成升序就等于把手上的「主选中」换成了下标最大的那个 ——
+    /// 用户先点 5 号、再按住 Shift 点 2 号，主选中会从 2 号跳回 5 号。
+    /// 顺序在这条链上是有含义的数据，不是随手排的容器。
+    /// </summary>
+    [Test]
+    public void 选中集的顺序是加进来的先后不是升序()
+    {
+        var track = Lane(new Note(60, 0, 240, 100), new Note(62, 480, 240, 100));
+
+        // 先点后面那个（1），再 Shift 点前面那个（0）
+        var scene = BuildDragging(track, View(), selected: new[] { 1, 0 });
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(scene.SelectedNotes, Is.EqualTo(new[] { 1, 0 }), "原样留着，别排");
+            Assert.That(scene.SelectedNote, Is.EqualTo(0), "主选中是最后加的那个，不是下标最大的那个");
+        });
+    }
+
+    [Test]
+    public void 场景自己留一份选中集不跟着调用方的缓冲变()
+    {
+        // 卷帘那边复用同一个缓冲，下一帧就清掉重填，而场景要活到下一次 SetScene ——
+        // 留着引用的话，这一帧刚画到一半选中集就被改了
+        var buffer = new List<int> { 0, 1 };
+        var track = Lane(new Note(60, 0, 240, 100), new Note(62, 480, 240, 100));
+
+        var scene = BuildDragging(track, View(), selected: buffer);
+        buffer.Clear();
+
+        Assert.That(scene.SelectedNotes, Is.EqualTo(new[] { 0, 1 }), "调用方清空之后场景还得是原来那两个");
+    }
 }

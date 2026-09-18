@@ -52,6 +52,33 @@ public sealed class UndoableSongEditor : ISongEditor
         => Record(song, _inner.SetTranspose(song, trackIndex, semitones));
 
     /// <summary>
+    /// 挪音符这条命令**一次调用就是一格撤销**，哪怕界面上是一次鼠标拖动。
+    ///
+    /// 拖动过程中不发命令：界面先自己画预览，松手才算一次「挪到这里」交进来 ——
+    /// 否则拖一下会攒出几百格撤销，用户按 Ctrl+Z 得按到手酸才能退回拖动之前。
+    /// 所以这里不需要「合并连续的同一条命令」那种机制，装饰器一行都不用改。
+    /// </summary>
+    public Song MoveNotes(Song song, IReadOnlyList<NoteRef> notes, long deltaTicks, int deltaPitch)
+        => Record(song, _inner.MoveNotes(song, notes, deltaTicks, deltaPitch));
+
+    /// <summary>
+    /// 改时值同样是一格。注意它**可能让音符越位**（<see cref="Track.Notes"/> 会重排，
+    /// 下标跟着变）—— 那是撤销链上的一步，撤回去的时候整份旧 <see cref="Song"/> 一起回去，
+    /// 下标自然也跟着回去了，这里没有额外要记账的东西。
+    /// </summary>
+    public Song SetNoteSpan(Song song, NoteRef note, long startTick, long lengthTicks)
+        => Record(song, _inner.SetNoteSpan(song, note, startTick, lengthTicks));
+
+    public Song DeleteNotes(Song song, IReadOnlyList<NoteRef> notes)
+        => Record(song, _inner.DeleteNotes(song, notes));
+
+    public Song RenameTrack(Song song, int trackIndex, string name)
+        => Record(song, _inner.RenameTrack(song, trackIndex, name));
+
+    public Song DeleteTrack(Song song, int trackIndex)
+        => Record(song, _inner.DeleteTrack(song, trackIndex));
+
+    /// <summary>
     /// 撤掉上一步，返回该回去的那份曲子。栈空时返回 <c>null</c> 且什么都不做、不崩 ——
     /// 「没什么可撤的」是个正常状态，不是错误。
     /// </summary>

@@ -1,0 +1,677 @@
+<title>卷帘手感样机</title>
+<style>
+  /* 颜色令牌逐条抄自 MidiPerformer.App/Styles/Tokens.axaml —— 只取这套样机用得上的那些。
+     这么做是为了让手感和真程序一致：你在这页上摸到的一格，就是编辑器里的一格。 */
+  :root{
+    --ground:#EEF1F5; --surface:#FFFFFF; --surface2:#F7F9FB; --surface3:#EAEEF3;
+    --ink:#171C23; --ink-muted:#5C6673; --ink-faint:#8A94A1;
+    --line:#CDD5DE; --line-soft:#E3E8EE;
+    --accent:#2C6BA8; --accent-soft:#DCEAF7; --accent-line:#9CC2E4;
+    --warn:#A85A1E; --warn-soft:#F8EADC; --warn-line:#DDB183;
+    --stop:#A83232; --stop-soft:#F8E2E2;
+    --note:#4A5563; --note-edge:#333C47;
+    --grid-bar:#B9C4D0; --grid-beat:#DDE3EA; --grid-16:#EDF1F5;
+    --laneA:#FBFCFD; --laneB:#F3F6F9;
+    --shadow:0 1px 2px #0F171C23, 0 8px 24px #0F171C23;
+    --r-sm:3px; --r-ctl:4px; --r-btn:5px; --r-panel:6px; --r-card:8px;
+    --font-ui:"Segoe UI","Microsoft YaHei","PingFang SC",system-ui,-apple-system,"Helvetica Neue",Arial,sans-serif;
+    --font-mono:"Cascadia Mono",Consolas,ui-monospace,"SF Mono",Menlo,monospace;
+  }
+  @media (prefers-color-scheme:dark){
+    :root:not([data-theme="light"]){
+      --ground:#13171C; --surface:#1A1F26; --surface2:#1F252D; --surface3:#262D36;
+      --ink:#E7EBF1; --ink-muted:#9BA6B3; --ink-faint:#6E7987;
+      --line:#333C46; --line-soft:#272E37;
+      --accent:#74ABDD; --accent-soft:#1C2E42; --accent-line:#3A5F85;
+      --warn:#D89B60; --warn-soft:#33261A; --warn-line:#6B4E2E;
+      --stop:#E08080; --stop-soft:#33201F;
+      --note:#5E6B7A; --note-edge:#48535F;
+      --grid-bar:#4A5563; --grid-beat:#2C343D; --grid-16:#232A32;
+      --laneA:#1D232B; --laneB:#20272F;
+      --shadow:0 1px 2px #4D000000, 0 8px 24px #40000000;
+    }
+  }
+  :root[data-theme="dark"]{
+    --ground:#13171C; --surface:#1A1F26; --surface2:#1F252D; --surface3:#262D36;
+    --ink:#E7EBF1; --ink-muted:#9BA6B3; --ink-faint:#6E7987;
+    --line:#333C46; --line-soft:#272E37;
+    --accent:#74ABDD; --accent-soft:#1C2E42; --accent-line:#3A5F85;
+    --warn:#D89B60; --warn-soft:#33261A; --warn-line:#6B4E2E;
+    --stop:#E08080; --stop-soft:#33201F;
+    --note:#5E6B7A; --note-edge:#48535F;
+    --grid-bar:#4A5563; --grid-beat:#2C343D; --grid-16:#232A32;
+    --laneA:#1D232B; --laneB:#20272F;
+    --shadow:0 1px 2px #4D000000, 0 8px 24px #40000000;
+  }
+
+  body{
+    background:var(--ground); color:var(--ink);
+    font-family:var(--font-ui); font-size:14px; line-height:1.6;
+    padding-inline:16px; padding-block:28px 56px;
+  }
+  .wrap{max-width:1000px; margin-inline:auto; display:flex; flex-direction:column; gap:20px}
+  .mono{font-family:var(--font-mono); font-variant-numeric:tabular-nums}
+
+  header h1{font-size:22px; font-weight:650; letter-spacing:-.01em; margin:0 0 6px; text-wrap:balance}
+  header p{margin:0; color:var(--ink-muted); max-width:62ch}
+  .eyebrow{font-size:11px; font-weight:700; letter-spacing:.09em; color:var(--ink-faint);
+    text-transform:uppercase; margin:0 0 8px}
+
+  .panel{background:var(--surface); border:1px solid var(--line); border-radius:var(--r-panel)}
+  .panel > h2{font-size:13px; font-weight:650; margin:0; padding:11px 14px;
+    border-bottom:1px solid var(--line-soft); background:var(--surface2);
+    border-radius:var(--r-panel) var(--r-panel) 0 0}
+  .panel > h2 small{font-weight:400; color:var(--ink-faint); margin-left:8px; font-size:11.5px}
+  .body{padding:14px}
+
+  /* ---------- 控制条 ---------- */
+  .controls{display:flex; flex-wrap:wrap; gap:20px; align-items:flex-start}
+  .ctl{display:flex; flex-direction:column; gap:6px}
+  .ctl > .cap{font-size:11px; font-weight:700; letter-spacing:.07em; color:var(--ink-faint);
+    text-transform:uppercase}
+  .seg{display:inline-flex; border:1px solid var(--line); border-radius:var(--r-btn);
+    overflow:hidden; background:var(--surface)}
+  .seg button{
+    font:inherit; font-size:12.5px; padding:5px 12px; border:0; cursor:pointer;
+    background:transparent; color:var(--ink-muted); border-inline-start:1px solid var(--line);
+  }
+  .seg button:first-child{border-inline-start:0}
+  .seg button:hover{background:var(--accent-soft); color:var(--accent)}
+  .seg button[aria-pressed="true"]{background:var(--accent); color:#fff}
+  :root[data-theme="dark"] .seg button[aria-pressed="true"],
+  :root:not([data-theme="light"]) .seg button[aria-pressed="true"]{color:#0E1216}
+  @media (prefers-color-scheme:light){
+    :root:not([data-theme="dark"]) .seg button[aria-pressed="true"]{color:#fff}
+  }
+  .seg button:focus-visible{outline:2px solid var(--accent); outline-offset:-2px}
+
+  button.plain{font:inherit; font-size:12.5px; padding:5px 12px; cursor:pointer;
+    background:var(--surface); color:var(--ink-muted); border:1px solid var(--line);
+    border-radius:var(--r-btn)}
+  button.plain:hover{background:var(--accent-soft); color:var(--accent); border-color:var(--accent-line)}
+  button.plain:focus-visible{outline:2px solid var(--accent); outline-offset:1px}
+
+  /* ---------- 卷帘 ---------- */
+  .rollscroll{overflow-x:auto; padding-bottom:2px}
+  .roll{position:relative; min-width:600px; height:238px; border:1px solid var(--line);
+    border-radius:var(--r-sm); background:var(--laneA); overflow:hidden;
+    cursor:default; touch-action:none; user-select:none}
+  .roll.grabbing{cursor:grabbing}
+  .layer{position:absolute; inset:0}
+  .gl{position:absolute; top:0; bottom:0; width:1px}
+  .gl.bar{background:var(--grid-bar)}
+  .gl.beat{background:var(--grid-beat)}
+  .gl.s16{background:var(--grid-16)}
+  .rulerline{position:absolute; left:0; right:0; height:1px; background:var(--line); top:17px}
+  .blabel{position:absolute; top:2px; font-size:10px; color:var(--ink-faint);
+    font-family:var(--font-mono); pointer-events:none}
+
+  .n{position:absolute; background:var(--note); border-top:1px solid var(--note-edge);
+    border-radius:1px; cursor:grab}
+  .n.sel{outline:1.5px solid var(--accent); outline-offset:1px}
+  .n.offgrid{background:var(--warn-soft); border-top-color:var(--warn);
+    box-shadow:inset 0 0 0 1px var(--warn-line)}
+  .n .grip{position:absolute; top:0; bottom:0; width:5px; cursor:ew-resize}
+  .n .grip.l{left:0} .n .grip.r{right:0}
+
+  .readout{display:flex; flex-wrap:wrap; gap:18px; padding:9px 14px;
+    background:var(--surface2); border:1px solid var(--line); border-top:0;
+    border-radius:0 0 var(--r-sm) var(--r-sm); font-size:12.5px}
+  .readout .k{color:var(--ink-faint); font-size:11px; margin-right:6px}
+  .readout .v{font-family:var(--font-mono); font-weight:600}
+  .readout .v.hot{color:var(--accent)}
+
+  /* ---------- 尺子 ---------- */
+  .ruler{margin-top:14px; border:1px solid var(--line); border-radius:var(--r-sm);
+    background:var(--surface2); padding:10px 12px}
+  .ruler .track{position:relative; height:26px; margin-top:2px}
+  .ruler .tick{position:absolute; bottom:0; width:1px; background:var(--ink-faint)}
+  .ruler .tick.cm{height:14px} .ruler .tick.half{height:8px; background:var(--line)}
+  .ruler .num{position:absolute; top:0; font-size:10px; color:var(--ink-faint);
+    font-family:var(--font-mono); transform:translateX(-50%)}
+  .ruler .inch{position:absolute; top:0; bottom:0; width:1.5px; background:var(--stop)}
+
+  .facts{display:grid; gap:10px; grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
+    margin-top:12px}
+  .fact{background:var(--surface2); border:1px solid var(--line-soft); border-radius:var(--r-sm);
+    padding:9px 11px}
+  .fact .fl{font-size:11px; color:var(--ink-faint)}
+  .fact .fv{font-family:var(--font-mono); font-size:16px; font-weight:650; margin-top:1px}
+  .fact .fn{font-size:11px; color:var(--ink-muted); margin-top:2px}
+  .fact.hero{background:var(--accent-soft); border-color:var(--accent-line)}
+  .fact.hero .fv{color:var(--accent)}
+
+  /* ---------- 对比 ---------- */
+  .compare{display:grid; gap:14px; grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}
+  .card{border:1px solid var(--line); border-radius:var(--r-sm); background:var(--surface2);
+    padding:12px}
+  .card h3{margin:0 0 3px; font-size:13px; font-weight:650}
+  .card .verdict{font-size:12px; margin:0 0 10px; min-height:3.2em}
+  .mini{position:relative; height:74px; background:var(--laneA); border:1px solid var(--line);
+    border-radius:var(--r-sm); overflow:hidden}
+  .mini .n{cursor:default}
+  .ghost{position:absolute; border:1.5px dashed var(--accent); border-radius:1px; background:transparent}
+  .mini .arrow{position:absolute; top:50%; height:1.5px; background:var(--accent)}
+  .card.ok{border-color:var(--accent-line)}
+  .card.bad .verdict{color:var(--warn)}
+
+  /* ---------- 键位 ---------- */
+  .schemes{display:grid; gap:14px; grid-template-columns:repeat(auto-fit,minmax(290px,1fr))}
+  .scheme{border:1px solid var(--line); border-radius:var(--r-sm); padding:12px;
+    background:var(--surface2)}
+  .scheme[data-on="true"]{border-color:var(--accent-line); background:var(--accent-soft)}
+  .scheme h3{margin:0 0 8px; font-size:13px}
+  .scheme h3 .tag{font-size:10.5px; font-weight:700; letter-spacing:.06em; text-transform:uppercase;
+    color:var(--accent); margin-left:7px}
+  .keys{display:flex; flex-direction:column; gap:5px; font-size:12.5px}
+  .krow{display:flex; align-items:center; gap:8px}
+  .krow .desc{color:var(--ink-muted)}
+  kbd{font-family:var(--font-mono); font-size:11px; padding:2px 6px; min-width:20px;
+    text-align:center; background:var(--surface); border:1px solid var(--line);
+    border-bottom-width:2px; border-radius:var(--r-sm); color:var(--ink)}
+  kbd.wide{min-width:auto}
+  .plus{color:var(--ink-faint); font-size:11px}
+  .hint{font-size:11.5px; color:var(--ink-faint); margin:10px 0 0}
+  .risk{background:var(--warn-soft); border:1px solid var(--warn-line); color:var(--warn);
+    border-radius:var(--r-ctl); padding:9px 11px; font-size:12px}
+</style>
+
+<div class="wrap">
+
+  <header>
+    <p class="eyebrow">工单 09 · 低保真样机</p>
+    <h1>卷帘手感样机</h1>
+    <p>这一个页面对应工单 09 里「改动吸附到网格」那一条。卷帘的宽度、色、网格线都照真程序来，
+      所以下面摸到的一格就是你以后在编辑器里摸到的一格。拖音符、拖边缘、按方向键都生效。</p>
+  </header>
+
+  <!-- ============ 控制条 ============ -->
+  <section class="panel">
+    <h2>先选一个网格<small>下面所有数字跟着它变</small></h2>
+    <div class="body">
+      <div class="controls">
+        <div class="ctl">
+          <span class="cap">吸附网格</span>
+          <div class="seg" id="snapSeg" role="group" aria-label="吸附网格">
+            <button data-snap="4" aria-pressed="true">一拍</button>
+            <button data-snap="1" aria-pressed="false">十六分音符</button>
+          </div>
+        </div>
+        <div class="ctl">
+          <span class="cap">方向键</span>
+          <div class="seg" id="schemeSeg" role="group" aria-label="方向键方案">
+            <button data-scheme="A" aria-pressed="true">方案 A</button>
+            <button data-scheme="B" aria-pressed="false">方案 B</button>
+          </div>
+        </div>
+        <div class="ctl">
+          <span class="cap">改坏了</span>
+          <div style="display:flex; gap:6px">
+            <button class="plain" id="undoBtn">撤销</button>
+            <button class="plain" id="resetBtn">复位</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="facts" id="facts"></div>
+    </div>
+  </section>
+
+  <!-- ============ 卷帘 ============ -->
+  <section class="panel">
+    <h2>卷帘<small>点一个音选中 · 拖身体移动 · 拖左右边缘改时值 · 按方向键微调</small></h2>
+    <div class="body" style="padding:14px 14px 0">
+      <div class="rollscroll">
+        <div class="roll" id="roll" tabindex="0" aria-label="卷帘样机"></div>
+      </div>
+      <div class="readout" id="readout"></div>
+    </div>
+
+    <div class="body" style="padding-top:0">
+      <div class="ruler">
+        <span class="cap" style="font-size:11px; font-weight:700; letter-spacing:.07em;
+          color:var(--ink-faint); text-transform:uppercase">下面这把尺子的刻度就是上面卷帘的刻度</span>
+        <div class="track" id="rulerTrack"></div>
+      </div>
+      <p class="hint" id="scaleNote"></p>
+    </div>
+  </section>
+
+  <!-- ============ 抢拍对比 ============ -->
+  <section class="panel">
+    <h2>同一段谱子，两种网格吸出来的结果<small>那个浅黄底的音比整拍早了十六分之一拍</small></h2>
+    <div class="body">
+      <div class="compare">
+        <div class="card bad">
+          <h3>一拍网格</h3>
+          <p class="verdict">一碰这个音，它就被拽到最近的整拍上。
+            <b>「抢拍」这个特征被抹掉了</b>——你想修的就是它，结果它被吸附修没了。</p>
+          <div class="mini" id="miniBeat"></div>
+        </div>
+        <div class="card ok">
+          <h3>十六分网格</h3>
+          <p class="verdict">这个音本来就落在十六分格线上，<b>拖它一下它不动</b>。
+            要往前挪也是挪十六分，抢的那一点还在你手上。</p>
+          <div class="mini" id="mini16"></div>
+        </div>
+      </div>
+      <p class="hint">这条只说明「修不修得动」。代价在下一步：格子细了，拖一格要更准的手。</p>
+    </div>
+  </section>
+
+  <!-- ============ 键位 ============ -->
+  <section class="panel">
+    <h2>两种方向键方案<small>挑一个，然后回上面那块卷帘上按按看</small></h2>
+    <div class="body">
+      <div class="schemes">
+        <div class="scheme" id="schemeA" data-on="true">
+          <h3>方案 A<span class="tag">工单 09 的字面</span></h3>
+          <div class="keys">
+            <div class="krow"><kbd>←</kbd><kbd>→</kbd><span class="desc">选中的音左移 / 右移一格</span></div>
+            <div class="krow"><kbd>↑</kbd><kbd>↓</kbd><span class="desc">升高 / 降低半音</span></div>
+            <div class="krow"><kbd class="wide">Shift</kbd><span class="plus">+</span><kbd>←</kbd><kbd>→</kbd><span class="desc">时值缩 / 放一格</span></div>
+            <div class="krow"><kbd class="wide">Ctrl</kbd><span class="plus">+</span><kbd>←</kbd><kbd>→</kbd><span class="desc">在音符之间前后跳（只定位）</span></div>
+          </div>
+          <p class="hint">07 已经做好的「前后跳」挪到 Ctrl 上，功能没丢，只是让开了主键。</p>
+        </div>
+
+        <div class="scheme" id="schemeB" data-on="false">
+          <h3>方案 B<span class="tag">不动 07</span></h3>
+          <div class="keys">
+            <div class="krow"><kbd>←</kbd><kbd>→</kbd><span class="desc">在音符之间前后跳（只定位）</span></div>
+            <div class="krow"><kbd>,</kbd><kbd>.</kbd><span class="desc">选中的音左移 / 右移一格</span></div>
+            <div class="krow"><kbd>;</kbd><kbd>'</kbd><span class="desc">升高 / 降低半音</span></div>
+            <div class="krow"><kbd class="wide">Shift</kbd><span class="plus">+</span><kbd>,</kbd><kbd>.</kbd><span class="desc">时值缩 / 放一格</span></div>
+          </div>
+          <p class="hint">07 的两条测试原样保留，代价是微调那四个键跟工单 09 写的不是一套。</p>
+        </div>
+      </div>
+      <p class="hint">两个方案都试一遍：选中一个音，按住方向键连按几下，看手感差在哪。</p>
+    </div>
+  </section>
+
+  <div class="risk">
+    这只是个样机：不会发任何按键、不碰游戏、改的全在这张网页里。真程序里所有编辑都走 08 立的撤销脊柱，Ctrl+Z 能一路退回去。
+  </div>
+
+</div>
+
+<script>
+(() => {
+  "use strict";
+
+  // ---------- 谱子：4 小节，一首 C 大调的短句 ----------
+  // start / len 的单位都是十六分音符格；一小节 = 16 格，一屏 4 小节 = 64 格。
+  const BARS = 4, STEPS_PER_BAR = 16, STEPS = BARS * STEPS_PER_BAR;
+  const BASE = [
+    // 第 1 小节：四个四分音
+    [64,  0, 4], [67,  4, 4], [69,  8, 4], [67, 12, 4],
+    // 第 2 小节：二分音 + 一个**抢拍**的 A（比整拍早 1/16）
+    [72, 16, 8], [69, 27, 4],
+    // 第 3 小节：四个四分音
+    [67, 32, 4], [69, 36, 4], [71, 40, 4], [72, 44, 4],
+    // 第 4 小节：二分音 + 两个四分音
+    [74, 48, 8], [71, 56, 4], [67, 60, 4],
+  ];
+  const LOW = 64, HIGH = 74;              // 音域 C4..D5，照真程序自适应出来的那几行
+  const NAMES = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
+  const noteName = m => NAMES[m % 12] + (Math.floor(m / 12) - 1);
+
+  let notes = BASE.map(([p, s, l], i) => ({ id: i, pitch: p, start: s, len: l }));
+  let nextId = notes.length;
+  let selected = 5;                        // 开场就选中那个抢拍的音
+  let snap = 4;                            // 4 格 = 一拍；1 格 = 十六分
+  let scheme = "A";
+  let undoStack = [];
+
+  const roll = document.getElementById("roll");
+  const readout = document.getElementById("readout");
+  const facts = document.getElementById("facts");
+  const rulerTrack = document.getElementById("rulerTrack");
+  const scaleNote = document.getElementById("scaleNote");
+
+  // ---------- 尺寸：全部由卷帘的真实宽度现算，所以数字是量出来的，不是编的 ----------
+  let rollW = 900;
+  const stepPx = () => rollW / STEPS;      // 一格（十六分）多少像素
+  const rowH = () => (roll.clientHeight - 18) / (HIGH - LOW + 1);
+
+  const PX_PER_MM = 96 / 25.4;             // CSS 像素是 96dpi
+  const mm = px => (px / PX_PER_MM);
+
+  const snapLabel = () => snap === 4 ? "一拍" : "十六分音符";
+  const snapText = () => snap === 4
+    ? `一格 = 一拍 = ${(stepPx() * 4).toFixed(1)}px ≈ ${mm(stepPx() * 4).toFixed(1)}mm`
+    : `一格 = 十六分 = ${stepPx().toFixed(1)}px ≈ ${mm(stepPx()).toFixed(1)}mm`;
+
+  // 吸到最近的格线。**相对音符原来的位置算**，所以本来就离格的音会在第一次拖动时跳回格上 —— 那正是吸附的意思。
+  const snapVal = (v) => Math.round(v / snap) * snap;
+
+  const clampStart = (s, len) => Math.max(0, Math.min(STEPS - len, s));
+
+  // ---------- 画卷帘 ----------
+  function render() {
+    rollW = roll.clientWidth;
+    const h = roll.clientHeight, rh = rowH();
+
+    let html = "";
+
+    // 网格线：小节线一直画；拍线一直画；十六分线只在选了十六分网格时画（画出来给你看密不密）
+    for (let s = 0; s <= STEPS; s++) {
+      const x = s * stepPx();
+      let cls = null;
+      if (s % STEPS_PER_BAR === 0) cls = "bar";
+      else if (s % 4 === 0) cls = "beat";
+      else if (snap === 1) cls = "s16";
+      if (cls) html += `<div class="gl ${cls}" style="left:${x}px"></div>`;
+    }
+    html += `<div class="rulerline"></div>`;
+    for (let b = 0; b < BARS; b++) {
+      html += `<div class="blabel" style="left:${b * STEPS_PER_BAR * stepPx() + 4}px">第 ${b + 1} 小节</div>`;
+    }
+
+    // 音符
+    for (const n of notes) {
+      const x = n.start * stepPx();
+      const w = Math.max(2, n.len * stepPx() - 1);
+      const y = 18 + (HIGH - n.pitch) * rh + 0.8;
+      const cls = ["n"];
+      if (n.id === selected) cls.push("sel");
+      if (n.start % 4 !== 0) cls.push("offgrid");
+      html += `<div class="${cls.join(" ")}" data-id="${n.id}"
+        style="left:${x}px; top:${y}px; width:${w}px; height:${Math.max(3, rh - 1.6)}px">
+        <div class="grip l" data-grip="l"></div><div class="grip r" data-grip="r"></div></div>`;
+    }
+
+    roll.innerHTML = html;
+  }
+
+  // ---------- 读数条 ----------
+  function renderReadout(hint) {
+    const n = notes.find(x => x.id === selected);
+    if (!n) {
+      readout.innerHTML = `<span><span class="k">选中</span><span class="v">—</span></span>
+        <span style="color:var(--ink-faint)">点一个音</span>`;
+      return;
+    }
+    const bar = Math.floor(n.start / STEPS_PER_BAR) + 1;
+    const beat = (n.start % STEPS_PER_BAR) / 4 + 1;
+    const off = n.start % 4 !== 0;
+    readout.innerHTML = `
+      <span><span class="k">音高</span><span class="v">${noteName(n.pitch)}</span></span>
+      <span><span class="k">小节</span><span class="v">${bar}</span></span>
+      <span><span class="k">拍位</span><span class="v${off ? " hot" : ""}">${beat.toFixed(2)} 拍${off ? " ← 抢拍" : ""}</span></span>
+      <span><span class="k">时值</span><span class="v">${(n.len / 4).toFixed(2)} 拍</span></span>
+      <span style="margin-left:auto; color:var(--ink-faint); font-size:11.5px">${hint || ""}</span>`;
+  }
+
+  // ---------- 尺子 + 数字 ----------
+  function renderScale() {
+    const total = rollW;
+    let html = "";
+    for (let m = 0; m <= Math.floor(mm(total)); m++) {
+      const x = m * PX_PER_MM;
+      if (x > total) break;
+      const isCm = m % 10 === 0;
+      html += `<div class="tick ${isCm ? "cm" : "half"}" style="left:${x}px"></div>`;
+      if (isCm && m > 0 && m % 20 === 0)
+        html += `<div class="num" style="left:${x}px">${m / 10}cm</div>`;
+    }
+    // 一英寸那条红线：25.4mm
+    html += `<div class="inch" style="left:${25.4 * PX_PER_MM}px"></div>`;
+    rulerTrack.innerHTML = html;
+
+    const beat = stepPx() * 4;
+    const shiftPx = (snap / 2) * stepPx();   // 要移动这么远才会跳到下一格
+    const charW = 14;                        // 14px 字号下一个汉字大约这么宽
+
+    facts.innerHTML = `
+      <div class="fact hero">
+        <div class="fl">${snapLabel()}网格 · 一格</div>
+        <div class="fv">${(snap === 4 ? beat : stepPx()).toFixed(0)}px</div>
+        <div class="fn">≈ ${mm(snap === 4 ? beat : stepPx()).toFixed(1)}mm ≈ ${((snap === 4 ? beat : stepPx()) / charW).toFixed(1)} 个汉字宽</div>
+      </div>
+      <div class="fact hero">
+        <div class="fl">手要移动多少才有反应</div>
+        <div class="fv">${shiftPx.toFixed(0)}px</div>
+        <div class="fn">≈ ${mm(shiftPx).toFixed(1)}mm，不到一半就弹回原处</div>
+      </div>
+      <div class="fact">
+        <div class="fl">一小节（一屏 4 个）</div>
+        <div class="fv">${(rollW / BARS).toFixed(0)}px</div>
+        <div class="fn">≈ ${mm(rollW / BARS).toFixed(0)}mm</div>
+      </div>
+      <div class="fact">
+        <div class="fl">一屏能放的最小音</div>
+        <div class="fv">${(snap === 4 ? beat : stepPx()).toFixed(0)}px 宽</div>
+        <div class="fn">${snap === 4 ? "十六分音符会被画成同宽，分不出长短" : "十六分音符各占一格，看得出长短"}</div>
+      </div>`;
+
+    scaleNote.textContent =
+      `卷帘宽度按真程序算：窗口 1180px 减去左边 212px 曲库，剩下约 ${Math.round(rollW)}px 给 4 小节。`
+      + `一屏跨 16 拍，所以一拍约 ${beat.toFixed(0)}px。红线是一英寸（25.4mm），照着它比一比就知道一格到底多宽。`;
+  }
+
+  function renderMini(id, useSnap) {
+    const el = document.getElementById(id);
+    const w = el.clientWidth, sp = w / STEPS;
+    const rh = (el.clientHeight - 2) / (HIGH - LOW + 1);
+    const n = BASE[5];                       // 那个抢拍的 A
+    const origX = n[1] * sp;
+    const snapped = Math.round(n[1] / useSnap) * useSnap;
+    const newX = snapped * sp;
+
+    let html = "";
+    for (let s = 0; s <= STEPS; s += (useSnap === 4 ? 4 : 1)) {
+      const x = s * sp;
+      const isBar = s % STEPS_PER_BAR === 0;
+      html += `<div class="gl ${isBar ? "bar" : (useSnap === 4 ? "beat" : "s16")}"
+        style="left:${x}px"></div>`;
+    }
+
+    // 原来在哪（虚线幽灵）
+    const y = 1 + (HIGH - n[0]) * rh;
+    const nh = Math.max(3, rh - 1.6);
+    html += `<div class="ghost" style="left:${origX}px; top:${y}px;
+      width:${Math.max(2, n[2] * sp - 1)}px; height:${nh}px"></div>`;
+
+    // 吸附之后落在哪
+    html += `<div class="n offgrid" style="left:${newX}px; top:${y}px;
+      width:${Math.max(2, n[2] * sp - 1)}px; height:${nh}px"></div>`;
+
+    if (Math.abs(newX - origX) > 1) {
+      html += `<div class="arrow" style="left:${Math.min(newX, origX)}px;
+        width:${Math.abs(newX - origX)}px"></div>`;
+    }
+    el.innerHTML = html;
+  }
+
+  // ---------- 编辑 ----------
+  const pushUndo = () => {
+    undoStack.push(JSON.stringify(notes));
+    if (undoStack.length > 60) undoStack.shift();
+  };
+
+  function commit() { render(); renderReadout(); }
+
+  function nudge(dTime, dPitch, dLen) {
+    const n = notes.find(x => x.id === selected);
+    if (!n) return;
+    const before = JSON.stringify(notes);
+
+    if (dTime) n.start = clampStart(n.start + dTime, n.len);
+    if (dPitch) n.pitch = Math.max(LOW, Math.min(HIGH, n.pitch + dPitch));
+    if (dLen) {
+      n.len = Math.max(snap, Math.min(STEPS - n.start, n.len + dLen));
+    }
+    if (JSON.stringify(notes) === before) return;   // 没动就不记一笔，和真程序的「引用相等」同一条规矩
+    pushUndo2(before);
+    commit();
+  }
+  function pushUndo2(snapshot) {
+    undoStack.push(snapshot);
+    if (undoStack.length > 60) undoStack.shift();
+  }
+
+  function seek(delta) {
+    const sorted = [...notes].sort((a, b) =>
+      a.start - b.start || a.pitch - b.pitch || a.id - b.id);
+    if (!sorted.length) return;
+    let i = sorted.findIndex(x => x.id === selected);
+    if (i < 0) i = delta > 0 ? -1 : 0;
+    const next = Math.max(0, Math.min(sorted.length - 1, i + delta));
+    selected = sorted[next].id;
+    commit();
+  }
+
+  // ---------- 拖动 ----------
+  let drag = null;
+
+  function localX(e) {
+    return e.clientX - roll.getBoundingClientRect().left;
+  }
+
+  roll.addEventListener("pointerdown", (e) => {
+    const el = e.target.closest(".n");
+    if (el) {
+      const id = +el.dataset.id;
+      const n = notes.find(x => x.id === id);
+      selected = id;
+      const grip = e.target.dataset.grip;
+      drag = { n, grip: grip || "body", x0: localX(e), start0: n.start, len0: n.len, moved: false };
+      // 「手要移动多少才有反应」= 半格。先把这条线量出来给读数条用
+      drag.threshold = snap / 2;
+    } else {
+      selected = -1;
+      drag = null;
+      commit();
+      return;
+    }
+    roll.classList.add("grabbing");
+    roll.setPointerCapture(e.pointerId);
+    commit();
+    e.preventDefault();
+  });
+
+  roll.addEventListener("pointermove", (e) => {
+    if (!drag) {
+      // 光标：落在音符上给抓取手型，落在左右 5px 给横向拉伸
+      const el = e.target.closest(".n");
+      roll.style.cursor = el ? (e.target.dataset.grip ? "ew-resize" : "grab") : "default";
+      return;
+    }
+
+    const dn = (localX(e) - drag.x0) / stepPx();      // 移动了几个格（浮点）
+    if (Math.abs(dn) < drag.threshold && !drag.moved) return;  // 没越过半格，什么都不动
+    if (!drag.moved) { pushUndo(); drag.moved = true; }
+
+    const n = drag.n;
+    if (drag.grip === "body") {
+      const raw = drag.start0 + dn;
+      n.start = clampStart(snapVal(raw), n.len);
+    } else if (drag.grip === "l") {
+      const rawEnd = drag.start0 + drag.len0;
+      const s = clampStart(snapVal(drag.start0 + dn), 0);
+      const newStart = Math.max(0, Math.min(s, rawEnd - snap));
+      n.start = newStart;
+      n.len = rawEnd - newStart;
+    } else {
+      const rawLen = drag.len0 + dn;
+      n.len = Math.max(snap, Math.min(STEPS - n.start, snapVal(rawLen)));
+    }
+    commit();
+  });
+
+  function endDrag(e) {
+    if (!drag) return;
+    drag = null;
+    roll.classList.remove("grabbing");
+    if (e) roll.releasePointerCapture?.(e.pointerId);
+    renderReadout();
+  }
+  roll.addEventListener("pointerup", endDrag);
+  roll.addEventListener("pointercancel", endDrag);
+
+  // ---------- 键盘 ----------
+  document.addEventListener("keydown", (e) => {
+    const tag = (e.target.tagName || "").toLowerCase();
+    if (tag === "input" || tag === "textarea") return;
+
+    const ctrl = e.ctrlKey || e.metaKey;
+    if (ctrl && e.key.toLowerCase() === "z") { undo(); e.preventDefault(); return; }
+
+    const S = snap;
+    if (scheme === "A") {
+      if (ctrl && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
+        seek(e.key === "ArrowLeft" ? -1 : 1); e.preventDefault(); return;
+      }
+      if (e.key === "ArrowLeft")  { e.shiftKey ? nudge(0, 0, -S) : nudge(-S, 0, 0); e.preventDefault(); }
+      else if (e.key === "ArrowRight") { e.shiftKey ? nudge(0, 0, S) : nudge(S, 0, 0); e.preventDefault(); }
+      else if (e.key === "ArrowUp")    { nudge(0, 1, 0); e.preventDefault(); }
+      else if (e.key === "ArrowDown")  { nudge(0, -1, 0); e.preventDefault(); }
+    } else {
+      if (e.key === "ArrowLeft")  { seek(-1); e.preventDefault(); }
+      else if (e.key === "ArrowRight") { seek(1); e.preventDefault(); }
+      else if (e.key === ",") { e.shiftKey ? nudge(0, 0, -S) : nudge(-S, 0, 0); e.preventDefault(); }
+      else if (e.key === ".") { e.shiftKey ? nudge(0, 0, S) : nudge(S, 0, 0); e.preventDefault(); }
+      else if (e.key === ";") { nudge(0, 1, 0); e.preventDefault(); }
+      else if (e.key === "'") { nudge(0, -1, 0); e.preventDefault(); }
+    }
+  });
+
+  function undo() {
+    if (!undoStack.length) { renderReadout("没有可撤的了"); return; }
+    notes = JSON.parse(undoStack.pop());
+    if (!notes.some(n => n.id === selected)) selected = notes.length ? notes[0].id : -1;
+    commit();
+    renderReadout("撤销了一步");
+  }
+
+  // ---------- 按钮 ----------
+  document.getElementById("snapSeg").addEventListener("click", (e) => {
+    const b = e.target.closest("button"); if (!b) return;
+    snap = +b.dataset.snap;
+    [...e.currentTarget.children].forEach(x =>
+      x.setAttribute("aria-pressed", String(x === b)));
+    renderAll();
+  });
+
+  document.getElementById("schemeSeg").addEventListener("click", (e) => {
+    const b = e.target.closest("button"); if (!b) return;
+    scheme = b.dataset.scheme;
+    [...e.currentTarget.children].forEach(x =>
+      x.setAttribute("aria-pressed", String(x === b)));
+    document.getElementById("schemeA").dataset.on = String(scheme === "A");
+    document.getElementById("schemeB").dataset.on = String(scheme === "B");
+  });
+
+  document.getElementById("undoBtn").addEventListener("click", undo);
+  document.getElementById("resetBtn").addEventListener("click", () => {
+    notes = BASE.map(([p, s, l], i) => ({ id: i, pitch: p, start: s, len: l }));
+    selected = 5;
+    undoStack = [];
+    renderAll();
+  });
+
+  // ---------- 启动 ----------
+  let lastW = 0;
+  function renderAll() {
+    render();
+    renderReadout();
+    renderScale();
+    renderMini("miniBeat", 4);
+    renderMini("mini16", 1);
+  }
+
+  // 宽度变了（窗口缩放）就重画：像素数是量出来的，不能让旧数字留着
+  const ro = new ResizeObserver(() => {
+    const w = roll.clientWidth;
+    if (Math.abs(w - lastW) < 0.5) return;
+    lastW = w;
+    renderAll();
+  });
+  ro.observe(roll);
+
+  renderAll();
+  roll.focus({ preventScroll: true });
+})();
+</script>

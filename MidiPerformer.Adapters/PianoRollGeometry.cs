@@ -39,6 +39,37 @@ public static class PianoRollGeometry
     /// <summary>命中判定里「头 / 尾」的宽度（像素）。</summary>
     public const double EdgeHitPixels = 4;
 
+    /// <summary>
+    /// 指针离按下点挪够多少像素才算「在拖」（像素）。
+    ///
+    /// **这是「点一下」和「拖一下」之间唯一的分界线**，别处一个都没有。
+    ///
+    /// 没有它的时候，按下期间任何一个 <c>PointerMoved</c> 都算一次真编辑，而位移是
+    /// **相对音符自己的起点**吸出来的（<c>SnapToGrid(_anchorStart + moved) - _anchorStart</c>）——
+    /// 一个本来就落在格线之间的音（抢拍），哪怕 <c>moved == 0</c> 也能算出非零位移：
+    /// 手没动，音符自己跳了半格，撤销栈上还多一格。空白处那一下更凶：抖动让框选区间
+    /// 从零长度变成几个 tick，而「这段区间里的所有音」是不分音高的，删掉的是别行上的音。
+    ///
+    /// 4px 是照 <see cref="EdgeHitPixels"/> 定的，和「头 / 尾」命中带一样宽：
+    /// 再小的话触控板上手一抖（约 2px）就触发，再大就开始吃掉真的微调。
+    /// </summary>
+    public const double DragThresholdPixels = 4;
+
+    /// <summary>
+    /// 指针从按下点挪开了没有 —— 够 <see cref="DragThresholdPixels"/> 才算数。
+    ///
+    /// 纯函数放在这儿，是为了让「多少像素算拖」这条能在 S4 缝上单测，
+    /// 不必起窗口造指针事件（那片地没有 UI 自动化，见工单 09）。
+    ///
+    /// 取平方比、不开根号：这条每个指针事件都跑，而且要的只是「够不够」，
+    /// 不是真长度。坐标里有 NaN 时比较为假 —— 那一下当「没在拖」，
+    /// 是这里唯一安全的答案（宁可少改一次，不可乱改一次）。
+    /// </summary>
+    /// <param name="dx">横坐标相对按下点的位移（像素）。</param>
+    /// <param name="dy">纵坐标相对按下点的位移（像素）。</param>
+    public static bool ExceedsDragThreshold(double dx, double dy)
+        => dx * dx + dy * dy >= DragThresholdPixels * DragThresholdPixels;
+
     /// <summary>音域自适应的最小行数：单音轨也要看得见一行，而且不能一行撑满整条轨。</summary>
     private const int MinPitchRows = 6;
 
@@ -235,7 +266,7 @@ public static class PianoRollGeometry
         return (low, high);
     }
 
-    // ==================== 小节刻度 ====================
+    // ==================== 刻度：小节与网格 ====================
 
     /// <summary>
     /// 一个小节多少 tick —— 卷帘横向刻度的定义。
@@ -259,6 +290,30 @@ public static class PianoRollGeometry
         return Math.Max(1, ticks);
     }
 
+    /// <summary>
+    /// 网格 —— 拖动、微调之后落到哪条线上的最小刻度，**一个十六分音符**。
+    ///
+    /// 十六分是用户在样机上手选出来的，不是推出来的。格子定成整拍只能修「整段挪了一拍」那种错，
+    /// 而**抢拍**（比整拍早/晚一个十六分）恰恰是这个编辑器最常要修的一类：格子比它粗，
+    /// 这种音就吸不上任何一条线，只能靠手拖到大概齐 —— 那等于没有吸附。
+    /// 代价是拖动精度要求变成一拍网格的 4 倍：一屏恒定 4 小节，一个小节占屏幕四分之一，
+    /// 于是十六分音符在 800px 宽的卷帘上只有 12.5px，鼠标得抖得比这细才吸得准。
+    /// 再细一档（三十二分）就开始「吸不动」了，比手抖还难受。
+    ///
+    /// **和拍号无关**：十六分音符本来就是四分音符的四分之一，4/4 和 6/8 里一样大。
+    /// 所以这里只看分辨率，不看 <see cref="TempoMap.TimeSignatureChanges"/>，
+    /// 也不经过 <see cref="BarTicks"/> —— 网格不是「小节的几分之一」。
+    ///
+    /// 下限 1 是给分辨率极低的曲子兜底：每四分音符 2 tick 的话 <c>/4</c> 算出 0，
+    /// 而 <see cref="SnapToGrid"/> 把 0 格夹成 1（见那边的说明）—— 那就是「每个 tick 都是一条线」，
+    /// 等于没有吸附：拖动会停在鼠标落到哪个 tick 就是哪个 tick，一格 0.1 像素地乱跑。
+    /// </summary>
+    public static long GridTicks(TempoMap tempoMap)
+    {
+        int pulsesPerQuarter = Math.Max(1, tempoMap.Division.TicksPerQuarterNote);
+        return Math.Max(1, pulsesPerQuarter / 4);
+    }
+
     /// <summary>整曲多少个小节，向上取整（空曲也算 1 小节，导航条上总得有个格子）。</summary>
     public static int BarCount(long totalTicks, long ticksPerBar)
         => (int)Math.Max(1, (totalTicks + Math.Max(1, ticksPerBar) - 1) / Math.Max(1, ticksPerBar));
@@ -271,15 +326,38 @@ public static class PianoRollGeometry
     public static long TickOfBar(int bar, long ticksPerBar) => Math.Max(0, bar) * Math.Max(1, ticksPerBar);
 
     /// <summary>
+    /// 吸附到**最近的格线**。<paramref name="gridTicks"/> 就是一格多少 tick ——
+    /// 拖音符时给 <see cref="GridTicks"/>，拖导航条时给 <see cref="BarTicks"/>。
+    ///
+    /// 舍入取 <c>AwayFromZero</c>，不是 .NET 默认的「银行家舍入」：正好落在两格正中的 tick
+    /// 是常事（半拍、半拍的半拍都是整数 tick），而银行家舍入按「末位是不是偶数」决定往哪边跳，
+    /// 于是同一个位置往左拖和往右拖可能吸到不同的线上，用户看到的是「吸附有时不听话」。
+    /// 往远处取至少是**可预期的**：正中就是往后（往大的方向）一格。
+    ///
+    /// 非有限数返回 0：<c>(long)NaN</c> 是个未定义值（x64 上实测 <c>long.MinValue</c>），
+    /// 放它出去会一路传进模型。结果夹到 0 以上：负 tick 在谱面上不存在。
+    ///
+    /// <see cref="SnapToBar"/> 转发到这里，于是舍入方式、NaN、负数夹取这三件事只有一份出处 ——
+    /// 各写一遍的话，日后改了其中一处，另一处会悄悄走偏，而那种偏差只有等到用户抱怨
+    /// 「拖导航条吸得准、拖音符吸不准」的时候才会被发现。
+    /// </summary>
+    public static long SnapToGrid(double tick, long gridTicks)
+    {
+        // 0 或负数按 1 算，不夹的话 `tick / 0` 是 Infinity，
+        // `(long)Math.Round(Infinity)` 又是个未定义值，会算出荒唐的吸附结果
+        gridTicks = Math.Max(1, gridTicks);
+        if (!double.IsFinite(tick)) return 0;
+        return Math.Max(0, (long)Math.Round(tick / gridTicks, MidpointRounding.AwayFromZero) * gridTicks);
+    }
+
+    /// <summary>
     /// 吸附到**最近的小节线**。拖动导航条时用它 —— 停在半小节上，对着谱子找不着北
     /// （wireframe 标注 3）。
+    ///
+    /// 就是拿「一个小节」当格的 <see cref="SnapToGrid"/>，转发过去而不是另写一份：
+    /// 小节和网格的吸附手感必须是同一套，不能一个吸得准一个吸不准。
     /// </summary>
-    public static long SnapToBar(double tick, long ticksPerBar)
-    {
-        ticksPerBar = Math.Max(1, ticksPerBar);
-        if (!double.IsFinite(tick)) return 0;
-        return Math.Max(0, (long)Math.Round(tick / ticksPerBar, MidpointRounding.AwayFromZero) * ticksPerBar);
-    }
+    public static long SnapToBar(double tick, long ticksPerBar) => SnapToGrid(tick, ticksPerBar);
 
     /// <summary>
     /// 视图左边缘的合法范围。
