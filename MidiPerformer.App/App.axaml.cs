@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
+using MidiPerformer.Adapters.Gateways;
 using MidiPerformer.App.Theme;
 using MidiPerformer.App.Views;
 
@@ -24,15 +25,27 @@ public partial class App : Application
 
     /// <summary>
     /// 组装点。全程序唯一允许 new 具体实现的地方。
-    /// 01 还没有任何网关可装，这里只把窗口立起来。
+    ///
+    /// 窗口一要三样东西：取色桥（自绘层用）、墙上钟（试听的时间积分）、
+    /// 出声的出口（winmm → GS 软波表）。三样都在这儿建好，构造器注入下去 ——
+    /// 别处谁也不 new 它们，不然「换一个实现」就得改一片。
     /// </summary>
     public override void OnFrameworkInitializationCompleted()
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
-            desktop.MainWindow = Has(desktop.Args, "--style-guide")
-                ? new StyleGuideWindow(Tokens)
-                : new MainWindow();
+            if (Has(desktop.Args, "--style-guide"))
+            {
+                desktop.MainWindow = new StyleGuideWindow(Tokens);
+            }
+            else
+            {
+                var sink = new WinmmPreview();
+                desktop.MainWindow = new MainWindow(Tokens, new SystemClock(), sink);
+
+                // 退出时关掉 MIDI 设备。窗口只负责松开按着的音，设备的开关是组装点的活
+                desktop.Exit += (_, _) => sink.Dispose();
+            }
         }
 
         base.OnFrameworkInitializationCompleted();

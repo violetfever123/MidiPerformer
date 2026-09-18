@@ -1,0 +1,56 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:views="clr-namespace:MidiPerformer.App.Views"
+             x:Class="MidiPerformer.App.Views.TrackLaneView">
+  <!--
+    一条轨 = 只读轨道头 + 卷帘。
+
+    **轨道头里一个控件都没有**，全是 TextBlock —— 这是有意的：
+    wireframe 里那几个（音色下拉、移调步进器、只看这条 / 折叠 / 删除轨）都要改谱面，
+    而这一张是只读的。摆一排按了没反应的控件，比不摆更坏 ——
+    人会以为是自己没点对。它们归 08，右边那行灰字就是留给谁看的一句话。
+
+    底色 / 边框一律取令牌，这里不出现任何颜色字面值。
+  -->
+  <StackPanel>
+    <Border Background="{DynamicResource TokenSurface2}"
+            BorderBrush="{DynamicResource TokenLineSoft}"
+            BorderThickness="0,0,0,1"
+            Padding="10,6">
+      <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,*">
+        <TextBlock x:Name="NumberText"
+                   Grid.Column="0"
+                   FontSize="11" FontWeight="Bold"
+                   Foreground="{DynamicResource TokenInkFaint}"
+                   MinWidth="20" VerticalAlignment="Center" />
+        <TextBlock x:Name="NameText"
+                   Grid.Column="1"
+                   FontSize="12.5" FontWeight="SemiBold"
+                   MinWidth="62" VerticalAlignment="Center" />
+        <TextBlock x:Name="TimbreText"
+                   Grid.Column="2"
+                   FontSize="11.5"
+                   Foreground="{DynamicResource TokenInkMuted}"
+                   VerticalAlignment="Center" />
+        <TextBlock x:Name="TransposeText"
+                   Grid.Column="3"
+                   FontSize="11.5"
+                   Foreground="{DynamicResource TokenInkMuted}"
+                   VerticalAlignment="Center" />
+        <TextBlock x:Name="CountText"
+                   Grid.Column="4"
+                   FontSize="11.5"
+                   Foreground="{DynamicResource TokenInkMuted}"
+                   VerticalAlignment="Center" />
+        <TextBlock x:Name="LaterText"
+                   Grid.Column="5"
+                   FontSize="11"
+                   Foreground="{DynamicResource TokenInkFaint}"
+                   HorizontalAlignment="Right" VerticalAlignment="Center"
+                   TextTrimming="CharacterEllipsis" />
+      </Grid>
+    </Border>
+
+    <views:PianoRollLane x:Name="Roll" />
+  </StackPanel>
+</UserControl>

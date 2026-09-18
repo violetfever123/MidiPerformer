@@ -1,13 +1,225 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:views="clr-namespace:MidiPerformer.App.Views"
         x:Class="MidiPerformer.App.Views.MainWindow"
         Title="MIDI 演奏器"
-        Width="1024" Height="680">
-  <StackPanel Margin="16" Spacing="8">
-    <TextBlock Text="MIDI 演奏器" FontSize="20" FontWeight="SemiBold" />
-    <TextBlock TextWrapping="Wrap"
-               Text="给《三角洲行动》口琴用的 MIDI 编辑 + 自动演奏器。编辑器与曲库尚未接上（见 .scratch/midi-performer/issues）。" />
-    <TextBlock TextWrapping="Wrap" Opacity="0.7"
-               Text="风险提示：本程序通过虚拟输入向系统发送按键，违反游戏规则，可能导致封号，风险自负。" />
-  </StackPanel>
+        Width="1180" Height="760"
+        MinWidth="720" MinHeight="460">
+
+  <!--
+    窗口一：编辑器外壳（docs/wireframe.html 那一块 .toolbar / .lanes / .nav / .readout / .transport）。
+
+    这是**整个窗口一的外壳**，主协调者合并时要在这上面接两处：
+      · 右上角「演奏器…」→ 06/04 那个独立窗口（本切片置灰）
+      · 工具栏「导出」→ 11（本切片置灰）
+    接法就是给那几个 Button 挂 Click，别改这层结构。
+
+    样式全部写在这儿的 Window.Styles 里：Styles/Controls.axaml 归 03，本切片不动它，
+    而新增的容器（工具栏 / 导航条 / 读数条 / 走带条）总得有长相。
+    一个颜色字面值都没有 —— 全走令牌。
+  -->
+  <Window.Styles>
+    <!-- wireframe 的 .toolbar / .nav / .transport：三块面板，靠上下边框分开 -->
+    <Style Selector="Border.toolbar">
+      <Setter Property="Background" Value="{DynamicResource TokenSurface2}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource TokenLine}" />
+      <Setter Property="BorderThickness" Value="0,0,0,1" />
+      <Setter Property="Padding" Value="12,9" />
+    </Style>
+
+    <Style Selector="Border.navbar">
+      <Setter Property="Background" Value="{DynamicResource TokenSurface2}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource TokenLine}" />
+      <Setter Property="BorderThickness" Value="0,1,0,0" />
+      <Setter Property="Padding" Value="12,9" />
+    </Style>
+
+    <Style Selector="Border.readoutbar">
+      <Setter Property="Background" Value="{DynamicResource TokenSurface2}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource TokenLine}" />
+      <Setter Property="BorderThickness" Value="0,1,0,0" />
+      <Setter Property="Padding" Value="12,6" />
+      <Setter Property="MinHeight" Value="31" />
+    </Style>
+
+    <Style Selector="Border.transportbar">
+      <Setter Property="Background" Value="{DynamicResource TokenSurface3}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource TokenLine}" />
+      <Setter Property="BorderThickness" Value="0,1,0,0" />
+      <Setter Property="Padding" Value="12,9" />
+    </Style>
+
+    <!-- 读数条的「键」和「值」，照 wireframe 的 .readout .k / .v -->
+    <Style Selector="TextBlock.readout-key">
+      <Setter Property="FontSize" Value="11" />
+      <Setter Property="Foreground" Value="{DynamicResource TokenInkFaint}" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+
+    <Style Selector="TextBlock.readout-value">
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="Foreground" Value="{DynamicResource TokenInk}" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+
+    <!-- 行内的小字说明：字段标签、提示、无循环那句 -->
+    <Style Selector="TextBlock.faint">
+      <Setter Property="FontSize" Value="11.5" />
+      <Setter Property="Foreground" Value="{DynamicResource TokenInkFaint}" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+
+    <Style Selector="TextBlock.label">
+      <Setter Property="FontSize" Value="12.5" />
+      <Setter Property="Foreground" Value="{DynamicResource TokenInkMuted}" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+
+    <!-- 走带条上的按钮比工具栏的大一号，照 wireframe 的 .tbtn -->
+    <Style Selector="Button.transport">
+      <Setter Property="FontSize" Value="13" />
+      <Setter Property="Padding" Value="13,5" />
+    </Style>
+
+    <!-- 报错那一行。底色取 warn-soft，字取 warn —— 与 wireframe 的 .risk 同一套令牌 -->
+    <Style Selector="Border.errorbox">
+      <Setter Property="Background" Value="{DynamicResource TokenWarnSoft}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource TokenWarnLine}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="{DynamicResource TokenRadiusControl}" />
+      <Setter Property="Padding" Value="9,6" />
+    </Style>
+
+    <Style Selector="Border.errorbox TextBlock">
+      <Setter Property="Foreground" Value="{DynamicResource TokenWarn}" />
+      <Setter Property="FontSize" Value="11.5" />
+    </Style>
+  </Window.Styles>
+
+  <Grid RowDefinitions="Auto,*,Auto,Auto,Auto">
+
+    <!-- ==================== 顶部工具栏 ==================== -->
+    <Border Grid.Row="0" Classes="toolbar">
+      <StackPanel Spacing="8">
+        <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,*">
+          <Button Grid.Column="0" x:Name="ImportButton" Classes="primary" Content="导入 MIDI…"
+                  Click="OnImportClick" />
+          <!-- 这三条本切片不接线，置灰 + 说清归谁。灰着的按钮比空按钮诚实 -->
+          <Button Grid.Column="1" x:Name="SaveButton" Content="保存" IsEnabled="False"
+                  Margin="8,0,0,0" ToolTip.Tip="存进曲库归 10" />
+          <Button Grid.Column="2" x:Name="SaveAsButton" Content="另存为…" IsEnabled="False"
+                  Margin="8,0,0,0" ToolTip.Tip="存进曲库归 10" />
+          <Button Grid.Column="3" x:Name="ExportButton" Content="导出" IsEnabled="False"
+                  Margin="8,0,0,0" ToolTip.Tip="导出 MIDI 归 11" />
+
+          <StackPanel Grid.Column="4" Orientation="Horizontal" Spacing="6" Margin="12,0,0,0">
+            <TextBlock Classes="label" Text="歌曲名" />
+            <!-- 改名就是改文件名，那件事（曲库、命名、导入历史）归 10；这儿只报当前这份叫什么 -->
+            <TextBox x:Name="SongNameBox" Width="170" IsReadOnly="True"
+                     ToolTip.Tip="改名与曲库归 10" />
+          </StackPanel>
+
+          <Button Grid.Column="5" x:Name="PerformerButton" Classes="launch" Content="演奏器…"
+                  IsEnabled="False" HorizontalAlignment="Right"
+                  ToolTip.Tip="独立演奏窗口归 06/04，合并时接上" />
+        </Grid>
+
+        <!-- 导入失败时在这儿说一句，没事时不占地方 -->
+        <Border x:Name="ErrorBox" Classes="errorbox" IsVisible="False">
+          <TextBlock x:Name="ErrorText" TextWrapping="Wrap" />
+        </Border>
+      </StackPanel>
+    </Border>
+
+    <!-- ==================== 卷帘区：所有轨上下堆叠 ==================== -->
+    <ScrollViewer Grid.Row="1" x:Name="LanesScroll"
+                  HorizontalScrollBarVisibility="Disabled"
+                  VerticalScrollBarVisibility="Auto">
+      <Panel>
+        <StackPanel x:Name="LanesHost" />
+        <TextBlock x:Name="EmptyHint"
+                   Margin="24,60"
+                   TextAlignment="Center" TextWrapping="Wrap"
+                   FontSize="12.5"
+                   Foreground="{DynamicResource TokenInkFaint}"
+                   Text="还没有曲子 —— 点左上角「导入 MIDI…」选一个 .mid 文件，谱面就会铺在这儿。" />
+      </Panel>
+    </ScrollViewer>
+
+    <!-- ==================== 小节导航条 ==================== -->
+    <Border Grid.Row="2" Classes="navbar">
+      <Grid ColumnDefinitions="Auto,*,Auto,Auto">
+        <TextBlock Grid.Column="0" Classes="faint" Text="小节导航"
+                   FontWeight="Bold" VerticalAlignment="Center" Margin="0,0,12,0" />
+        <!-- 整曲密度缩略图。按小节吸附、拖动时喊 DragStarted / DragCompleted 给卷帘藏播放头 -->
+        <views:RollNavStrip Grid.Column="1" x:Name="NavStrip" Height="30" />
+        <TextBlock Grid.Column="2" x:Name="NavRangeText" Classes="label mono"
+                   Margin="12,0,0,0" Text="—" />
+        <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="5" Margin="12,0,0,0">
+          <TextBlock Classes="label" Text="跳到" />
+          <TextBox x:Name="JumpBox" Classes="numeric" Width="46"
+                   FontSize="12.5" Padding="6,3" VerticalAlignment="Center"
+                   KeyDown="OnJumpKeyDown" />
+          <TextBlock Classes="label" Text="小节" />
+        </StackPanel>
+      </Grid>
+    </Border>
+
+    <!-- ==================== 读数条 ==================== -->
+    <Border Grid.Row="3" Classes="readoutbar">
+      <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,*">
+        <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6">
+          <TextBlock Classes="readout-key" Text="悬停" />
+          <TextBlock x:Name="HoverPitchText" Classes="readout-value mono" Text="—" />
+        </StackPanel>
+        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" Margin="16,0,0,0">
+          <TextBlock Classes="readout-key" Text="小节" />
+          <TextBlock x:Name="HoverBarText" Classes="readout-value mono" Text="—" />
+        </StackPanel>
+        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" Margin="16,0,0,0">
+          <TextBlock Classes="readout-key" Text="拍位" />
+          <TextBlock x:Name="HoverBeatText" Classes="readout-value mono" Text="—" />
+        </StackPanel>
+        <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="6" Margin="16,0,0,0">
+          <TextBlock Classes="readout-key" Text="时值" />
+          <TextBlock x:Name="HoverLengthText" Classes="readout-value mono" Text="—" />
+        </StackPanel>
+        <StackPanel Grid.Column="4" Orientation="Horizontal" Spacing="6" Margin="16,0,0,0">
+          <TextBlock Classes="readout-key" Text="选中" />
+          <TextBlock x:Name="SelectionText" Classes="readout-value mono" Text="—" />
+        </StackPanel>
+        <TextBlock Grid.Column="5" x:Name="HintText" Classes="faint"
+                   TextAlignment="Right" TextWrapping="Wrap" Margin="16,0,0,0" />
+      </Grid>
+    </Border>
+
+    <!-- ==================== 走带条 ==================== -->
+    <Border Grid.Row="4" Classes="transportbar">
+      <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,*">
+        <Button Grid.Column="0" x:Name="PlayButton" Classes="primary transport"
+                Content="▶ 从当前位置播放" IsEnabled="False" Click="OnPlayClick" />
+        <Button Grid.Column="1" x:Name="StopButton" Classes="transport"
+                Content="■ 停止" IsEnabled="False" Margin="12,0,0,0" Click="OnStopClick" />
+
+        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="7" Margin="12,0,0,0">
+          <TextBlock Classes="label" Text="速度" />
+          <!-- 改速度是改谱面（08），本切片只报当前值。数字框做成只读的，免得看着像能改 -->
+          <TextBox x:Name="BpmBox" Classes="numeric" Width="66" IsReadOnly="True"
+                   Text="120" VerticalAlignment="Center" ToolTip.Tip="改 BPM 归 08" />
+          <TextBlock Classes="faint" Text="拍/分" />
+        </StackPanel>
+
+        <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="5" Margin="12,0,0,0">
+          <TextBlock Classes="label" Text="位置" />
+          <TextBlock x:Name="PositionText" Classes="readout-value mono" Text="—" />
+        </StackPanel>
+
+        <TextBlock Grid.Column="4" Classes="faint" TextAlignment="Right"
+                   HorizontalAlignment="Right" VerticalAlignment="Center">
+          <Run Text="没有循环" FontWeight="SemiBold" Foreground="{DynamicResource TokenInkMuted}" />
+          <Run Text=" · 放完自动停止并松开所有按键" />
+        </TextBlock>
+      </Grid>
+    </Border>
+  </Grid>
 </Window>
