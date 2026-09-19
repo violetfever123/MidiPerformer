@@ -327,7 +327,7 @@ public partial class MainWindow : Window
         JumpBox.IsEnabled = true;
         // 有谱面就写得出，哪怕一个音都没有 —— 速度表和分辨率也值得留下来，
         // 所以这条的判据是「装上了曲子」，不是「有轨」
-        ExportButton.IsEnabled = true;
+        ExportMenuItem.IsEnabled = true;
 
         // 换曲子了：悬停那个音说的是上一份谱面，清掉。清完读数自己回落到选中（多半也是空的）
         ShowHover(null);
@@ -552,8 +552,20 @@ public partial class MainWindow : Window
 
     /// <summary>
     /// 「保存」：已经有曲名就写回那一首，还没有（导入时没命名、或者刚从曲库删掉）就先问一个。
+    ///
+    /// 本体在 <see cref="SaveAsync"/>：菜单项和 <c>Ctrl+S</c> 走的是同一件事，
+    /// 两处各写一遍的话迟早有一天只改一处。这里只负责把那件事接上菜单项的 <c>Click</c>。
     /// </summary>
-    private async void OnSaveClick(object? sender, RoutedEventArgs e)
+    private async void OnSaveClick(object? sender, RoutedEventArgs e) => await SaveAsync();
+
+    /// <summary>
+    /// 「保存」和 <c>Ctrl+S</c> 共用的入口。
+    ///
+    /// 返回 <see cref="Task"/> 而不是 <c>async void</c>：键盘那一路（<see cref="OnWindowKeyDown"/>）
+    /// 不是 async 的，只能把它丢掉（<c>_ =</c>）—— 问名字那一步要开模态框，是这条路上唯一
+    /// 真会等的地方，等的是用户，不是 IO。
+    /// </summary>
+    private async Task SaveAsync()
     {
         if (_library is not { } library) return;
 
@@ -849,13 +861,19 @@ public partial class MainWindow : Window
     /// <summary>撤销 / 重做、保存 / 另存为、速度框、曲名框这一组。换曲子和每次编辑之后调它。</summary>
     private void RefreshEditState()
     {
-        UndoButton.IsEnabled = _editor.CanUndo;
-        RedoButton.IsEnabled = _editor.CanRedo;
+        // 亮的是菜单项，不是按钮 —— 这几条命令收进「文件」/「操作」两组菜单了（见 MainWindow.axaml），
+        // 但「没得撤就置灰」这条规矩一个字节都没变：菜单项置灰一样点不动
+        UndoMenuItem.IsEnabled = _editor.CanUndo;
+        RedoMenuItem.IsEnabled = _editor.CanRedo;
         BpmBox.IsEnabled = _song is not null;
         SongNameBox.IsEnabled = _song is not null;
         // 没有曲库就存不了（组装点没给），灰着比按了没反应诚实
-        SaveButton.IsEnabled = _song is not null && _library is not null;
-        SaveAsButton.IsEnabled = SaveButton.IsEnabled;
+        //
+        // 这里和 21 号工单撞过一次：23 号是在「工具栏一排按钮」上写的（`SaveButton` / `SaveAsButton`
+        // + 一句 `DurationText.Text = …`），而 21 号把时长栏整个删了、位置读数也搬去了导航条。
+        // 合并时取了菜单项这一半，**没有**把那句 `DurationText` 带回来 —— main 上已经没有这个控件了。
+        SaveMenuItem.IsEnabled = _song is not null && _library is not null;
+        SaveAsMenuItem.IsEnabled = SaveMenuItem.IsEnabled;
     }
 
     private void OnUndoClick(object? sender, RoutedEventArgs e) => Undo();
@@ -1357,8 +1375,8 @@ public partial class MainWindow : Window
     // ==================== 键盘 ====================
 
     /// <summary>
-    /// 窗口级快捷键：空格开始试听、撤销 / 重做（Ctrl+Z、Ctrl+Y、Ctrl+Shift+Z）、方向键微调、
-    /// Ctrl+←/→ 定位、Ctrl+↑/↓ 换聚焦轨。
+    /// 窗口级快捷键：空格开始试听、撤销 / 重做（Ctrl+Z、Ctrl+Y、Ctrl+Shift+Z）、保存（Ctrl+S）、
+    /// 方向键微调、Ctrl+←/→ 定位、Ctrl+↑/↓ 换聚焦轨。
     ///
     /// 方向键按**方案 A**（工单 09）：<c>←/→</c> 移时间、<c>↑/↓</c> 移音高、
     /// <c>Shift+←/→</c> 改时值、<c>Ctrl+←/→</c> 在**焦点轨内**前后跳、
@@ -1399,6 +1417,16 @@ public partial class MainWindow : Window
         {
             if (e.Key == Key.Z && !shift) { e.Handled = true; Undo(); return; }
             if (e.Key == Key.Y || (e.Key == Key.Z && shift)) { e.Handled = true; Redo(); return; }
+
+            // Ctrl+S = 保存，和「文件」菜单里那一条等价（走同一个 SaveAsync）。
+            // 菜单化之后按钮藏进菜单里了，不给快捷键说不过去；菜单项右边那个 Ctrl+S
+            // 只是**显示**（InputGesture 不管按键），真按键是这儿接的。
+            //
+            // **焦点在输入框里时这一条不会生效** —— 上面那句「焦点在 TextBox 里就让开」
+            // 是整段让开的，理由是输入框里的 Ctrl+Z 归它自己的撤销。保存键没有那个冲突，
+            // 按惯例（Windows 上哪个程序都是）也该在曲名框里照样保存 —— 但那要让开的那一句
+            // 再分一套例外出来，这一票不做，先记在这儿。
+            if (e.Key == Key.S && !shift) { e.Handled = true; _ = SaveAsync(); return; }
         }
 
         if (_controller is null) return;
