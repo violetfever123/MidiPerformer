@@ -97,16 +97,34 @@ public sealed class PianoRollController
     /// <summary>整曲 tick 跨度，按小节向上取整。</summary>
     public long TotalTicks => TicksPerBar * BarCount;
 
-    /// <summary>每小节的音符数（多轨合计）—— 导航条的柱子高度就是它。</summary>
+    /// <summary>
+    /// 每小节的音符数（**多轨合计**）。
+    ///
+    /// **导航条不再拿它画东西了**（22 号工单把那条从「全曲密度柱」改成「焦点轨的音符块」），
+    /// 所以这里数的是「整首曲子哪儿热闹」，而不是「你手上这条轨哪儿密」—— 两件事，别混。
+    /// 现在整条链上只有测试在读它（`PianoRollControllerTests`）；
+    /// 导航条那份 scene 由 <c>PianoRollPresenter.BuildNav</c> 按焦点轨现算。
+    /// </summary>
     public IReadOnlyList<int> BarNoteCounts { get; }
 
-    /// <summary>最密的那个小节有多少个音。导航条按它归一化。</summary>
+    /// <summary>
+    /// 上面那张表里最密的那个小节有多少个音。
+    ///
+    /// 从前导航条按它归一化柱高，那个用途跟着 22 号工单一起没了（见 <see cref="BarNoteCounts"/>），
+    /// 现在同样只剩测试在读。
+    /// </summary>
     public int MaxBarNoteCount { get; private set; }
 
     /// <summary>当前视图左边缘对应的 tick。**永远落在合法范围内**（见 <see cref="PianoRollGeometry.ClampViewStart"/>）。</summary>
     public long ViewStartTick { get; private set; }
 
-    /// <summary>视图左边缘落在第几小节（0 起）。导航条的「第 a–b 小节」用它。</summary>
+    /// <summary>
+    /// 视图左边缘落在第几小节（0 起）。
+    ///
+    /// 21 号工单之后**界面上没人用它**了：视图范围从前写成「第 a–b 小节 / 共 N」，那行文字被
+    /// 缩略图上的视口框取代，位置读数报的也是**播放头**所在小节（不是视口起始）。
+    /// 现在只剩测试在读它 —— 留着是因为它仍然是「视口左边缘」这件事唯一的读数。
+    /// </summary>
     public int ViewStartBar => PianoRollGeometry.BarAtTick(ViewStartTick, TicksPerBar);
 
     /// <summary>

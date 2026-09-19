@@ -17,8 +17,12 @@
     窗口本身就是 wireframe 里的 .perf 那张卡片（surface 底 + 细边 + 圆角 + 阴影），
     所以这里只设窗口底色，外面不再套一层 Border。
 
-    风险提示（下面那个 .risk）是**常驻**的：不是弹窗、不是首次提示、不折叠。
-    它必须在「开始」按下去之前就看得见 —— 这是这一块唯一一条与安全有关的界面要求。
+    从前这儿还有一块**常驻风险提示**（`Border.risk`：虚拟输入违反游戏规则、可能导致封号、风险自负），
+    27 号工单把它删了 —— **有意接受的代价**：它是自用工具上唯一一句风险提示，
+    不影响任何功能，但以后给别人用就没这句话了。
+    留下的那条「为什么没开始」的通道是**状态行**（见下面 StatusText 那一段，文案在
+    `Format.PreflightRefusal`）：它说的是**这一按为什么没生效、下一步去改什么**，
+    那块横幅说的是**用这个程序的后果**，两件事 —— 删的是后者。
 
     05 补上的是「演奏轨」那一行的筛选（只列单声部轨），以及一条可弹的都没有时的空状态块；
     06 补上的是倒计时与基准八度两行、预检失败的中文提示，以及按下开始之后那块
@@ -135,21 +139,6 @@
     </Style>
     <Style Selector="TextBlock.dot.run">
       <Setter Property="Foreground" Value="{DynamicResource TokenStop}" />
-    </Style>
-
-    <!-- ==================== 风险提示 ==================== -->
-    <!-- wireframe 的 .risk：警告色系的一整块，常驻在窗口里 -->
-    <Style Selector="Border.risk">
-      <Setter Property="Background" Value="{DynamicResource TokenWarnSoft}" />
-      <Setter Property="BorderBrush" Value="{DynamicResource TokenWarnLine}" />
-      <Setter Property="BorderThickness" Value="1" />
-      <Setter Property="CornerRadius" Value="{DynamicResource TokenRadiusButton}" />
-      <Setter Property="Padding" Value="9,7" />
-    </Style>
-    <Style Selector="Border.risk TextBlock">
-      <Setter Property="FontSize" Value="11.5" />
-      <Setter Property="Foreground" Value="{DynamicResource TokenWarn}" />
-      <Setter Property="TextWrapping" Value="Wrap" />
     </Style>
 
     <!-- ==================== 小按钮 ==================== -->
@@ -275,21 +264,17 @@
             Click="OnStop" IsEnabled="False" />
 
     <!-- ============ 状态 ============ -->
+    <!--
+      **这一行是「为什么没开始」的唯一通道。** 预检不放行时它说的是三种失败里具体哪一种、
+      下一步去改什么（文案在 Format.PreflightRefusal，不在这个文件里）。
+      从前它下面还有一块常驻风险横幅，27 号工单删掉了 —— 两件事不一样：
+      横幅说的是用这个程序的后果，这一行说的是这一按为什么没生效。
+    -->
     <Border Classes="status">
       <StackPanel Orientation="Horizontal" Spacing="8">
         <TextBlock x:Name="StatusDot" Classes="dot" Text="●" />
         <TextBlock x:Name="StatusText" TextWrapping="Wrap" VerticalAlignment="Center"
                    Text="就绪 · 先打开一首 MIDI" />
-      </StackPanel>
-    </Border>
-
-    <!-- ============ 常驻风险提示 ============ -->
-    <!-- 位置在按钮下面，但它一直在：不需要点任何东西就能看见 -->
-    <Border Classes="risk">
-      <StackPanel Spacing="3">
-        <TextBlock FontWeight="Bold"
-                   Text="虚拟输入违反游戏规则，可能导致封号，风险自负。" />
-        <TextBlock Text="本程序只做一件事：往系统里发按键。它不读游戏进程、不查前台窗口、不碰游戏内存。演奏期间随时按 F6 急停，急停会立刻停下并松开所有按住的键和鼠标键。" />
       </StackPanel>
     </Border>
 

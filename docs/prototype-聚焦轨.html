@@ -1,0 +1,433 @@
+<title>聚焦轨高亮</title>
+<style>
+  :root{
+    --ground:#EEF1F5; --surface:#FFFFFF; --surface-2:#F7F9FB; --surface-3:#EAEEF3;
+    --ink:#171C23; --ink-muted:#5C6673; --ink-faint:#8A94A1;
+    --line:#CDD5DE; --line-soft:#E3E8EE;
+    --accent:#2C6BA8; --accent-soft:#DCEAF7; --accent-line:#9CC2E4;
+    --warn:#A85A1E; --warn-soft:#F8EADC; --warn-line:#DDB183;
+    --note:#4A5563; --note-edge:#333C47;
+    --grid-bar:#B9C4D0; --grid-beat:#DDE3EA;
+    --lane-a:#FBFCFD; --lane-b:#F3F6F9;
+    --focus-wash:#EAF2FA;
+    --annot:#7B4BA8; --annot-soft:#EFE7F7; --annot-line:#C4A9DE;
+    --shadow:0 1px 2px rgba(23,28,35,.06), 0 8px 24px rgba(23,28,35,.06);
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --ground:#13171C; --surface:#1A1F26; --surface-2:#1F252D; --surface-3:#262D36;
+      --ink:#E7EBF1; --ink-muted:#9BA6B3; --ink-faint:#6E7987;
+      --line:#333C46; --line-soft:#272E37;
+      --accent:#74ABDD; --accent-soft:#1C2E42; --accent-line:#3A5F85;
+      --warn:#D89B60; --warn-soft:#33261A; --warn-line:#6B4E2E;
+      --note:#5E6B7A; --note-edge:#48535F;
+      --grid-bar:#4A5563; --grid-beat:#2C343D;
+      --lane-a:#1D232B; --lane-b:#20272F;
+      --focus-wash:#1E2A3A;
+      --annot:#B08AD6; --annot-soft:#2A2036; --annot-line:#4E3B66;
+      --shadow:0 1px 2px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.25);
+    }
+  }
+  :root[data-theme="dark"]{
+    --ground:#13171C; --surface:#1A1F26; --surface-2:#1F252D; --surface-3:#262D36;
+    --ink:#E7EBF1; --ink-muted:#9BA6B3; --ink-faint:#6E7987;
+    --line:#333C46; --line-soft:#272E37;
+    --accent:#74ABDD; --accent-soft:#1C2E42; --accent-line:#3A5F85;
+    --warn:#D89B60; --warn-soft:#33261A; --warn-line:#6B4E2E;
+    --note:#5E6B7A; --note-edge:#48535F;
+    --grid-bar:#4A5563; --grid-beat:#2C343D;
+    --lane-a:#1D232B; --lane-b:#20272F;
+    --focus-wash:#1E2A3A;
+    --annot:#B08AD6; --annot-soft:#2A2036; --annot-line:#4E3B66;
+    --shadow:0 1px 2px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.25);
+  }
+
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--ground); color:var(--ink);
+    font-family:"Segoe UI","Microsoft YaHei","PingFang SC",system-ui,sans-serif;
+    font-size:14px; line-height:1.5;
+    padding-block:26px 48px; padding-inline:16px;
+  }
+  .mono{font-family:"Cascadia Mono",Consolas,ui-monospace,monospace;font-variant-numeric:tabular-nums}
+  kbd{
+    font-family:"Cascadia Mono",Consolas,ui-monospace,monospace;font-size:11px;
+    background:var(--surface-3);border:1px solid var(--line);border-bottom-width:2px;
+    border-radius:3px;padding:0 4px;
+  }
+
+  .page{max-width:1280px;margin:0 auto;display:flex;flex-direction:column;gap:28px}
+
+  .phead h1{margin:0;font-size:21px;font-weight:650;letter-spacing:-.01em;text-wrap:balance}
+  .phead p{margin:6px 0 0;color:var(--ink-muted);font-size:13px;max-width:78ch}
+  .tag{
+    display:inline-block;padding:2px 8px;border-radius:3px;font-size:11px;font-weight:600;
+    letter-spacing:.04em;background:var(--annot-soft);color:var(--annot);
+    border:1px solid var(--annot-line);white-space:nowrap;vertical-align:1px;
+  }
+
+  .sect{display:flex;flex-direction:column;gap:12px}
+  .sect > h2{
+    margin:0;font-size:12px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;
+    color:var(--ink-faint);display:flex;align-items:center;gap:10px;
+  }
+  .sect > h2::after{content:"";flex:1;height:1px;background:var(--line)}
+  .sect > p{margin:0;font-size:12.5px;color:var(--ink-muted);max-width:78ch}
+
+  /* ---------- 实测结论条 ---------- */
+  .finding{
+    background:var(--surface);border:1px solid var(--line);border-left:3px solid var(--accent);
+    border-radius:6px;padding:12px 14px;display:flex;flex-direction:column;gap:8px;
+  }
+  .finding h3{margin:0;font-size:13px;font-weight:650}
+  .finding p{margin:0;font-size:12.5px;color:var(--ink-muted);line-height:1.55;max-width:82ch}
+  .finding p b{color:var(--ink);font-weight:600}
+  .finding .num{
+    font-family:"Cascadia Mono",Consolas,ui-monospace,monospace;font-variant-numeric:tabular-nums;
+    font-weight:700;color:var(--ink);
+  }
+  .finding .bad{color:var(--warn)}
+  .finding .good{color:var(--accent)}
+  .ratios{display:flex;flex-wrap:wrap;gap:8px;margin-top:2px}
+  .ratio{
+    display:flex;align-items:baseline;gap:7px;font-size:11.5px;color:var(--ink-muted);
+    border:1px solid var(--line);border-radius:5px;padding:5px 9px;background:var(--surface-2);
+  }
+  .ratio .sw{width:11px;height:11px;border-radius:2px;flex:none;align-self:center;border:1px solid var(--line)}
+  .ratio .r{
+    font-family:"Cascadia Mono",Consolas,ui-monospace,monospace;font-variant-numeric:tabular-nums;
+    font-weight:700;
+  }
+
+  /* ---------- 变体卡 ---------- */
+  .grid{display:grid;gap:14px;align-items:start;grid-template-columns:repeat(auto-fit,minmax(min(440px,100%),1fr))}
+  .card{
+    background:var(--surface);border:1px solid var(--line);border-radius:8px;
+    overflow:hidden;box-shadow:var(--shadow);display:flex;flex-direction:column;
+  }
+  .card > header{
+    display:flex;align-items:center;gap:9px;flex-wrap:wrap;
+    padding:9px 12px;background:var(--surface-2);border-bottom:1px solid var(--line);
+  }
+  .card .k{
+    font-family:"Cascadia Mono",Consolas,ui-monospace,monospace;font-size:11px;font-weight:700;
+    color:var(--surface);background:var(--ink-faint);border-radius:3px;padding:1px 6px;
+  }
+  .card h3{margin:0;font-size:13px;font-weight:650}
+  .card header .rec{
+    font-size:10.5px;font-weight:700;letter-spacing:.06em;border-radius:3px;padding:2px 7px;
+    background:var(--accent-soft);color:var(--accent);border:1px solid var(--accent-line);
+  }
+  .card .why{
+    padding:9px 12px;font-size:12px;color:var(--ink-muted);line-height:1.5;
+    border-top:1px solid var(--line-soft);background:var(--surface-2);
+  }
+  .card .why b{color:var(--ink);font-weight:600}
+  .card .stage{padding:0;background:var(--surface)}
+
+  /* ---------- 轨与卷帘 ---------- */
+  .lane{border-bottom:1px solid var(--line)}
+  .lane:last-child{border-bottom:0}
+
+  .lhead{
+    display:flex;flex-wrap:wrap;align-items:center;gap:4px 9px;
+    padding:5px 10px;background:var(--surface-2);border-bottom:1px solid var(--line-soft);
+  }
+  .lane.b .lhead{background:var(--surface)}
+  .lhead .num{font-size:10.5px;font-weight:700;color:var(--ink-faint);min-width:18px}
+  .lhead .tname{font-size:12px;font-weight:650;min-width:56px}
+  .lhead .ctl{font-size:10.5px;color:var(--ink-muted)}
+  .lhead .grp{display:flex;gap:4px;margin-left:auto}
+  .lhead .badge{
+    font-size:9.5px;font-weight:700;letter-spacing:.04em;padding:1px 6px;border-radius:3px;
+    background:var(--annot-soft);color:var(--annot);border:1px solid var(--annot-line);
+  }
+
+  .iconbtn{
+    font-size:10.5px;color:var(--ink-muted);background:var(--surface);
+    border:1px solid var(--line);border-radius:4px;padding:1px 6px;
+  }
+  .iconbtn.danger{color:var(--warn);border-color:var(--warn-line);background:var(--warn-soft)}
+
+  .roll{
+    position:relative;height:46px;overflow:hidden;
+    background-color:var(--lane-a);
+    background-image:
+      repeating-linear-gradient(to right, var(--grid-bar) 0 1px, transparent 1px 25%),
+      repeating-linear-gradient(to right, var(--grid-beat) 0 1px, transparent 1px 6.25%);
+  }
+  .lane.b .roll{background-color:var(--lane-b)}
+
+  .note{
+    position:absolute;height:5px;border-radius:1px;
+    background:var(--note);box-shadow:inset 0 1px 0 var(--note-edge);
+    left:calc(var(--x) * 1%);width:calc(var(--w) * 1%);top:calc(2px + var(--y) * 5px);
+  }
+
+  /* ---------- A：只染轨道头 ---------- */
+  [data-variant="A"] .lane[data-focus="true"] .lhead{
+    background:var(--accent-soft);border-bottom-color:var(--accent-line);
+  }
+  /* ---------- B：头 + 整条卷帘染色 ---------- */
+  [data-variant="B"] .lane[data-focus="true"] .lhead{
+    background:var(--accent-soft);border-bottom-color:var(--accent-line);
+  }
+  [data-variant="B"] .lane[data-focus="true"] .roll{background-color:var(--focus-wash)}
+  /* ---------- C：头 + 底边 + 左竖条（推荐） ---------- */
+  [data-variant="C"] .lane[data-focus="true"]{box-shadow:inset 3px 0 0 var(--accent)}
+  [data-variant="C"] .lane[data-focus="true"] .lhead{
+    background:var(--accent-soft);border-bottom-color:var(--accent-line);
+  }
+  /* ---------- D：全套 ---------- */
+  [data-variant="D"] .lane[data-focus="true"]{box-shadow:inset 3px 0 0 var(--accent)}
+  [data-variant="D"] .lane[data-focus="true"] .lhead{
+    background:var(--accent-soft);border-bottom-color:var(--accent-line);
+  }
+  [data-variant="D"] .lane[data-focus="true"] .tname{color:var(--accent)}
+  [data-variant="D"] .lane[data-focus="true"] .roll{background-color:var(--focus-wash)}
+  [data-variant="D"] .lane[data-focus="true"] .note{background:var(--accent);box-shadow:none}
+
+  /* 基准：没有任何轨被聚焦 */
+  .base .lhead{background:var(--surface-2)}
+  .base .lane.b .lhead{background:var(--surface)}
+
+  /* ---------- 折叠态（配套规则用） ---------- */
+  .lane[data-collapsed="true"] .roll{display:none}
+  .lane[data-collapsed="true"] .lhead{border-bottom:0;color:var(--ink-faint)}
+  .lane[data-collapsed="true"] .lhead .tname{color:var(--ink-faint);font-weight:600}
+  .strip{
+    display:none;align-items:center;gap:9px;padding:4px 10px 6px;background:var(--lane-a);
+  }
+  .lane[data-collapsed="true"] .strip{display:flex}
+  .lane.b .strip{background:var(--lane-b)}
+  .strip .lbl{font-size:10.5px;color:var(--ink-faint);flex:none}
+  .strip .mini{
+    flex:1;height:7px;border-radius:2px;background:var(--note);opacity:.4;
+  }
+  .skip{
+    margin-left:auto;font-size:9.5px;font-weight:700;letter-spacing:.04em;
+    padding:1px 6px;border-radius:3px;
+    background:var(--warn-soft);color:var(--warn);border:1px solid var(--warn-line);flex:none;
+  }
+
+  /* ---------- 配套规则 ---------- */
+  .rules{display:grid;gap:12px;align-items:start;grid-template-columns:repeat(auto-fit,minmax(min(300px,100%),1fr))}
+  .rule{
+    background:var(--surface);border:1px solid var(--line);border-left:3px solid var(--accent-line);
+    border-radius:6px;padding:11px 13px;display:flex;flex-direction:column;gap:7px;
+  }
+  .rule h4{margin:0;font-size:12.5px;font-weight:650}
+  .rule p{margin:0;font-size:12px;color:var(--ink-muted);line-height:1.5}
+  .rule .keys{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--ink-muted)}
+
+  /* ---------- 已定 ---------- */
+  .decided{display:flex;flex-direction:column;gap:0;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+  .decided .row{
+    display:grid;grid-template-columns:58px 1fr;gap:12px;
+    padding:9px 13px;background:var(--surface);border-bottom:1px solid var(--line-soft);
+    font-size:12.5px;
+  }
+  .decided .row:last-child{border-bottom:0}
+  .decided .row:nth-child(even){background:var(--surface-2)}
+  .decided .q{
+    font-family:"Cascadia Mono",Consolas,ui-monospace,monospace;font-size:11px;font-weight:700;
+    color:var(--ink-faint);padding-top:1px;
+  }
+  .decided .d{color:var(--ink-muted);line-height:1.55}
+  .decided .d b{color:var(--ink);font-weight:600}
+  .decided .d .no{color:var(--warn)}
+</style>
+
+<div class="page">
+
+  <header class="phead">
+    <h1>聚焦轨高亮</h1>
+    <p>
+      <kbd>Ctrl</kbd>+<kbd>↑</kbd>/<kbd>↓</kbd> 把「当前聚焦轨」上下挪一格。聚焦只表示<b>在编辑哪一条</b>，
+      不改变你听到什么。下面四套画法都只差高亮本身 —— 轨道头、卷帘、网格、音符用的是 wireframe 的同一套令牌。
+      <span class="tag">原型 · 示例数据</span>
+    </p>
+  </header>
+
+  <section class="sect">
+    <h2>先说结论</h2>
+    <div class="finding">
+      <h3>染底色这条路是走不通的 —— 实测对比度只有 1.1:1</h3>
+      <p>
+        第一版原型跑出来，深色主题下「被聚焦的轨道头」和「没聚焦的」几乎分不出来。量了一下不是错觉：<b>把
+        <span class="mono">accent-soft</span> 铺在 <span class="mono">surface-2</span> 上</b>，
+        浅色主题的对比度是 <span class="num bad">1.16:1</span>、深色主题是 <span class="num bad">1.11:1</span>。
+        WCAG 对非文字的界面构件要求 <span class="num">3:1</span> —— 差的不是一点点，
+        是<b>差了三倍</b>。底边那条 <span class="mono">accent-line</span> 也只有
+        <span class="num bad">1.77:1</span> / <span class="num bad">2.28:1</span>，同样不够。
+      </p>
+      <p>
+        <b>唯一撑得住的是那条 <span class="mono">accent</span> 实色左竖条</b>：浅色
+        <span class="num good">5.27:1</span>、深色 <span class="num good">6.28:1</span>，两个主题都稳稳过线。
+        它之所以成立，是因为它<b>换了颜色而不是换了深浅</b> —— 在四个一样高、一样密的轨道头里，
+        深浅要靠比较，颜色不用。这也就是 A 和 B 被否掉的原因：不是不好看，是<b>不合格</b>。
+      </p>
+      <div class="ratios">
+        <span class="ratio"><i class="sw" style="background:var(--surface-2)"></i>surface-2</span>
+        <span class="ratio"><i class="sw" style="background:var(--accent-soft)"></i>accent-soft 铺底 <b class="r">1.16 / 1.11</b></span>
+        <span class="ratio"><i class="sw" style="background:var(--accent-line)"></i>accent-line 描边 <b class="r">1.77 / 2.28</b></span>
+        <span class="ratio"><i class="sw" style="background:var(--accent)"></i>accent 左竖条 <b class="r">5.27 / 6.28</b></span>
+      </div>
+    </div>
+  </section>
+
+  <section class="sect">
+    <h2>基准 · 谁也没被聚焦</h2>
+    <p>这是今天的样子，四条轨一视同仁。下面每一套都拿它当底子，只动被聚焦的那一条。</p>
+    <div class="grid">
+      <div class="card base">
+        <div class="stage" data-lanes="base"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="sect">
+    <h2>四个画法 · 第 1 轨被聚焦</h2>
+    <p>四条轨是同一份数据，四种画法渲染四遍，所以差别只在高亮。</p>
+    <div class="grid">
+
+      <article class="card">
+        <header><span class="k">A</span><h3>只染轨道头</h3></header>
+        <div class="stage" data-variant="A" data-lanes="A"></div>
+        <p class="why">轨道头底色换 <b>accent-soft</b>，底边压一条 <b>accent-line</b>。<span class="no">1.16:1 / 1.11:1</span>，两条都远在 3:1 之下 —— 看着是变了，但<b>扫视时抓不住</b>。这一套如果单用，等于没做。</p>
+      </article>
+
+      <article class="card">
+        <header><span class="k">B</span><h3>头 + 整条卷帘染色</h3></header>
+        <div class="stage" data-variant="B" data-lanes="B"></div>
+        <p class="why">在 A 之上把卷帘底色也染上。面积大了、<b>整条被接管</b>的感觉出来了，但每一处的对比度还是 A 那个量级（约 <span class="no">1.1:1</span>）；而且底色一动，<b>网格线和音符的对比度跟着降</b> —— 正好是你要低头细看的那条轨，反而变糊。</p>
+      </article>
+
+      <article class="card">
+        <header><span class="k">C</span><h3>头 + 底边 + 左竖条</h3><span class="rec">推荐</span></header>
+        <div class="stage" data-variant="C" data-lanes="C"></div>
+        <p class="why">靠一条 <b>accent 实色左竖条</b>打头阵（<span class="good">5.27:1 / 6.28:1</span>），配 A 的轨道头。左竖条<b>改变了轮廓</b>而不只是深浅 —— 四个轨道头并排时，它不需要被比较就能看见。卷帘底色不动，网格和音符的对比度一米不欠。</p>
+      </article>
+
+      <article class="card">
+        <header><span class="k">D</span><h3>全套</h3></header>
+        <div class="stage" data-variant="D" data-lanes="D"></div>
+        <p class="why">比 C 多了两处，但只有一处是真有用的：<b>轨名换成 accent 色</b>（文字对比度够，可留）。最后那一下 —— 把<b>音符本身</b>也染成 accent —— 是错的：音符的蓝会和「<b>选中音符</b>」的蓝争同一眼，两件含义完全不同的事看起来像一件。<span class="no">不建议</span></p>
+      </article>
+
+    </div>
+  </section>
+
+  <section class="sect">
+    <h2>配套规则</h2>
+    <div class="rules">
+
+      <div class="rule">
+        <h4>默认聚焦「最像主旋律」那条</h4>
+        <p>导入后不等你按键，聚焦就落在 <span class="mono">TrackRanking</span> 排第一的那条上，轨道头挂一个徽章说明为什么是它。这个分析已经写好、演奏器一直在用，编辑器这边白捡。</p>
+        <div class="stage" data-lanes="rule-rank" style="border:1px solid var(--line);border-radius:5px;overflow:hidden"></div>
+      </div>
+
+      <div class="rule">
+        <h4>收起来的轨跳过</h4>
+        <p>折叠的含义就是「这条我不看」，所以 <kbd>Ctrl</kbd>+<kbd>↑</kbd>/<kbd>↓</kbd> 直接越过它，不在上面停一下。</p>
+        <div class="stage" data-lanes="rule-fold" style="border:1px solid var(--line);border-radius:5px;overflow:hidden"></div>
+      </div>
+
+      <div class="rule">
+        <h4>到头停住，不环绕</h4>
+        <p>已经在第一条还按 <kbd>Ctrl</kbd>+<kbd>↑</kbd>，什么也不发生。环绕会让人不知道自己现在在第几条。</p>
+        <div class="keys">
+          <kbd>Ctrl</kbd>+<kbd>↑</kbd> 上一条 · <kbd>Ctrl</kbd>+<kbd>↓</kbd> 下一条 · 到头即止
+        </div>
+      </div>
+
+      <div class="rule">
+        <h4><span class="mono">Ctrl</span>+<kbd>←</kbd>/<kbd>→</kbd> 收窄成只在本轨内跳</h4>
+        <p>今天它跨所有轨跳音符。有了聚焦轨之后不收窄，一跳就跳到别的轨上，「聚焦轨」当场变空转 —— 两条键会互相打架。这是对现有行为的<b>破坏性改动</b>。</p>
+      </div>
+
+    </div>
+  </section>
+
+  <section class="sect">
+    <h2>本轮已定的其他决策</h2>
+    <div class="decided">
+      <div class="row"><span class="q">Q7</span><span class="d">弹框两个框「从第 __ 小节 到 第 __ 小节」，<b>两端都含</b>；越界夹住、起&gt;止自动交换；框下实时显示「将删掉第 5–8 小节（共 4 小节）· 第 3 轨 96 → 92 小节 · <b>整曲长度不变</b>」。</span></div>
+      <div class="row"><span class="q">Q8</span><span class="d">播放头<b>不动</b>（整曲时间轴上别的轨一个 tick 没动）；视口滚到拼缝；音符选中集<b>清空</b>。</span></div>
+      <div class="row"><span class="q">Q9</span><span class="d">命令收 <b>tick</b> 不收小节号：<span class="mono">ISongEditor.CutRange(song, trackIndex, startTick, endTick)</span>。理由与 <span class="mono">DeleteNotes</span> 同一先例 —— 区间由界面算，Core 不必长出小节概念、不必搬家破坏分层。</span></div>
+      <div class="row"><span class="q">Q10</span><span class="d">跨左边界截到 A、跨右边界截到 B 后前移；<b>横跨整个区间的长音只留前半截</b>，接不上就接不上 —— 真嫌断，删完手动拖右边缘（<span class="mono">SetNoteSpan</span> 现成）。</span></div>
+      <div class="row"><span class="q">Q12</span><span class="d">空格 = 走带条左边那颗按钮的快捷键：<b>按一下开播、再按停在原地、再按从那儿接着放</b> —— <b>一颗键管两头</b>，按钮上的字跟着换（<span class="mono">▶ 播放 / ⏸ 暂停 / ▶ 继续</span>）。空格<b>无条件抢占</b>，同时把 ▶/■ 两个传输按钮设成 <span class="mono">IsTabStop=false</span>；焦点在输入框里时让开。<b>这条推翻了原先的决定</b>（原话说的是：空格只等于「▶ 从当前位置播放」这一下，<b>播放中按空格没反应</b>，理由写的是「和按钮一致，播放中按钮本就是禁用的」）——<b>推翻的理由是那时还没有「暂停」</b>：两头只剩「放」和「停」，按第二下等于把刚放的东西丢掉，连按两下手就不知道自己站在哪一头，所以那条理由在当时是成立的。20 号工单补上「暂停」之后两头变了，第二下的结果直接写在按钮上，迷失不了，于是空格和按钮一起改成一颗切换键。</span></div>
+    </div>
+  </section>
+
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  var LANES = [
+    { num:"01", name:"主旋律", prog:"口琴 · GM 23", tr:"+0", rank:true,
+      notes:[[0,3,5],[4,2,6],[7,2,4],[10,4,5],[16,2,6],[19,2,7],[22,2,5],[25,4,3],
+             [32,3,5],[36,2,6],[39,3,4],[43,3,5],[48,2,6],[51,2,4],[54,3,5],[58,4,7],[62,2,5]] },
+    { num:"02", name:"和弦", prog:"尼龙弦吉他 · GM 25", tr:"−3",
+      notes:[[0,15,3],[0,15,2],[0,15,1],[16,15,3],[16,15,2],[16,15,0],
+             [32,15,3],[32,15,2],[32,15,1],[48,15,3],[48,15,2],[48,15,0]] },
+    { num:"03", name:"贝斯", prog:"指弹贝斯 · GM 34", tr:"+0",
+      notes:[[0,7,0],[8,7,1],[16,7,0],[24,7,1],[32,7,0],[40,7,1],[48,7,0],[56,7,1],
+             [0,7,2],[16,7,2],[32,7,2],[48,7,2]] },
+    { num:"04", name:"鼓点", prog:"标准鼓组 · 通道 10", tr:"—",
+      notes:(function(){
+        var a=[], i;
+        for (i=0;i<64;i+=2) a.push([i,1,7]);
+        for (i=0;i<64;i+=8) { a.push([i,1,4]); a.push([i+4,1,5]); }
+        return a;
+      })() }
+  ];
+
+  function noteHtml(n){
+    return '<span class="note" style="--x:'+n[0]+';--w:'+n[1]+';--y:'+n[2]+'"></span>';
+  }
+
+  function laneHtml(t, i, opts){
+    opts = opts || {};
+    var cls = "lane" + (i % 2 ? " b" : "");
+    if (opts.focus) cls += " focused";
+    var attrs = (opts.focus ? ' data-focus="true"' : "") + (opts.collapsed ? ' data-collapsed="true"' : "");
+    return '<div class="'+cls+'"'+attrs+'>'
+      + '<div class="lhead">'
+      +   '<span class="num">'+t.num+'</span>'
+      +   '<span class="tname">'+t.name+'</span>'
+      +   (opts.badge ? '<span class="badge">'+opts.badge+'</span>' : '')
+      +   '<span class="ctl">'+t.prog+'</span>'
+      +   '<span class="ctl">移调 <span class="mono">'+t.tr+'</span></span>'
+      +   '<span class="grp"><span class="iconbtn">折叠</span><span class="iconbtn danger">删除轨</span></span>'
+      + '</div>'
+      + '<div class="roll">'+t.notes.map(noteHtml).join("")+'</div>'
+      + '<div class="strip">'
+      +   '<span class="lbl">已折叠</span><span class="mini"></span>'
+      +   (opts.skip ? '<span class="skip">↑↓ 跳过</span>' : '')
+      + '</div>'
+      + '</div>';
+  }
+
+  var LANE_PLANS = {
+    "base":        [{}, {}, {}, {}],
+    "A":           [{focus:true}, {}, {}, {}],
+    "B":           [{focus:true}, {}, {}, {}],
+    "C":           [{focus:true}, {}, {}, {}],
+    "D":           [{focus:true}, {}, {}, {}],
+    "rule-rank":   [{focus:true, badge:"最像主旋律"}, {}, {}, {}],
+    "rule-fold":   [{}, {collapsed:true, skip:true}, {focus:true}]
+  };
+
+  Array.prototype.forEach.call(document.querySelectorAll("[data-lanes]"), function(host){
+    var plan = LANE_PLANS[host.dataset.lanes];
+    if (!plan) return;
+    host.innerHTML = plan.map(function(opts, i){
+      return laneHtml(LANES[i], i, opts);
+    }).join("");
+  });
+})();
+</script>

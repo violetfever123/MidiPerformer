@@ -406,10 +406,14 @@
         <span class="dots"><i></i><i></i><i></i></span>
       </div>
 
+      <!--
+        两条命令收进「文件」/「操作」两组菜单，演奏器留在右上角（标注 11）。
+        两颗菜单按钮在这儿**点不开**：线框里没有弹出层的样式，硬开出来会是一块没长相对齐的列表，
+        比不开更难看。内容写在标注 11 里。
+      -->
       <div class="toolbar">
-        <button class="btn primary">导入 MIDI…</button>
-        <button class="btn">保存</button>
-        <button class="btn">另存为…</button>
+        <button class="btn">文件 ▾</button>
+        <button class="btn">操作 ▾</button>
         <span class="field">歌曲名 <input type="text" value="起风了"></span>
         <button class="btn launch" style="margin-left:auto">演奏器…</button>
       </div>
@@ -501,24 +505,49 @@
           <canvas id="navcv"></canvas>
           <div class="navthumb" id="navthumb"></div>
         </div>
-        <span class="navpos mono" id="navlabel">第 1–4 小节 / 共 24</span>
+        <!--
+          这一格是**位置**（播放头在第几小节），不是从前那串「第 1–4 小节 / 共 24」——
+          视图范围那套文字整条删了：左边缩略图上那个视口框已经在视觉上说明「我在看哪一段」，
+          文字是同一件事说第二遍。位置读数留播放头，是因为右边紧挨着就是「跳到」——
+          「我在哪 / 我要去哪」摆在一起才成对照。见标注 3。
+        -->
+        <span class="navpos">位置 <b class="mono" id="navlabel">1 / 24 小节</b></span>
         <label class="jump">跳到 <input type="text" id="jump" class="mono" value="1"> 小节</label>
       </div>
 
+      <!--
+        **一套读数，不是两套。** 从前左边是「悬停」那一套、右边是「选中」那一套，同一个音
+        在两处各显示一半，鼠标一移开左边变空、右边还留着 —— 看着像两台机器。
+        现在合成一套：轨 / 音高 / 小节 / 拍位 / 时值，**悬浮的音优先，没悬浮就用主选中的音**。
+        两个都没有时**整块连标签一起藏起来**（一个字都不显示），但外头 .readout 那条的
+        min-height 不动，否则鼠标一移开整窗会跳一下 —— 所以外面套了个壳，
+        `display:contents` 让五格照旧直接排进 .readout 那条 flex 里（不多出一层盒子），
+        要藏的时候把它自己设成 `none` 就一下全藏了。见标注 6。
+      -->
       <div class="readout">
-        <span><span class="k">悬停</span> <span class="v" id="ro-pitch">—</span></span>
-        <span><span class="k">小节</span> <span class="v mono" id="ro-bar">—</span></span>
-        <span><span class="k">拍位</span> <span class="v mono" id="ro-pos">—</span></span>
-        <span><span class="k">选中</span> <span class="v mono" id="ro-sel">—</span></span>
-        <span class="hint">拖音符改音高和位置 · 拖右边缘改时值 · 空白处横向拖拽选中一段时间 · 选中后用 <kbd>←</kbd><kbd>→</kbd><kbd>↑</kbd><kbd>↓</kbd> 微调，<kbd>Shift</kbd>+<kbd>←</kbd><kbd>→</kbd> 改时值</span>
+        <span id="ro-cells" style="display:none">
+          <span><span class="k">轨</span> <span class="v mono" id="ro-track">—</span></span>
+          <span><span class="k">音高</span> <span class="v mono" id="ro-pitch">—</span></span>
+          <span><span class="k">小节</span> <span class="v mono" id="ro-bar">—</span></span>
+          <span><span class="k">拍位</span> <span class="v mono" id="ro-pos">—</span></span>
+          <span><span class="k">时值</span> <span class="v mono" id="ro-len">—</span></span>
+        </span>
+        <span class="hint">空格 播放/暂停 · ← → 移时间（一格 = 十六分）· ↑ ↓ 移音高 · Shift + ← → 改时值 · Ctrl + ← → 同轨前后跳 · Ctrl + ↑ ↓ 换轨 · Delete 删除 · Ctrl+Z 撤销 / Ctrl+Y 重做</span>
       </div>
 
+      <!--
+        走带条是**两颗**（21 把「位置」「时长」两栏搬走了）：
+        左边一颗切换 —— 播放中写「⏸ 暂停」、暂停中写「▶ 继续」、其余写「▶ 播放」，
+        字问状态要（见 refreshTransport），不记「上次点了什么」；
+        右边一颗 ■ 停止。合成一颗是不行的：「我就停在这，等下接着听」和「这段我听完了」
+        是两件事，后者顺带把视野拉回小节线，前者一个像素都不动。
+        最右边那句是**没有循环**的意思：放完自动停止并松开所有按键。
+      -->
       <div class="transport">
-        <button class="tbtn play" id="btnplay">▶ 从当前位置播放</button>
+        <button class="tbtn play" id="btnplay" aria-pressed="false">▶ 播放</button>
         <button class="tbtn" id="btnstop">■ 停止</button>
         <span class="bpm">速度 <input type="text" id="bpm" class="mono" value="76"> <span class="unit">拍/分</span></span>
-        <span class="bpm" style="gap:5px">位置 <b class="mono" id="clk" style="color:var(--ink)">1 / 24 小节</b></span>
-        <span class="noloop"><b>没有循环</b> · 放完自动停止并松开所有按键</span>
+        <span class="noloop">放完自动停止并松开所有按键</span>
       </div>
     </div>
 
@@ -533,7 +562,7 @@
       </div>
       <div class="annot">
         <span class="n">3</span><span class="t">导航条按小节吸附</span>
-        <p>下方那条是整曲缩略图，柱子高度＝该小节音符多少，所以看密度就知道副歌在哪。拖动时吸附到小节线，不会停在半小节上，而且<b>拖动过程中红线（播放头）会隐藏</b>——不然它跟着吸附一格格跳，很烦。松手后红线回到落点。右边可以直接输入小节号跳过去。</p>
+        <p>下方那条是整曲缩略图，柱子高度＝该小节音符多少，所以看密度就知道副歌在哪。拖动时吸附到小节线，不会停在半小节上，而且<b>拖动过程中红线（播放头）会隐藏</b>——不然它跟着吸附一格格跳，很烦。松手后红线回到落点。右边那格是<b>位置</b>：播放头在第几小节，<b>不是</b>视口起点——视图范围那串「第 1–4 小节 / 共 24」整条删了，缩略图上的视口框已经把「我在看哪一段」说过了，文字是同一件事说第二遍；而位置读数挨着「跳到」，两个数摆在一起才是「我在哪 / 我要去哪」的对照。再右边可以直接输入小节号跳过去。</p>
       </div>
       <div class="annot">
         <span class="n">4</span><span class="t">按播放看它自己流过去</span>
@@ -544,8 +573,10 @@
         <p>每条轨行高恒定，并且只显示这条轨<b>实际用到的音域</b>（自动裁到最低音到最高音）。所以一个只用 8 个音的贝斯轨不会白占 3 个八度的高度，4 条堆叠也塞得下。</p>
       </div>
       <div class="annot">
-        <span class="n">6</span><span class="t">悬停显示音高</span>
-        <p>鼠标移到音符上，读数条显示音名、小节、拍位、时值。需求 1.5 明确要的。</p>
+        <span class="n">6</span><span class="t">一套读数，不是两套</span>
+        <p>鼠标移到音符上，读数条一次给全五格：<b>轨 / 音高 / 小节 / 拍位 / 时值</b>（音高写音名 + 简谱，如 <span class="mono">G4（5）</span>）——需求 1.5 要的是这些，从前却拆成左右两套：「悬停」那套给音高 / 小节 / 拍位，「选中」那套给轨 / 时值，同一个音在两处各显示一半，鼠标一移开左边变空、右边还留着，看着像两台机器。现在的规矩只有一条：<b>悬浮的音优先，没悬浮就用主选中的音</b>。</p>
+        <p>两个都没有的时候，这五格<b>连标签一起藏起来</b>（不是显示一排破折号）——「还没载曲子」和「载了但没悬停」是同一件事，不该一个一排 <span class="mono">—</span>、一个整块消失。外面那条读数栏的高度不动（<span class="mono">min-height</span>），否则鼠标一划过去整窗就跳一下。</p>
+        <p>线框里只有悬停这一路（它不实现拖动和选中），所以鼠标一移开就整块消失；「回落到选中」那半条路只能在真程序里看。</p>
       </div>
       <div class="annot">
         <span class="n">7</span><span class="t">删除某一段落</span>
@@ -562,6 +593,19 @@
       <div class="annot">
         <span class="n">10</span><span class="t">播放留在编辑器，演奏搬出去</span>
         <p>底部播放条保留（改完能马上试听）。<b>演奏</b>那套搬到了右上角「演奏器…」打开的独立窗口。</p>
+      </div>
+      <div class="annot">
+        <span class="n">11</span><span class="t">工具栏收成两组菜单</span>
+        <p>「<b>文件</b>」= 导入 MIDI… / 保存（Ctrl+S）/ 另存为… / 导出；「<b>操作</b>」= 撤销（Ctrl+Z）/ 重做（Ctrl+Y）。分组按的是<b>这件事是什么</b>，不是「谁常用」：一组进出盘，一组动谱面 —— 以后新增的编辑类动作往「操作」里加，工具栏的宽度一分都不用再让（原来四颗文件按钮 + 曲名框已经快把这一行占满了）。线框里这两颗<b>点不开</b>：没有弹出层的样式，硬开出来只会是一块没长相对齐的列表。</p>
+        <p>快捷键印在菜单项<b>右边</b>，不是 ToolTip：菜单的标准做法，鼠标不用停下来等。它只负责显示 —— 真按键是窗口级接的（焦点在输入框里时让开，不然打字会变成按命令）。</p>
+        <p>「演奏器…」<b>不进菜单</b>，留在右上角当独立按钮：它是「去另一个窗口」，不是文件操作；而且演奏是这个程序的正事，藏进两层菜单等于把它埋了。代价是<b>导入不再是工具栏上那颗蓝按钮</b>——菜单项没有「推荐」这个概念，这是菜单化明码标价的代价，接受它：启动第一件事还有两处指着（「文件」菜单本身，和空状态那句「还没有曲子 —— 把 .mid 拖进这个窗口，或从「文件」菜单导入」）。</p>
+      </div>
+      <div class="annot">
+        <span class="n">12</span><span class="t">空格是播放 / 暂停</span>
+        <p>空格和走带条左边那颗按钮是<b>同一颗切换键</b>：放着的时候按 = 停在原地，停着的时候按 = 从那儿接着放（字变成「▶ 继续」）。两处说的是同一件事，所以按钮上的字和读数条那行提示必须一起改口 —— 这正是这一条值得单列出来的原因。</p>
+        <p><b>它推翻了一个从前的决定</b>（那个决定写在 <span class="mono">docs/prototype-聚焦轨.html</span> 的 Q12 里，那儿照实改了）：从前空格只管「开始」，播放中按空格<b>没反应</b>。理由当时是成立的 —— 那时还没有「暂停」，两头只剩「放」和「停」，按第二下等于把刚放的东西丢掉，连按两下手确实会不知道自己站在哪一头。现在第二下的结果直接写在按钮上（▶ 暂停 → ▶ 继续），迷失不了，所以一个键管两头。</p>
+        <p>空格是<b>窗口级</b>收的，而且必须抢在控件前面：焦点停在轨头的按钮、下拉上时，空格本来归它们（按钮是「按一下」、下拉是「展开」），不抢就是「空格播放」时灵时不灵 —— 而屏幕上没有任何东西说得清为什么，人只会以为自己按歪了。输入框那一头整块让开（改名、速度、小节号、曲名），所以改名字时打空格还是空格。</p>
+        <p>两颗走带按钮因此都<b>不在 Tab 序里</b>：按钮的标准激活键正是空格，留着 Tab 位就等于摆一个「Tab 得过去、按空格却没反应」的落点，比一开始就不给这个落点更坏。鼠标、回车照旧能按。</p>
       </div>
     </div>
   </section>
@@ -610,10 +654,13 @@
             <span>就绪 · <b>4:32</b> · 共 <b>312</b> 个音 · 音域 <b class="mono">C4 – A5</b></span>
           </div>
 
-          <div class="risk">
-            <span>⚠</span>
-            <span><b>虚拟输入违反游戏规则，可能导致封号，风险自负。</b>演奏期间随时按 <b>F6</b> 急停。</span>
-          </div>
+          <!--
+            这里从前还有一块常驻风险横幅（.risk）：「虚拟输入违反游戏规则，可能导致封号，
+            风险自负」+「本程序只做一件事：往系统里发按键」。27 号工单把这一块整个删了，见标注 19。
+            上面样式表里那条 .risk 规则**没跟着删**（这次只动结构和文案，颜色值一个都不动），
+            留着也不会有东西用上它。再上面那块 status 留着 ——
+            它说的是**这一按为什么没生效**，和横幅说的**用这个程序的后果**是两件事。
+          -->
         </div>
       </div>
 
@@ -693,30 +740,36 @@
 
     <div class="annots">
       <div class="annot">
-        <span class="n">11</span><span class="t">没有循环，放完就停</span>
+        <span class="n">13</span><span class="t">没有循环，放完就停</span>
         <p>循环控件整个去掉了。发出去的是真实按键事件，循环失控等于往游戏里持续灌输入。播到曲尾自动停止，并<b>主动松开所有按键和鼠标</b>。</p>
       </div>
       <div class="annot">
-        <span class="n">12</span><span class="t">看门狗兜底</span>
+        <span class="n">14</span><span class="t">看门狗兜底</span>
         <p>去掉循环不等于安全——单次播放也会卡（F6 线程挂了、note-off 丢了）。所以：F6 挂在独立的低级钩子线程上，UI 卡死也能响应；另有一个硬超时，曲长 +5 秒后无条件停并松键。</p>
       </div>
       <div class="annot">
-        <span class="n">13</span><span class="t">不读游戏进程</span>
+        <span class="n">15</span><span class="t">不读游戏进程</span>
         <p>程序全程只做一件事：往系统里发按键。不枚举进程、不查前台窗口、不碰游戏内存。代价是没有「失焦自动急停」这条兜底（它需要知道谁在前台），发错窗口只能靠你在倒计时结束前切好。</p>
       </div>
       <div class="annot">
-        <span class="n">14</span><span class="t">只发一条轨</span>
+        <span class="n">16</span><span class="t">只发一条轨</span>
         <p>游戏乐器同时只能响一个音，所以多轨可以一起<b>播</b>给你听，但<b>发按键</b>时只能挑一条。<br>
         「演奏轨」下拉框<b>只列出单声部轨</b>——判定看的是<b>起音是否撞在一起</b>（同一瞬间 ±30ms 内有两个音 = 和弦），不是看时值有没有重叠，否则连奏的旋律会被误判成多声部。<br>
         一条都没有时下拉框锁死，直接告诉你去编辑器删声部。</p>
       </div>
       <div class="annot">
-        <span class="n">15</span><span class="t">悬浮倒计时，不抢焦点</span>
+        <span class="n">17</span><span class="t">悬浮倒计时，不抢焦点</span>
         <p>你按下开始就会切到游戏，所以演奏器窗口本身看不见。<b>倒计时必须浮在游戏画面上</b>。悬浮层始终置顶，但绝不抢走游戏窗口的焦点（否则按键会发错地方）。</p>
       </div>
       <div class="annot">
-        <span class="n">16</span><span class="t">启动前自检</span>
-        <p>点「开始演奏」前检查两件事：程序是否以管理员运行（否则按键会被系统拦掉）、输入法是否在中文状态（中文输入法会吞掉按键）。这两条是参考实现踩过的坑。</p>
+        <span class="n">18</span><span class="t">启动前自检</span>
+        <p>点「开始演奏」前检查两件事：程序是否以管理员运行（否则按键会被系统拦掉）、输入法是否在中文状态（中文输入法会吞掉按键）。这两条是参考实现踩过的坑。<b>没放行时说的不是一句「不能开始」</b>，而是具体哪一种、下一步去改什么（权限不够就重开程序、输入法中文就切英文、轨弹不了就换轨）——说不清下一步的提示等于把人支到错方向上去，比不说更坏。</p>
+      </div>
+      <div class="annot">
+        <span class="n">19</span><span class="t">常驻风险横幅删了</span>
+        <p>演奏器窗口底下那块横幅（「虚拟输入违反游戏规则，可能导致封号，风险自负」+「本程序只做一件事：往系统里发按键」）<b>整块删掉</b>，样式一起删。</p>
+        <p><b>代价是有意接受的</b>：那是这个自用工具上唯一一句风险提示，以后给别人用就没这句话了。它不影响任何功能，而它占的是演奏器窗口里最显眼的一格 —— 每次都说着同一句、按一次「知道了」也消不掉的话，读到最后就是墙纸。</p>
+        <p>留下的那条「为什么没开始」的通道是<b>状态行</b>（上面那块 status）：它说的是<b>这一按为什么没生效</b>，横幅说的是<b>用这个程序的后果</b>，两件事，删的是后者。横幅里另外两件事没有跟着消失：「只发按键、不读进程」在上面标注 15，急停键 F6 写在「开始演奏」那颗按钮上（演奏前就该知道出事了按哪个）。</p>
       </div>
     </div>
   </section>
@@ -729,6 +782,10 @@
 
   var NOTE_NAMES = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
   function pitchName(p){ return NOTE_NAMES[((p % 12) + 12) % 12] + (Math.floor(p / 12) - 1); }
+  // 音高那格写「音名（简谱）」两样：只给音名，对着简谱数音级要数半天；只给简谱，
+  // 又不知道唱的是哪个八度。两样一起给，谁也不用来回推。（和 Format.Pitch 同一个写法）
+  var JIANPU = ["1","#1","2","#2","3","4","#4","5","#5","6","#6","7"];
+  function pitchLabel(p){ return pitchName(p) + "（" + JIANPU[((p % 12) + 12) % 12] + "）"; }
 
   var SONG_BARS = 24, STEPS_PER_BAR = 16;
   var SONG_STEPS = SONG_BARS * STEPS_PER_BAR;
@@ -782,7 +839,7 @@
   var posStep = 0;      // 播放头（16 分音符为单位）
   var viewStep = 0;     // 屏幕左边缘的时间位置（浮点）
   var bpm = 76;
-  var playing = false, rafId = 0, lastTs = 0;
+  var playing = false, paused = false, rafId = 0, lastTs = 0;
   var hidePlayhead = false;   // 拖导航条时藏起红线，免得跟着吸附一起跳
 
   var navtrack  = document.getElementById("navtrack");
@@ -791,7 +848,6 @@
   var navlabel  = document.getElementById("navlabel");
   var jumpInput = document.getElementById("jump");
   var bpmInput  = document.getElementById("bpm");
-  var clkEl     = document.getElementById("clk");
   var btnPlay   = document.getElementById("btnplay");
   var btnStop   = document.getElementById("btnstop");
 
@@ -932,16 +988,15 @@
   function updateNav(){
     navthumb.style.left = (viewStep / SONG_STEPS * 100) + "%";
     navthumb.style.width = Math.min(100, VIS_STEPS / SONG_STEPS * 100) + "%";
-    var a = Math.floor(viewStep / STEPS_PER_BAR) + 1;
-    var b = Math.min(SONG_BARS, a + BARS_VISIBLE - 1);
-    navlabel.textContent = "第 " + a + "–" + b + " 小节 / 共 " + SONG_BARS;
-    if (document.activeElement !== jumpInput) jumpInput.value = String(a);
+    // 位置读数是**播放头**那一小节，不是视口起点（见标注 3）。
+    // 「跳到」那个框**不跟着它走**：那是用户输入的目标，只在载入时放个 1、
+    // 跳完显示落点 —— 和真程序一样，它不是一个读数。
+    navlabel.textContent = (Math.floor(posStep / STEPS_PER_BAR) + 1) + " / " + SONG_BARS + " 小节";
   }
 
   function renderAll(){
     for (var i = 0; i < rollEls.length; i++) renderRoll(rollEls[i]);
     updateNav();
-    clkEl.textContent = (Math.floor(posStep / STEPS_PER_BAR) + 1) + " / " + SONG_BARS + " 小节";
   }
 
   function setView(v, snap){
@@ -969,21 +1024,39 @@
     rafId = requestAnimationFrame(playFrame);
   }
 
+  // 按钮上的字**问状态要**，不记「上次点了什么」（和真程序里的 RefreshTransport 同一条规矩）：
+  // 暂停、停止、放完自动停都能把状态改掉，靠一个「上次是放还是停」的字段迟早会和真身对不上 ——
+  // 那时按钮上写着「暂停」，而没东西在响。
+  function refreshTransport(){
+    btnPlay.textContent = playing ? "⏸ 暂停" : (paused ? "▶ 继续" : "▶ 播放");
+    btnPlay.setAttribute("aria-pressed", playing ? "true" : "false");
+  }
+
+  // **一颗键管两头（放 / 暂停）** —— 这颗按钮和空格键都是这个行为：
+  // 再按一下停在原地，再按从那儿接着放。从前写的是「从当前位置播放」，`if (playing) return;`
+  // 让放着的第二下彻底没反应：那时还没暂停可切，两头是「放」和「停」，
+  // 按第二下等于把刚放的东西丢掉，按下去只有困惑。（这条旧决定在真按键那边被推翻，见标注 12）
   function startPlay(){
-    if (playing) return;
-    posStep = viewStep;
-    playing = true; lastTs = 0;
-    btnPlay.setAttribute("aria-pressed", "true");
-    btnPlay.textContent = "▶ 播放中…";
+    if (playing){
+      playing = false; paused = true;
+      cancelAnimationFrame(rafId);
+      refreshTransport();
+      return;
+    }
+    if (!paused) posStep = viewStep;   // 「继续」接着刚才那口气放，不回到视图左边缘
+    paused = false; playing = true; lastTs = 0;
+    refreshTransport();
     rafId = requestAnimationFrame(playFrame);
   }
 
   function stopPlay(finished){
-    if (playing){ playing = false; cancelAnimationFrame(rafId); }
-    btnPlay.setAttribute("aria-pressed", "false");
-    btnPlay.textContent = "▶ 从当前位置播放";
+    if (playing) cancelAnimationFrame(rafId);
+    // 停止把「暂停」也一并清掉：放完自动停走的正是这条路，于是按钮回到「▶ 播放」，
+    // 不会卡在「继续」上 —— 「继续」的意思是「从刚才停的地方接着听」，而这一停没有那个地方
+    playing = false; paused = false;
     viewStep = clampView(Math.round(viewStep / STEPS_PER_BAR) * STEPS_PER_BAR);
     renderAll();
+    refreshTransport();
     if (finished) btnPlay.focus();
   }
 
@@ -1022,20 +1095,27 @@
 
   jumpInput.addEventListener("change", function(){
     var v = parseInt(jumpInput.value, 10);
-    if (!isFinite(v)){ updateNav(); return; }
+    // 输了个不是数的东西：退回**播放头**那一小节，不留一个看着生效了的错值（和真程序一致）
+    if (!isFinite(v)){ jumpInput.value = String(Math.floor(posStep / STEPS_PER_BAR) + 1); return; }
     v = Math.max(1, Math.min(SONG_BARS - BARS_VISIBLE + 1, v));
+    // 越界的小节号夹到首尾（输 999 的意思就是「去最后」），框里显示夹过之后的值
+    jumpInput.value = String(v);
     posStep = (v - 1) * STEPS_PER_BAR;
     setView(posStep, true);
   });
 
   // ---- 卷帘交互 ----
+  var readCells = document.getElementById("ro-cells");
+  var readTrack = document.getElementById("ro-track");
   var readPitch = document.getElementById("ro-pitch");
   var readBar   = document.getElementById("ro-bar");
   var readPos   = document.getElementById("ro-pos");
-  var readSel   = document.getElementById("ro-sel");
+  var readLen   = document.getElementById("ro-len");
+  // 藏的是**整个壳**（连标签一起），不是把值清成破折号 —— 见标注 6。
+  // 壳平时是 display:contents，显出来时那五格照旧直接排进 .readout 那条 flex 里；
+  // 藏的时候设成 none，一行字都不占，而 .readout 的 min-height 撑着那条栏，整窗不跳。
   function clearReadout(){
-    readPitch.textContent = "—"; readBar.textContent = "—";
-    readPos.textContent = "—"; readSel.textContent = "—";
+    readCells.style.display = "none";
   }
 
   function hitNote(rollEl, x, y){
@@ -1058,10 +1138,14 @@
       var hit = hitNote(rollEl, e.clientX - r.left, e.clientY - r.top);
       if (hit){
         rollEl.style.cursor = "grab";
-        readPitch.textContent = pitchName(hit.pitch);
+        // 一格一件事，五格一起给全（轨 / 音高 / 小节 / 拍位 / 时值），写法照 Format 那几支：
+        // 轨是两位的 01、音高带简谱、小节 1 起、拍位和时值都是「X.XX 拍」
+        readCells.style.display = "contents";
+        readTrack.textContent = ("0" + (idx + 1)).slice(-2);
+        readPitch.textContent = pitchLabel(hit.pitch);
         readBar.textContent = String(Math.floor(hit.start / STEPS_PER_BAR) + 1);
         readPos.textContent = (((hit.start % STEPS_PER_BAR) / 4) + 1).toFixed(2) + " 拍";
-        readSel.textContent = "轨 " + (idx + 1) + " · 时值 " + (hit.dur / 4).toFixed(2) + " 拍";
+        readLen.textContent = (hit.dur / 4).toFixed(2) + " 拍";
       } else {
         rollEl.style.cursor = "default";
         clearReadout();
@@ -1138,6 +1222,9 @@
     });
   });
 
+  // 按钮上的字**问状态要**（不照着 HTML 里那一行字念），这样上面那行初始文案
+  // 就算哪天和 refreshTransport 走散了，一载入也会被纠正过来
+  refreshTransport();
   renderNav();
   renderAll();
 })();

@@ -105,10 +105,6 @@ public partial class TrackLaneView : UserControl
     {
         InitializeComponent();
 
-        // 音色（16）、折叠（15）都做完了，这句话里只剩**真还没做、也还没有归属切片**的那一样：
-        // 只看这条（独奏）—— 别替它许诺
-        LaterText.Text = "只看这条 还没做";
-
         // 128 个 GM 音色一次装好。**文字走 Format**（和鼓轨那句话、和 FormatTests 盯的是同一处）：
         // 在视图里自己拼一遍「· GM n」，改一处漏一处是迟早的事
         TimbreBox.ItemsSource = Enumerable.Range(0, Format.ProgramNames.Count)
