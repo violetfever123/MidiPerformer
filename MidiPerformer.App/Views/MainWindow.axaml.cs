@@ -1675,9 +1675,21 @@ public partial class MainWindow : Window
         double navWidth = NavStrip.Bounds.Width;
         if (navWidth >= 20)
         {
+            // 缩略图画的是**焦点轨**：Ctrl+↑/↓ 换了焦点、或者点了别条轨上的音符，下一帧它就跟着换。
+            //
+            // 焦点轨的轨对象要按下标取，而「轨被删光」那一帧 FocusedTrack 已经越界了
+            // （控制器那边把这个下标当「没这条轨」，见 PitchRangeOf 的说明，它照答不误）。
+            // 这儿同样给 null 而不是硬取 —— 索引越界会当场炸在重画里，而重画是每个播放帧都跑的
+            int focused = controller.FocusedTrack;
+            var navTrack = focused >= 0 && focused < controller.Song.Tracks.Count
+                ? controller.Song.Tracks[focused]
+                : null;
+
             NavStrip.SetScene(PianoRollPresenter.BuildNav(
-                controller.BarNoteCounts, navWidth,
-                controller.TotalTicks, controller.ViewStartTick, controller.TicksVisible));
+                new PianoRollPresenter.NavViewport(
+                    navWidth, NavStrip.Bounds.Height, controller.TotalTicks, controller.BarCount),
+                navTrack, controller.PitchRangeOf(focused), playhead,
+                controller.ViewStartTick, controller.TicksVisible));
         }
 
         // 视图范围从前在这儿写成「第 1–4 小节 / 共 96」—— 那句话没了：

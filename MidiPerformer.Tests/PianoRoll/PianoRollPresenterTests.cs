@@ -246,40 +246,157 @@ public class PianoRollPresenterTests
 
     // ==================== 导航条 ====================
 
+    /// <summary>
+    /// 建一张导航条场景。默认是 1000px 宽、30px 高（就是窗口里那条的实际高度）、4 小节的曲子。
+    /// </summary>
+    private static PianoRollPresenter.NavScene Nav(
+        Track? track,
+        (int Low, int High)? pitchRange = null,
+        long playhead = 0,
+        double width = 1000,
+        double height = 26,
+        int barCount = 4,
+        long totalTicks = Bar * 4,
+        long viewStart = 0,
+        long ticksVisible = Bar * 4)
+        => PianoRollPresenter.BuildNav(
+            new PianoRollPresenter.NavViewport(width, height, totalTicks, barCount),
+            track, pitchRange ?? (60, 72), playhead, viewStart, ticksVisible);
+
     [Test]
-    public void 导航条的柱子按小节音符数归一化()
+    public void 导航条画的是焦点轨的音符块()
     {
-        var scene = PianoRollPresenter.BuildNav(
-            new[] { 0, 4, 2, 8 }, width: 1000, totalTicks: Bar * 4, viewStartTick: 0, ticksVisible: Bar * 4);
+        // 音域 60..72 共 13 行，摊到 26px 上正好一行 2px，块高 = 2 - 1 = 1
+        var scene = Nav(Lane(new Note(60, 0, Bar / 2, 100), new Note(72, Bar, Bar / 4, 100)));
 
         Assert.Multiple(() =>
         {
-            Assert.That(scene.Bars.Select(b => b.NoteCount), Is.EqualTo(new[] { 0, 4, 2, 8 }));
-            Assert.That(scene.Bars[3].Fraction, Is.EqualTo(1.0), "最密的那小节顶格");
-            Assert.That(scene.Bars[1].Fraction, Is.EqualTo(0.5));
-            Assert.That(scene.Bars[0].Fraction, Is.EqualTo(0), "空小节的柱高交给画的那边兜底，数据就是 0");
-            Assert.That(scene.BarWidth, Is.EqualTo(250));
+            Assert.That(scene.Notes, Has.Count.EqualTo(2));
+
+            // 横向按 tick 铺满整曲：整曲 4 小节 = 1000px，一小节 250px
+            Assert.That(scene.Notes[0].X, Is.EqualTo(0).Within(1e-9), "曲子开头那个音贴着左边缘");
+            Assert.That(scene.Notes[0].Width, Is.EqualTo(125 - 1).Within(1e-9), "半小节宽 125px，再让出 1px 的缝");
+            Assert.That(scene.Notes[1].X, Is.EqualTo(250).Within(1e-9));
+
+            // 纵向按音高铺开、高音在上：最高音那行贴着顶边
+            Assert.That(scene.Notes[1].Y, Is.EqualTo(0).Within(1e-9), "音域最高的那个音在最上面一行");
+            Assert.That(scene.Notes[0].Y, Is.EqualTo(24).Within(1e-9), "比它低 12 个半音 = 12 行 × 2px");
+            Assert.That(scene.Notes[0].Height, Is.EqualTo(1).Within(1e-9));
         });
+    }
+
+    [Test]
+    public void 导航条换一条轨就换一份音符()
+    {
+        // 缩略图跟的是**焦点轨**，不是「所有轨加在一起」——
+        // 换了焦点轨，同一段 tick 上画出来的东西必须换成那条轨自己的音
+        var melody = Lane(new Note(60, 0, Bar / 2, 100));
+        var bass = new Track(0, 1, "贝斯", 32, new[] { new Note(48, Bar, Bar / 2, 100) });
+
+        var melodyScene = Nav(melody);
+        var bassScene = Nav(bass);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(melodyScene.Notes, Has.Count.EqualTo(1));
+            Assert.That(melodyScene.Notes[0].X, Is.EqualTo(0).Within(1e-9), "旋律的音在开头");
+
+            Assert.That(bassScene.Notes, Has.Count.EqualTo(1));
+            Assert.That(bassScene.Notes[0].X, Is.EqualTo(250).Within(1e-9), "贝斯的音在第 2 小节");
+        });
+    }
+
+    [Test]
+    public void 导航条纵向用这条轨自己的音域铺开()
+    {
+        // 同一条轨的音：音域越窄，纵向拉得越开 —— 缩略图的纵向分辨率全给这条轨用到的音
+        var track = Lane(new Note(60, 0, Bar / 2, 100), new Note(62, Bar, Bar / 2, 100));
+
+        var narrow = Nav(track, pitchRange: (60, 62), height: 30);
+        var wide = Nav(track, pitchRange: (48, 72), height: 30);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(narrow.Notes[0].Height, Is.GreaterThan(wide.Notes[0].Height),
+                "音域窄的轨，一行更矮不了、块更厚");
+            Assert.That(narrow.Notes[0].Y, Is.EqualTo(2 * (30.0 / 3)).Within(1e-9),
+                "3 行摊 30px，低音那行在第 2 行顶");
+        });
+    }
+
+    [Test]
+    public void 导航条音高越界的音贴在边行不丢()
+    {
+        // 音域贴到 MIDI 两端被 FitPitchRange 夹过之后，某个音会落在音域之外。
+        // 卷帘那边是直接不画，缩略图**不能** —— 少一个音看着就是「这段没谱」
+        var track = Lane(new Note(60, 0, Bar / 2, 100), new Note(80, Bar, Bar / 2, 100));
+
+        var scene = Nav(track, pitchRange: (60, 72), height: 26);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(scene.Notes, Has.Count.EqualTo(2), "越界的那个音照样要画");
+            Assert.That(scene.Notes[1].Y, Is.EqualTo(0).Within(1e-9), "夹到最高那行");
+            Assert.That(scene.Notes[1].Y + scene.Notes[1].Height, Is.LessThanOrEqualTo(26),
+                "夹完不能画到条外面去");
+        });
+    }
+
+    [Test]
+    public void 导航条上的短音也有一笔可看()
+    {
+        // 长曲子里整曲铺进一条几百像素的带子：一个十六分音符只剩零点几个像素 ——
+        // 不给最小宽度，快的段落整段消失
+        var scene = Nav(
+            Lane(new Note(60, 0, TicksPerQuarter / 4, 100)),
+            barCount: 400, totalTicks: Bar * 400);
+
+        Assert.That(scene.Notes[0].Width,
+            Is.GreaterThanOrEqualTo(PianoRollGeometry.MinNoteWidth));
     }
 
     [Test]
     public void 导航条一个音都没有也不除零()
     {
-        var scene = PianoRollPresenter.BuildNav(
-            new[] { 0, 0, 0 }, width: 900, totalTicks: Bar * 3, viewStartTick: 0, ticksVisible: Bar * 4);
+        var scene = Nav(Lane());
 
         Assert.Multiple(() =>
         {
-            Assert.That(scene.Bars.All(b => b.Fraction == 0), Is.True);
+            Assert.That(scene.Notes, Is.Empty);
             Assert.That(double.IsNaN(scene.BarWidth), Is.False);
+            Assert.That(scene.BarWidth, Is.EqualTo(250).Within(1e-9), "4 小节摊 1000px");
         });
+    }
+
+    [Test]
+    public void 没有这条轨时导航条是一张空的()
+    {
+        // 轨被删光的那一帧，窗口手上没有轨对象可给（控制器把越界的下标当「没这条轨」）。
+        // 那一帧要的是一条空缩略图，不是一场崩溃
+        var scene = Nav(track: null);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(scene.Notes, Is.Empty);
+            Assert.That(scene.BarWidth, Is.EqualTo(250).Within(1e-9));
+            Assert.That(double.IsNaN(scene.PlayheadX), Is.False);
+        });
+    }
+
+    [Test]
+    public void 导航条上的播放头按整曲位置落点()
+    {
+        var scene = Nav(Lane(new Note(60, 0, Bar / 2, 100)), playhead: Bar * 2);
+
+        Assert.That(scene.PlayheadX, Is.EqualTo(500).Within(1e-9), "4 小节的曲子播到一半就是一半宽");
     }
 
     [Test]
     public void 导航条上的框标出当前可见的那一段()
     {
-        var scene = PianoRollPresenter.BuildNav(
-            new[] { 1, 1, 1, 1 }, width: 1000, totalTicks: Bar * 4, viewStartTick: Bar, ticksVisible: Bar * 2);
+        var scene = Nav(
+            Lane(new Note(60, 0, Bar / 2, 100)),
+            viewStart: Bar, ticksVisible: Bar * 2);
 
         Assert.Multiple(() =>
         {
@@ -291,8 +408,9 @@ public class PianoRollPresenterTests
     [Test]
     public void 曲子比一屏还短时框铺满整条()
     {
-        var scene = PianoRollPresenter.BuildNav(
-            new[] { 1, 1 }, width: 1000, totalTicks: Bar * 2, viewStartTick: 0, ticksVisible: Bar * 4);
+        var scene = Nav(
+            Lane(new Note(60, 0, Bar / 2, 100)),
+            barCount: 2, totalTicks: Bar * 2, ticksVisible: Bar * 4);
 
         Assert.That(scene.ThumbWidth, Is.EqualTo(1000), "框不能比导航条还宽");
     }

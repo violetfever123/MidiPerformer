@@ -144,23 +144,56 @@ public static class PianoRollPresenter
         public MarqueeRect? Marquee { get; init; }
     }
 
-    /// <summary>导航条上的一根柱子：这个小节有多少个音。</summary>
-    /// <param name="NoteCount">该小节的音符数（多轨合计）。</param>
-    /// <param name="Fraction">相对最高的那一根的比例 0..1。空小节也给一个最小高度，柱子不能消失。</param>
-    public readonly record struct NavBar(int NoteCount, double Fraction);
+    /// <summary>
+    /// 导航条上的一块音符（像素）。
+    ///
+    /// 和卷帘的 <see cref="PianoRollGeometry.NoteBox"/> 不是一回事：那个按**一屏**换算、
+    /// 还带着命中判定要的下标；这个按**整曲**换算 —— 一个音在缩略图上多宽，
+    /// 只由它在整曲里的位置决定，跟当前视图无关。
+    /// </summary>
+    public readonly record struct NavNote(double X, double Y, double Width, double Height);
 
-    /// <summary>导航条要画的东西：整曲密度缩略图 + 当前可见窗口那个框。</summary>
+    /// <summary>
+    /// 导航条这块地方有多大、铺的是多长的曲子 —— 整曲缩影要换算要知道的全部东西。
+    ///
+    /// 收成一个值类型，是为了让 <see cref="BuildNav"/> 别收一列同类型的数字：
+    /// 宽、高、整曲 tick 数、小节数四个挨着排，串一个位置照样编得过，
+    /// 而串了看不出来（<c>TokenPalette</c> 那边为同一件事吃过一次亏）。
+    /// 顺带让「一个小节多宽」只有一份出处 —— 画每 4 小节那根分隔线的控件和算音符块这边，
+    /// 读的是同一个数。
+    /// </summary>
+    /// <param name="Width">导航条的像素宽。</param>
+    /// <param name="Height">导航条的像素高。</param>
+    /// <param name="TotalTicks">整曲的 tick 跨度（按小节对齐）。</param>
+    /// <param name="BarCount">整曲多少小节。点击时按小节吸附要用它（见 <c>RollNavStrip.RaiseSeek</c>）。</param>
+    public readonly record struct NavViewport(double Width, double Height, long TotalTicks, int BarCount)
+    {
+        /// <summary>一个小节占的像素宽。畸形数据（0 小节）按整条宽算，不除零。</summary>
+        public double BarWidth => BarCount > 0 ? Width / BarCount : Width;
+
+        /// <summary>整曲里某个 tick 落在这条上的横坐标。</summary>
+        public double XAtTick(double tick) => PianoRollGeometry.NavXAtTick(tick, Width, TotalTicks);
+    }
+
+    /// <summary>导航条要画的东西：<b>焦点轨</b>的整曲缩影 + 当前可见窗口那个框。</summary>
     public sealed class NavScene
     {
-        public required IReadOnlyList<NavBar> Bars { get; init; }
+        /// <summary>整曲多少小节。点击时要按它吸到整小节上，所以场景必须带着这个数。</summary>
+        public required int BarCount { get; init; }
 
-        /// <summary>一个小节的宽度（像素）。柱子按它铺开。</summary>
+        /// <summary>一个小节的宽度（像素）。每 4 小节那根分隔线按它铺开。</summary>
         public required double BarWidth { get; init; }
+
+        /// <summary>焦点轨的音符块，顺序跟着 <c>Track.Notes</c>（按起点升序）。</summary>
+        public required IReadOnlyList<NavNote> Notes { get; init; }
 
         /// <summary>可见窗口那个框的左边缘与宽度（像素）。</summary>
         public required double ThumbX { get; init; }
 
         public required double ThumbWidth { get; init; }
+
+        /// <summary>播放头的横坐标（像素）。整曲缩略图上就靠它看播到哪儿了。</summary>
+        public required double PlayheadX { get; init; }
     }
 
     /// <summary>
@@ -269,41 +302,92 @@ public static class PianoRollPresenter
             Math.Max(0, viewport.Height - PianoRollGeometry.RulerHeight));
     }
 
-    /// <summary>算导航条要画的东西。</summary>
-    /// <param name="barNoteCounts">每小节的音符数，由 <c>PianoRollController</c> 数好。</param>
-    /// <param name="width">导航条的像素宽。</param>
-    /// <param name="totalTicks">整曲的 tick 跨度（按小节对齐）。</param>
+    /// <summary>
+    /// 缩略图上最短的一笔（像素）。一行音高摊到 30px 高的条上往往只有一两个像素，
+    /// 不给下限的话，音域宽的那几条轨会一个块都看不见 —— 缩略图成了空白。
+    /// </summary>
+    private const double MinNavNoteHeight = 1;
+
+    /// <summary>
+    /// 缩略图上音符块上下让出的总高度（像素）。
+    ///
+    /// 一行音高只有一两个像素，不让这点缝，上下相邻的两行就糊成一整片，
+    /// 「哪儿密哪儿空」恰恰是这条缩略图唯一要回答的问题。
+    /// </summary>
+    private const double NavNoteGap = 1;
+
+    /// <summary>
+    /// 算导航条要画的东西：**焦点轨**的音符铺满整曲。
+    ///
+    /// 画的是**焦点轨**，不是「含选中音符的那条轨」：焦点轨永远唯一、永远有定义，
+    /// 不会因为按 Esc 清空选择就整条空掉，而且它跟 Ctrl+↑/↓ 换的是同一条 ——
+    /// 一套心智模型，不是两套。这里只管「给哪条轨就画哪条轨」，
+    /// 「焦点轨是谁」由调用方（窗口）每帧现问一次，于是换焦点轨下一帧就跟着换。
+    ///
+    /// 纵向按**这条轨自己的显示音域**铺开（和卷帘给的是同一个 <c>PitchRangeOf</c>），
+    /// 所以缩略图上「高音在上」和卷帘里是同一个朝向，两边高低对得上。
+    /// 音域窄的轨会被摊开占满整条高度，这是有意的：缩略图要回答的是「哪儿密哪儿空」，
+    /// 把一条只用八个音的轨挤成中间一丝，反而什么都看不出来。
+    /// </summary>
+    /// <param name="nav">导航条多大、铺多长的曲子。</param>
+    /// <param name="track">
+    /// 画哪条轨的音符。**null = 没有这条轨**（轨被删光的那一帧，控制器那边也是这么认的，
+    /// 见 <c>PianoRollController.PitchRangeOf</c>）—— 那时画出来是一条空的缩略图，不抛。
+    /// </param>
+    /// <param name="pitchRange">这条轨的显示音域（含余量）。</param>
+    /// <param name="playheadTick">播放头位置（tick）。</param>
     /// <param name="viewStartTick">可见窗口的左边缘。</param>
     /// <param name="ticksVisible">可见窗口跨多少 tick（固定 4 小节）。</param>
     public static NavScene BuildNav(
-        IReadOnlyList<int> barNoteCounts,
-        double width,
-        long totalTicks,
+        NavViewport nav,
+        Track? track,
+        (int Low, int High) pitchRange,
+        long playheadTick,
         long viewStartTick,
         long ticksVisible)
     {
-        int max = 0;
-        foreach (int count in barNoteCounts)
-            if (count > max) max = count;
+        var notes = new List<NavNote>();
 
-        var bars = new List<NavBar>(barNoteCounts.Count);
-        foreach (int count in barNoteCounts)
+        if (track is { } lane)
         {
-            // 空小节也给一点点高度：柱子彻底消失的话，那段谱面看着像不存在
-            double fraction = max <= 0 ? 0 : count / (double)max;
-            bars.Add(new NavBar(count, fraction));
-        }
+            // 行数是这条轨的音域，不是 MIDI 那 128 行：缩略图纵向的分辨率全给这条轨真正用到的音
+            int rows = Math.Max(1, pitchRange.High - pitchRange.Low + 1);
+            double rowHeight = nav.Height / rows;
+            double blockHeight = Math.Max(MinNavNoteHeight, rowHeight - NavNoteGap);
 
-        double barWidth = barNoteCounts.Count > 0 ? width / barNoteCounts.Count : width;
+            foreach (var note in lane.Notes)
+            {
+                double x = nav.XAtTick(note.StartTick);
+                // 整曲之后的位置不该有音（tick 跨度按小节向上取整，正常盖得住每个音）。
+                // 真碰上了就跳过：自绘控件默认**不裁边界**，画出去会压到隔壁控件上
+                if (x >= nav.Width) continue;
+
+                double right = Math.Min(nav.Width, nav.XAtTick(note.StartTick + note.LengthTicks));
+                int pitch = note.Pitch + lane.Transpose;
+
+                // 音高夹进音域的**边行**，而不是像卷帘那样把越界的音丢掉：
+                // 越界只可能来自 FitPitchRange 在 MIDI 0/127 两端被夹过（音域本来就贴着边），
+                // 而这种音恰恰是用户最想看见的那几个。缩略图少画一个音，看着就是「这段没谱」
+                int row = Math.Clamp(pitchRange.High - pitch, 0, rows - 1);
+
+                notes.Add(new NavNote(
+                    x,
+                    row * rowHeight,
+                    Math.Max(PianoRollGeometry.MinNoteWidth, right - x - PianoRollGeometry.NoteGap),
+                    blockHeight));
+            }
+        }
 
         return new NavScene
         {
-            Bars = bars,
-            BarWidth = barWidth,
-            ThumbX = PianoRollGeometry.NavXAtTick(viewStartTick, width, totalTicks),
-            ThumbWidth = totalTicks <= 0
-                ? width
-                : Math.Min(width, ticksVisible / (double)totalTicks * width)
+            BarCount = nav.BarCount,
+            BarWidth = nav.BarWidth,
+            Notes = notes,
+            ThumbX = PianoRollGeometry.NavXAtTick(viewStartTick, nav.Width, nav.TotalTicks),
+            ThumbWidth = nav.TotalTicks <= 0
+                ? nav.Width
+                : Math.Min(nav.Width, ticksVisible / (double)nav.TotalTicks * nav.Width),
+            PlayheadX = nav.XAtTick(playheadTick)
         };
     }
 
