@@ -137,6 +137,14 @@ public partial class TrackLaneView : UserControl
             Refresh(_lastPlayheadTick, _lastPlayheadVisible);
             SelectionChanged?.Invoke(this, notes);
         };
+
+        // 焦点这一声同理，而且更要紧：`Refresh` 里那句 `SetFocused` 只改**这一条**的
+        // 竖条和底色，上一条轨得靠窗口推一遍才会灭掉
+        Roll.FocusChanged += (_, _) =>
+        {
+            Refresh(_lastPlayheadTick, _lastPlayheadVisible);
+            FocusChanged?.Invoke(this, EventArgs.Empty);
+        };
     }
 
     /// <summary>
@@ -271,6 +279,14 @@ public partial class TrackLaneView : UserControl
 
     /// <summary>卷帘上的选中集变了。窗口靠它刷新读数条和「选中」那一格。</summary>
     public event EventHandler<IReadOnlyList<NoteRef>>? SelectionChanged;
+
+    /// <summary>
+    /// 卷帘上按了一下，焦点轨于是挪到了**这一条**上（卷帘的原话，见
+    /// <see cref="PianoRollLane.FocusChanged"/>）。窗口靠它把别的轨的高亮灭掉。
+    ///
+    /// 谁的轨看 <c>sender</c>，和 <see cref="DeleteRequested"/> 那条路子一致。
+    /// </summary>
+    public event EventHandler? FocusChanged;
 
     /// <summary>
     /// 这条轨收起来 / 展开了。**窗口靠它把试听那张表重排一遍** ——

@@ -214,6 +214,18 @@ public sealed class PianoRollLane : Control
     public event EventHandler<IReadOnlyList<NoteRef>>? SelectionChanged;
 
     /// <summary>
+    /// 聚焦轨挪到这条轨上来了（按下时手落在这一条上，见 <see cref="OnPointerPressed"/>）。
+    ///
+    /// 只在这条轨**本来不是**聚焦轨时发 —— 控制器上的
+    /// <see cref="PianoRollController.SetFocusedTrack"/> 会说这次到底挪没挪。
+    /// 窗口收到它把整窗的底色推一遍（别的轨要把高亮灭掉），这一条自己已经重画过了。
+    ///
+    /// <b>悬浮不发这条。</b>鼠标横扫过几条轨不该让焦点跟着闪 ——
+    /// 焦点是「手搭在哪条轨上」，得有一下明确的动作（按下去、或者 Ctrl+↑/↓）才算数。
+    /// </summary>
+    public event EventHandler? FocusChanged;
+
+    /// <summary>
     /// 拖动预览变了（幽灵挪了、带子宽了），这一屏要重算一遍才画得出来。
     ///
     /// 场景是 <c>TrackLaneView</c> 那边算的，所以这里只能喊一声；它再拿**同一份**播放头状态
@@ -338,6 +350,13 @@ public sealed class PianoRollLane : Control
         e.Pointer.Capture(this);
         e.Handled = true;
 
+        // 手落在哪条轨上，焦点就跟到哪条轨上（见 FocusChanged）。
+        // 摆在捕获之后：挪焦点会让窗口重画一屏，那一趟里这条控件要是被换掉，捕获就丢了。
+        //
+        // **四支都算** —— 拖头尾、拖身体、Shift 加选、点空白和拖框，说的都是同一句话：
+        // 「我现在在弄这条轨」。只有悬浮不算（见 OnPointerMoved）。
+        bool focusChanged = controller.SetFocusedTrack(TrackIndex);
+
         bool selectionChanged = false;
 
         switch (hit)
@@ -400,7 +419,10 @@ public sealed class PianoRollLane : Control
         UpdateCursor(hit);
         InvalidateVisual();
 
+        // 选中的那一声先喊：它一路走到窗口的读数条，两件事这一帧就都落定了。
+        // 焦点这一声摆后面，于是它引起的那次重画画的已经是最终的选中集
         if (selectionChanged) RaiseSelectionChanged();
+        if (focusChanged) FocusChanged?.Invoke(this, EventArgs.Empty);
     }
 
     // ==================== 指针：拖动 ====================

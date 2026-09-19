@@ -410,6 +410,7 @@ public partial class MainWindow : Window
             lane.NoteResized += OnNoteResized;
             lane.NotesDeleted += OnNotesDeleted;
             lane.SelectionChanged += OnLaneSelectionChanged;
+            lane.FocusChanged += OnLaneFocusChanged;
             lane.CollapseChanged += OnLaneCollapseChanged;
             lane.RenameRequested += OnTrackRenameRequested;
             lane.DeleteRequested += OnTrackDeleteRequested;
@@ -975,6 +976,19 @@ public partial class MainWindow : Window
         RefreshView();
     }
 
+    /// <summary>
+    /// 卷帘上按了一下，焦点轨跟到那一条去了。
+    ///
+    /// 那一头自己已经重画过（<see cref="TrackLaneView"/> 收到卷帘那一声就 Refresh 了），
+    /// 这里管的是**别的轨**：`Refresh` 里只管把「聚焦」那三笔点亮，灭掉上一条得整窗推一遍。
+    /// 读数和选中集都不用动 —— 换焦点不改选中集（那是刻意的，见 <see cref="MoveFocus"/>）。
+    ///
+    /// <b>不滚进视野。</b>Ctrl+↑/↓ 换聚焦轨会滚（你可能看不见落点在哪），
+    /// 而这里不会：鼠标点的东西本来就在眼前，这时候再滚一下反而是画面在手下抽搐 ——
+    /// 尤其这一按往往还接着一次拖动。
+    /// </summary>
+    private void OnLaneFocusChanged(object? sender, EventArgs e) => RefreshView();
+
     // ==================== 编辑之后的选中集 ====================
 
     /// <summary>「编辑之后该选中哪个音」记的是**值**：哪条轨 + 音符本身（见 <see cref="ApplySong"/>）。</summary>
@@ -1306,7 +1320,7 @@ public partial class MainWindow : Window
     /// Ctrl+←/→ 定位、Ctrl+↑/↓ 换聚焦轨。
     ///
     /// 方向键按**方案 A**（工单 09）：<c>←/→</c> 移时间、<c>↑/↓</c> 移音高、
-    /// <c>Shift+←/→</c> 改时值、<c>Ctrl+←/→</c> 在所有轨的音符之间前后跳、
+    /// <c>Shift+←/→</c> 改时值、<c>Ctrl+←/→</c> 在**焦点轨内**前后跳、
     /// <c>Ctrl+↑/↓</c> 在轨之间上下走（聚焦，见 <see cref="MoveFocus"/>）。
     /// 07 原本把裸 <c>←/→</c> 绑成「前后跳」，09 把裸键让给了微调 ——
     /// <b>能力没砍，挪到 Ctrl 上了</b>：07 那两条测试测的是控制器上的 <c>MoveSelection</c>，
@@ -1347,7 +1361,9 @@ public partial class MainWindow : Window
 
         if (_controller is null) return;
 
-        // Ctrl + ←/→ ：在音符之间前后跳（只定位，不动音符）
+        // Ctrl + ←/→ ：在**焦点轨**的音符之间前后跳（只定位，不动音符）。
+        // 限定在一条轨里是 18 改的：跨轨那版按着按着会莫名其妙换到别的轨上，
+        // 而换轨本来就有自己的手势（Ctrl+↑/↓，紧挨着下面那一段）
         if (ctrl && e.Key is Key.Left or Key.Right)
         {
             e.Handled = true;
@@ -1425,7 +1441,12 @@ public partial class MainWindow : Window
         }
     }
 
-    /// <summary>在音符之间前后跳一个（Ctrl + ←/→）。只定位，不动音符。</summary>
+    /// <summary>
+    /// 在**焦点轨**的音符之间前后跳一个（Ctrl + ←/→）。只定位，不动音符、不动焦点。
+    ///
+    /// 落点一定在焦点轨上（见 <see cref="PianoRollController.MoveSelection"/>），
+    /// 所以下面那个 <c>Reveal</c> 展开的就是焦点轨自己。
+    /// </summary>
     private void JumpSelection(int delta)
     {
         if (_controller is null) return;

@@ -32,7 +32,10 @@ namespace MidiPerformer.Adapters.Controllers;
 public sealed class PianoRollController
 {
     private readonly Song _song;
-    private readonly List<(int Track, int Note)> _ordered = new();
+
+    /// <summary>每条轨「按键盘定位的顺序」排好的音符下标（见 <see cref="BuildNavigationOrder"/>）。</summary>
+    private readonly List<int>[] _navigationOrder;
+
     private readonly List<bool>[] _inRange;
     private readonly (int Low, int High)[] _pitchRanges;
     private readonly int _ticksPerQuarterNote;
@@ -67,7 +70,7 @@ public sealed class PianoRollController
         for (int i = 0; i < _pitchRanges.Length; i++) _pitchRanges[i] = (-1, -1);
         BarNoteCounts = CountNotesPerBar();
 
-        BuildTimeOrder();
+        _navigationOrder = BuildNavigationOrder();
     }
 
     public Song Song => _song;
@@ -216,14 +219,26 @@ public sealed class PianoRollController
     /// <summary>
     /// 把聚焦挪到第 <paramref name="trackIndex"/> 条轨上。越界夹进范围，不抛。
     ///
-    /// 窗口换完控制器拿它把聚焦放回原来那条轨上，而那条轨可能刚好被删掉了
-    /// （同 <see cref="RestoreSelection"/>：越界不是错误，是「它不在了」）。
+    /// 两条路走它：窗口换完控制器把聚焦放回原来那条轨上（那条轨可能刚好被删掉了，
+    /// 同 <see cref="RestoreSelection"/>：越界不是错误，是「它不在了」），
+    /// 以及卷帘上点了一下、焦点跟着手走（见 <c>PianoRollLane.OnPointerPressed</c>）。
     /// 一条轨都没有时落在 0 —— 那时候没轨可指，但读数总得有个值。
+    ///
+    /// <b>返回焦点是不是真的挪了。</b>「点音符 → 焦点跟随」那条路拿它决定要不要喊一声：
+    /// 点在自己已经聚焦的那条轨上是常事（连着点几个音），每次都喊的话，
+    /// 收到的那一头会把整窗重画一遍，白画。
     /// </summary>
-    public void SetFocusedTrack(int trackIndex) =>
-        FocusedTrack = _song.Tracks.Count == 0
+    public bool SetFocusedTrack(int trackIndex)
+    {
+        int target = _song.Tracks.Count == 0
             ? 0
             : Math.Clamp(trackIndex, 0, _song.Tracks.Count - 1);
+
+        if (target == FocusedTrack) return false;
+
+        FocusedTrack = target;
+        return true;
+    }
 
     /// <summary>
     /// 聚焦往上 / 往下走一条（<paramref name="delta"/> = ±1），<b>跳过收起来的那些</b>：
@@ -541,11 +556,25 @@ public sealed class PianoRollController
         Selection is { } s ? Describe(s.Track, s.Note) : null;
 
     /// <summary>
-    /// 按时间在**所有轨的音符**之间前后跳一个（<paramref name="delta"/> = ±1）。
+    /// 在**焦点轨**的音符之间前后跳一个（<paramref name="delta"/> = ±1）。
     ///
     /// 这一张只定位，不移动 —— 方向键选中它、把视图带过去，
-    /// 到曲子头尾就停住（不绕回去：绕回去会让人以为自己按错了方向）。
-    /// 返回新的选中项；一个音都没有时返回 null。
+    /// 到这条轨的头尾就停住（不绕回去：绕回去会让人以为自己按错了方向）。
+    /// 返回新的选中项；这条轨一个音都没有时返回 null。
+    ///
+    /// <b>只在焦点轨里走</b>（<see cref="FocusedTrack"/>，Ctrl+↑/↓ 换的那一条）。
+    /// 07 那版是在**所有轨**的音符之间跳，一趟走下来会莫名其妙换到别的轨上；
+    /// 而「上一个 / 下一个」这种手势说的是「在这一条轨上」，跨轨是另一件事。
+    ///
+    /// 顺序见 <see cref="BuildNavigationOrder"/>（时间优先，同刻从上到下）。
+    ///
+    /// <b>焦点轨和选中集可以不一致</b>：Ctrl+↑/↓ 换轨**不动选中集**（那是刻意的，
+    /// 有测试钉着），于是会出现焦点在轨 1、选中的音在轨 3。那时候从**这条轨的开头重新起算**
+    /// —— 两个方向都落在这一轨的第一个音上（Ctrl+← 和 Ctrl+→ 都读作「回到这条轨的开头」）。
+    /// 这和「一个音都没选中」时是同一支，不是特例。
+    ///
+    /// 横向上视图跟着走（左边缘对齐到它所在的小节）；纵向上哪条轨归调用方
+    /// （窗口那边 <c>Reveal</c> 把落点滚进视野）—— 这里已经保证落点就在焦点轨上了。
     ///
     /// **跳到哪儿就是只选中那一个**：这是「换个音看看」，不是「再加上一个」。
     /// 手上的一串选中（框选出来的一组）在这里被收掉，否则主选中换了地方、
@@ -553,20 +582,29 @@ public sealed class PianoRollController
     /// </summary>
     public NoteInfo? MoveSelection(int delta)
     {
-        if (_ordered.Count == 0) return null;
         if (delta == 0) return DescribeSelection();
+        if (FocusedTrack < 0 || FocusedTrack >= _navigationOrder.Length) return null;
 
-        // 没选中时：往后跳从第一个开始，往前跳从最后一个开始
-        int current = Selection is { } s ? _ordered.IndexOf(s) : (delta > 0 ? -1 : 0);
-        int next = Math.Clamp(current + delta, 0, _ordered.Count - 1);
-        if (next == current && Selection is not null) return DescribeSelection();
+        var order = _navigationOrder[FocusedTrack];
+        if (order.Count == 0) return null;
 
-        SelectOnly(new NoteRef(_ordered[next].Track, _ordered[next].Note));
+        // 「此刻在哪」只认**焦点轨上的**那个选中音。选中音在别的轨上时当没选中（current = -1），
+        // 于是 next 落在第一个音上：-1 + 1 = 0 正好是它，-1 - 1 = -2 被下面那道夹取拉回 0
+        int current = Selection is { } s && s.Track == FocusedTrack
+            ? order.IndexOf(s.Note)
+            : -1;
 
-        var (trackIndex, noteIndex) = _ordered[next];
-        long startTick = _song.Tracks[trackIndex].Notes[noteIndex].StartTick;
-        // 视图左边缘对齐到这个音所在的小节 —— 横向「滚进视野」就是这一步；
-        // 纵向（哪条轨）由视图那边 BringIntoView
+        int next = Math.Clamp(current + delta, 0, order.Count - 1);
+        // 真正站在这一轨的某个音上、而且已经在头 / 尾 —— 原地不动。
+        // 这一句不能只看 next == current：current 是 -1 时 next 也会等于 current（空不了，
+        // 但 order.Count 为 1 时 next = 0 ≠ -1），要紧的是别把「刚从别的轨过来」当成「到头了」
+        if (next == current && current >= 0) return DescribeSelection();
+
+        int noteIndex = order[next];
+        SelectOnly(new NoteRef(FocusedTrack, noteIndex));
+
+        long startTick = _song.Tracks[FocusedTrack].Notes[noteIndex].StartTick;
+        // 视图左边缘对齐到这个音所在的小节 —— 横向「滚进视野」就是这一步
         SetViewStart(PianoRollGeometry.TickOfBar(
             PianoRollGeometry.BarAtTick(startTick, TicksPerBar), TicksPerBar));
 
@@ -625,27 +663,43 @@ public sealed class PianoRollController
 
     // ==================== 内部 ====================
 
-    /// <summary>所有轨的音符按时间排成一条线，键盘定位在上面走。</summary>
-    private void BuildTimeOrder()
+    /// <summary>
+    /// 每条轨按**定位顺序**排好的音符下标，<see cref="MoveSelection"/> 走它。
+    ///
+    /// 顺序是「时间优先」：起点升序，**同一个起点上按音高降序**。降序不是随便挑的 ——
+    /// 卷帘上高音画在上头，降序读出来才是「先上到下、再左到右」，
+    /// 和眼睛扫一行谱的方向一致（升序会从下往上走）。
+    ///
+    /// <b>一条轨一张表，不是一条大表。</b>定位只在**焦点轨**里走、不跨轨（见
+    /// <see cref="MoveSelection"/>），所以要的是「这条轨的下一个音」，
+    /// 「所有轨的下一个音」是另一个问题（换轨是 Ctrl+↑/↓）。
+    ///
+    /// 顺序必须是**确定的**，否则同一份谱子按两次方向键走到的地方可能不一样：
+    /// <c>OrderBy</c> / <c>ThenByDescending</c> 是稳定排序，而下标数组本来就是 0,1,2… 的顺序，
+    /// 于是完全重复的音（同刻、同音高）之间也按原次序站定 —— 这是最后那一级的兜底，
+    /// 不用再补一个 <c>ThenBy(下标)</c>。
+    ///
+    /// <see cref="Track.Notes"/> 本来就承诺起点升序，所以「起点」那一级看着是白排的；
+    /// 留着它是因为**这条顺序的依据是音符自己、不是数组碰巧怎么排的** ——
+    /// 拿掉它，这里的正确性就变成依赖别人一条不变量，而那正是最难发现的那类回归。
+    /// </summary>
+    private List<int>[] BuildNavigationOrder()
     {
+        var order = new List<int>[_song.Tracks.Count];
+
         for (int t = 0; t < _song.Tracks.Count; t++)
         {
             var notes = _song.Tracks[t].Notes;
-            for (int n = 0; n < notes.Count; n++) _ordered.Add((t, n));
+            var indexes = new int[notes.Count];
+            for (int n = 0; n < notes.Count; n++) indexes[n] = n;
+
+            order[t] = indexes
+                .OrderBy(i => notes[i].StartTick)
+                .ThenByDescending(i => notes[i].Pitch)
+                .ToList();
         }
 
-        // 同刻的音按轨号、再按音高排：顺序必须是**确定的**，
-        // 否则同一份谱子按两次方向键走到的地方可能不一样
-        _ordered.Sort((a, b) =>
-        {
-            int cmp = _song.Tracks[a.Track].Notes[a.Note].StartTick
-                .CompareTo(_song.Tracks[b.Track].Notes[b.Note].StartTick);
-            if (cmp != 0) return cmp;
-            cmp = a.Track.CompareTo(b.Track);
-            if (cmp != 0) return cmp;
-            return _song.Tracks[a.Track].Notes[a.Note].Pitch
-                .CompareTo(_song.Tracks[b.Track].Notes[b.Note].Pitch);
-        });
+        return order;
     }
 
     private int[] CountNotesPerBar()

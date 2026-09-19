@@ -170,20 +170,83 @@ public class PianoRollControllerTests
     // ==================== 键盘定位 ====================
 
     [Test]
-    public void 方向键按时间在所有轨的音符之间走()
+    public void 方向键只在焦点轨里走()
     {
-        // 第 2 条轨那个音比第 1 条轨的早：顺序必须是「按时间」，不是「按轨」
+        // 第 2 条轨那个音比第 1 条轨的早。从前那版是「在所有轨的音符之间按时间跳」，
+        // 于是第一步就会跳到第 2 条轨上 —— 按着按着莫名其妙换轨，正是 18 要去掉的东西
         var controller = new PianoRollController(SongOf(
             Melody(new Note(60, Bar, 480, 100)),
             Bass(0, new Note(40, 0, 480, 100))));
 
         Assert.Multiple(() =>
         {
-            Assert.That(controller.MoveSelection(1)?.Track, Is.EqualTo(1), "先到最早的那个音");
-            Assert.That(controller.MoveSelection(1)?.Track, Is.EqualTo(0));
-            Assert.That(controller.MoveSelection(1)?.Track, Is.EqualTo(0), "到头了停在最后一个音上，不绕回去");
-            Assert.That(controller.MoveSelection(-1)?.Track, Is.EqualTo(1));
-            Assert.That(controller.MoveSelection(-1)?.Track, Is.EqualTo(1), "往回走到头也一样停住");
+            Assert.That(controller.MoveSelection(1)?.Track, Is.EqualTo(0), "焦点在第 1 条，就只走第 1 条");
+            Assert.That(controller.FocusedTrack, Is.EqualTo(0), "定位不改焦点");
+            Assert.That(controller.MoveSelection(1)?.Bar, Is.EqualTo(2));
+            Assert.That(controller.MoveSelection(1)?.Bar, Is.EqualTo(2), "这条轨只有那一个音，到头了停住不绕回去");
+
+            controller.SetFocusedTrack(1);
+            Assert.That(controller.MoveSelection(-1)?.Track, Is.EqualTo(1), "换焦点之后走的是新的那条轨");
+            Assert.That(controller.MoveSelection(-1)?.Bar, Is.EqualTo(1));
+        });
+    }
+
+    [Test]
+    public void 同刻的音从上往下走()
+    {
+        // 同一个起点上三个音。卷帘上高音画在上头，所以「下一个」是往下走（音高降序）——
+        // 数组故意按音高升序给，好让「照着数组顺序走」那版和这一版分得开
+        var controller = new PianoRollController(SongOf(
+            Melody(new Note(60, 0, 480, 100), new Note(64, 0, 480, 100), new Note(67, 0, 480, 100))));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(controller.MoveSelection(1)?.Pitch, Is.EqualTo(67), "最上面那个先来");
+            Assert.That(controller.MoveSelection(1)?.Pitch, Is.EqualTo(64));
+            Assert.That(controller.MoveSelection(1)?.Pitch, Is.EqualTo(60));
+            Assert.That(controller.MoveSelection(1)?.Pitch, Is.EqualTo(60), "到底了停住");
+
+            Assert.That(controller.MoveSelection(-1)?.Pitch, Is.EqualTo(64), "往回是往上");
+        });
+    }
+
+    [Test]
+    public void 焦点轨和选中集分家时从这条轨的开头重新起算()
+    {
+        // Ctrl+↑/↓ 换焦点不动选中集，于是会出现「焦点在轨 1、选中的音在轨 2」。
+        // 这时候两个方向都该落在**轨 1 的第一个音**上 —— 那正是「回到我正在弄的这条轨」的意思
+        var controller = new PianoRollController(SongOf(
+            Melody(new Note(60, Bar, 480, 100), new Note(62, Bar * 2, 480, 100)),
+            Bass(0, new Note(40, Bar * 5, 480, 100))));
+
+        controller.SelectOnly(new NoteRef(1, 0));
+        controller.SetFocusedTrack(0);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(controller.MoveSelection(-1)?.Pitch, Is.EqualTo(60), "Ctrl+← 回到这条轨的开头");
+            Assert.That(controller.Selection!.Value.Track, Is.EqualTo(0), "选中集落到焦点轨上");
+        });
+
+        controller.SelectOnly(new NoteRef(1, 0));
+        controller.SetFocusedTrack(0);
+        Assert.That(controller.MoveSelection(1)?.Pitch, Is.EqualTo(60), "Ctrl+→ 也从头起算，不是找最近的");
+    }
+
+    [Test]
+    public void 焦点轨一个音都没有时定位不崩()
+    {
+        // 空轨也是能聚焦的（展开、改名、删除都长在轨道头上）。
+        // 这时候按 Ctrl+←/→ 什么都不该发生 —— 尤其不该跳到别的轨上去
+        var controller = new PianoRollController(SongOf(
+            Melody(),
+            Bass(0, new Note(40, Bar * 3, 480, 100))));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(controller.MoveSelection(1), Is.Null);
+            Assert.That(controller.MoveSelection(-1), Is.Null);
+            Assert.That(controller.Selection, Is.Null);
         });
     }
 
@@ -682,6 +745,28 @@ public class PianoRollControllerTests
     public void 初始聚焦在第一条()
     {
         Assert.That(new PianoRollController(BarsOf(4)).FocusedTrack, Is.EqualTo(0));
+    }
+
+    /// <summary>
+    /// 聚焦挪没挪看得出来。
+    ///
+    /// 卷帘上「点音符 → 焦点跟随」那条路靠这个返回值决定要不要喊一声：
+    /// 点在自己已经聚焦的那条轨上是常事（连着点几个音），每次都喊的话，
+    /// 收到的那一头会把整窗重画一遍。
+    /// </summary>
+    [Test]
+    public void 聚焦挪没挪看得出来()
+    {
+        var controller = new PianoRollController(ThreeTracks());
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(controller.SetFocusedTrack(0), Is.False, "本来就在这条轨上");
+            Assert.That(controller.SetFocusedTrack(2), Is.True);
+            Assert.That(controller.SetFocusedTrack(2), Is.False, "已经挪过来了");
+            Assert.That(controller.SetFocusedTrack(99), Is.False, "越界夹回最后一条，夹完还是原地");
+            Assert.That(controller.FocusedTrack, Is.EqualTo(2));
+        });
     }
 
     [Test]
