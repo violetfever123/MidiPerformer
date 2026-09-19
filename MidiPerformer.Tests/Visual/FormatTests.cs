@@ -1,4 +1,5 @@
 using MidiPerformer.Adapters.Presenters;
+using MidiPerformer.Core.Ports.Inbound;
 using NUnit.Framework;
 
 namespace MidiPerformer.Tests.Visual;
@@ -179,5 +180,67 @@ public class FormatTests
         Assert.That(
             Format.CutSummary(5, 8, 3, preview),
             Is.EqualTo("第 5–8 小节（共 4 小节）：这一段里没有音，抽了和没抽一样"));
+    }
+
+    // ==================== 预检不放行的提示 ====================
+
+    /// <summary>
+    /// 预检不放行时状态行上那句话。**逐字钉住**，理由和上面那条预览一样：
+    /// 这是用户唯一能知道「为什么按了开始没动静」的地方。
+    ///
+    /// 三句话各点出**下一步该做什么**（以管理员身份重开 / 切成英文 / 换一条轨），
+    /// 而不是三句「不能开始」—— 说不清下一步就等于把人支到错方向上去。
+    /// 这三条文案是这条工单的硬要求（「两种都要给出明确的中文提示，不是静默失败」），
+    /// 所以它不能再写死在窗口里：那样没人给它加得了断言。
+    /// </summary>
+    [Test]
+    public void 三种不放行各有一句说清下一步的中文()
+    {
+        Assert.Multiple(() =>
+        {
+            Assert.That(Format.PreflightRefusal(PerformanceStartOutcome.NotElevated),
+                Is.EqualTo("没开始：要以管理员身份运行。不然发的按键会被系统挡在游戏窗口外面 —— 一个音都收不到，还不报错。"));
+            Assert.That(Format.PreflightRefusal(PerformanceStartOutcome.ImeActive),
+                Is.EqualTo("没开始：输入法现在是中文。中文态下按键会被输入法截走，弹出来就是整段整段地漏音。切成英文再按一次。"));
+            Assert.That(Format.PreflightRefusal(PerformanceStartOutcome.NoPlayableTrack),
+                Is.EqualTo("没开始：这条轨弹不了。口琴一次只响一个音，所以只能弹单声部、不带打击乐的轨。换一条试试。"));
+        });
+    }
+
+    /// <summary>
+    /// 每个不放行的原因都得有自己的一句话，而且不能是空的、不能和别人撞。
+    ///
+    /// 这一条防的是**将来**：往 <see cref="PerformanceStartOutcome"/> 里添一个失败原因、
+    /// 忘了在这儿配文案，用户看到的就是「按了开始什么都没发生」—— 正是要防的那种静默失败。
+    /// 断言写成「遍历所有枚举值」而不是「逐个列出来」，就是为了让新增的那个自动落进网里：
+    /// 新值会走到那句兜底文案上，于是「和别人撞了」这条会红。
+    /// </summary>
+    [Test]
+    public void 每个不放行的原因都有一句不重复的话()
+    {
+        var refusals = Enum.GetValues<PerformanceStartOutcome>()
+            .Where(o => o != PerformanceStartOutcome.Started)
+            .ToList();
+
+        var messages = refusals.Select(Format.PreflightRefusal).ToList();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(messages, Has.All.Not.Empty, "有一条不放行没给文案 —— 那就是静默失败");
+            Assert.That(messages.Distinct().Count(), Is.EqualTo(refusals.Count),
+                "两条不放行给了同一句话：用户分不出该去改权限还是去切输入法");
+        });
+    }
+
+    /// <summary>
+    /// 放行时也**绝不**返回空串。
+    ///
+    /// 调用方只在 <c>!= Started</c> 时才用它，但空串在这儿是个陷阱：哪天真有人漏了那个判断，
+    /// 状态行会变成一片空白 —— 又回到「静默失败」。所以宁可回一句「预检没放行」。
+    /// </summary>
+    [Test]
+    public void 放行时也绝不返回空串()
+    {
+        Assert.That(Format.PreflightRefusal(PerformanceStartOutcome.Started), Is.Not.Empty);
     }
 }

@@ -147,7 +147,72 @@ public class StartPerformanceTests
         });
     }
 
+    /// <summary>
+    /// 三档倒计时（3 / 5 / 10 秒）都**按用户选的那个秒数**等满才发第一个音。
+    ///
+    /// 只测一个 3 秒是不够的：一个把倒计时写死成 3 秒的实现能过掉上面任何一条 ——
+    /// 而「10 秒」恰恰是用户切到游戏窗口要用的那一档，写成 3 秒等于在他还没切过去的时候就开弹。
+    /// 所以三个值各跑一遍，断言的是同一条不变量：第一个音不早于所选秒数。
+    ///
+    /// 上界是**松的**（+1 秒）：它只拦「等得离谱」的那种（比如 3 秒档按 10 秒等）。
+    /// 假时钟每读一次走一个 <see cref="TierStepSeconds"/>，所以连 10 秒档也只要几十次
+    /// 真正的分片等待、一百多毫秒就跑完 —— 一等真时间，这条测试就得跑 18 秒。
+    /// </summary>
+    [TestCase(3.0)]
+    [TestCase(5.0)]
+    [TestCase(10.0)]
+    public void 三档倒计时都等满了才发第一个音(double 倒计时秒)
+    {
+        var clock = new FakeClock { AutoStepSeconds = TierStepSeconds };
+        var sink = new RecordingEventSink(clock);
+        var performance = new StartPerformance(clock, sink);
+
+        using var finished = new ManualResetEventSlim(false);
+        performance.Finished += () => finished.Set();
+
+        Assert.That(performance.Start(请求(倒计时秒), elevated: true, imeInChinese: false),
+            Is.EqualTo(PerformanceStartOutcome.Started));
+
+        Assert.That(finished.Wait(TimeSpan.FromSeconds(20)), Is.True, "一场短曲子放不完");
+
+        // 只取音键：修饰键（鼠标）在倒计时终点之前就有，拿它算会误判成「发早了」。
+        // 这一首的样本音是 C4、基准八度自动选到 4，本来也压不出修饰键来。
+        var 按下 = sink.KeyEvents.Where(e => e.Down).ToList();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(按下, Is.Not.Empty, "倒计时走完了，第一个音却没发出去");
+            Assert.That(按下[0].At, Is.GreaterThanOrEqualTo(倒计时秒), "第一个音发得比倒计时终点还早");
+            Assert.That(按下[0].At, Is.LessThan(倒计时秒 + 1),
+                "等得比所选秒数长太多 —— 倒计时的长度多半没读用户选的那个");
+        });
+    }
+
+    /// <summary>
+    /// 悬浮层那个大数字的第一帧就是**用户选的那一档**。
+    ///
+    /// 用手动时钟（时间不走）读一次，避开线程启动那几毫秒的竞争：
+    /// 它错了用户会看到「选了 10 秒、数字从 3 开始数」—— 那是他唯一能核对倒计时的东西。
+    /// </summary>
+    [TestCase(3.0)]
+    [TestCase(5.0)]
+    [TestCase(10.0)]
+    public void 倒计时的大数字从选的档位开始数(double 倒计时秒)
+    {
+        var clock = new FakeClock();                      // 手动：时钟不走，倒计时永远走不完
+        var performance = new StartPerformance(clock, new RecordingEventSink(clock));
+
+        performance.Start(请求(倒计时秒), elevated: true, imeInChinese: false);
+
+        Assert.That(performance.CountdownSecondsLeft, Is.EqualTo((int)倒计时秒));
+
+        performance.Stop();                                // 把那条还在等的线程收掉
+    }
+
     // ==================== 夹具 ====================
+
+    /// <summary>三档倒计时那几条用的假时钟步长（秒）：够大到几十步就跨过 10 秒。</summary>
+    private const double TierStepSeconds = 0.25;
 
     private static StartPerformanceRequest 请求(double 倒计时秒)
         => new(短曲(), TrackIndex: 0, BaseOctave: null, InputTiming.Standard, 倒计时秒);

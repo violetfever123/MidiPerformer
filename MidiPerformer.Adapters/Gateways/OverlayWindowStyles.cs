@@ -34,6 +34,26 @@ public static class OverlayWindowStyles
     private const long WS_EX_NOACTIVATE = 0x0800_0000L;
 
     /// <summary>
+    /// 三个样式位的并集。**公开出来是给测试看的**（<c>OverlayStyleTests</c>）。
+    ///
+    /// 理由和 <c>InputSender.InputStructSize</c> 一样：网关干的事验不了（设没设上、系统认不认，
+    /// 只有真窗口看得见），但「要的是哪几个位」验得了。而这三个常量**写错一个不会有任何提示**：
+    /// 没有编译错、运行时也不报错，键还照发，只是全发到悬浮层自己或者桌面上 ——
+    /// 表现和「游戏一个音都收不到」一模一样，还查不出原因。
+    /// 常量表就在 WinUser.h，一个字符的差别（<c>0x0800_0000</c> 对 <c>0x0080_0000</c>）就是天壤之别，
+    /// 所以这里把它钉死。
+    /// </summary>
+    public const long Flags = WS_EX_TRANSPARENT | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW;
+
+    /// <summary>
+    /// 在窗口**已有的**拓展样式上叠出我们要的那一份。
+    ///
+    /// 必须是「或」而不是直接赋值：拓展样式里还住着别的位（分层、RTL、拖边框…），
+    /// 整个覆盖回去会顺手把它们抹掉，窗口的别的行为跟着变样。这里只加位，一个位都不清。
+    /// </summary>
+    public static long WithOverlayStyles(long currentExtendedStyle) => currentExtendedStyle | Flags;
+
+    /// <summary>
     /// 给一个窗口加上「点击穿透 + 不抢焦点 + 不进任务栏」。
     ///
     /// 返回是否成功。<b>失败不抛</b>：拿不到句柄的场合（窗口还没建出来、或者调用发生得太早）
@@ -47,7 +67,7 @@ public static class OverlayWindowStyles
         if (hwnd == IntPtr.Zero) return false;
 
         long style = GetWindowLongPtr(hwnd, GWL_EXSTYLE).ToInt64();
-        long wanted = style | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW;
+        long wanted = WithOverlayStyles(style);
         if (wanted == style) return true;              // 已经设过了，不重复一次系统调用
 
         // 返回值是**旧的**样式，设失败时返回 0。这里不看返回值，回头读一次确认 ——

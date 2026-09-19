@@ -145,7 +145,9 @@ public partial class PerformerOverlayWindow : Window
     /// 它存在的理由很具体：工单里有「已在一个普通窗口上验证悬浮层置顶与不抢焦点」这一条，
     /// 而这条没法在测试里验 —— 它需要一个真窗口、一个真的前台窗口，和一次真的点击。
     /// 于是照 <c>--style-guide</c> 的先例留一个开关，能把悬浮层单独拉起来比一比
-    /// 「显示之后前台窗口还是不是原来那个」。见 docs 里 06 的验收记录。
+    /// 「显示之后前台窗口还是不是原来那个」。见 `.scratch/midi-performer/issues/06-performance-preflight-and-overlay.md`
+    /// 的验收记录（原先写的是「见 docs 里 06 的验收记录」，而 docs/ 下只有 spec 与 wireframe，
+    /// 这条指针是空的 —— 记录跟着工单走）。
     /// </summary>
     public void ShowAllStatesForDemo()
     {

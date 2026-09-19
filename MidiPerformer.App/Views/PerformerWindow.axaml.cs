@@ -3,6 +3,7 @@ using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using MidiPerformer.Adapters.Gateways;
+using MidiPerformer.Adapters.Presenters;
 using MidiPerformer.Core.Model;
 using MidiPerformer.Core.Ports.Inbound;
 using MidiPerformer.Core.Ports.Outbound;
@@ -291,7 +292,9 @@ public partial class PerformerWindow : Window
         var outcome = _performance.Start(request, InputSender.CheckElevation(), InputMethod.IsChineseActive());
         if (outcome != PerformanceStartOutcome.Started)
         {
-            SetStatus(Explain(outcome), Status.Idle);
+            // 文案在展现层（Format），不在这儿拼：那段 switch 原先写死在这个文件里，
+            // 于是「每个失败原因都得有一句话」没人守得住 —— 见 Format.PreflightRefusal 的说明。
+            SetStatus(Format.PreflightRefusal(outcome), Status.Idle);
             return;
         }
 
@@ -422,23 +425,6 @@ public partial class PerformerWindow : Window
         int index = BaseOctaveCombo.SelectedIndex;
         return index <= 0 ? null : index + 1;
     }
-
-    /// <summary>
-    /// 预检结论翻成中文。<b>文案全在这一层</b>：Core 只回一个原因，
-    /// 见 <see cref="PerformanceStartOutcome"/> 的说明。
-    ///
-    /// 三种失败各说各的下一步动作，不写成三句「不能开始」：用户看完得知道去改什么。
-    /// </summary>
-    private static string Explain(PerformanceStartOutcome outcome) => outcome switch
-    {
-        PerformanceStartOutcome.NotElevated =>
-            "没开始：要以管理员身份运行。不然发的按键会被系统挡在游戏窗口外面 —— 一个音都收不到，还不报错。",
-        PerformanceStartOutcome.ImeActive =>
-            "没开始：输入法现在是中文。中文态下按键会被输入法截走，弹出来就是整段整段地漏音。切成英文再按一次。",
-        PerformanceStartOutcome.NoPlayableTrack =>
-            "没开始：这条轨弹不了。口琴一次只响一个音，所以只能弹单声部、不带打击乐的轨。换一条试试。",
-        _ => "没开始。"
-    };
 
     /// <summary>
     /// 拉起悬浮层（已经开着就只把它显出来）。

@@ -1,4 +1,5 @@
 using System.Globalization;
+using MidiPerformer.Core.Ports.Inbound;
 using MidiPerformer.Core.UseCases.Perform.Repertoire;
 
 namespace MidiPerformer.Adapters.Presenters;
@@ -72,6 +73,35 @@ public static class Format
         var span = TimeSpan.FromSeconds(seconds);
         return $"{(int)span.TotalMinutes}:{span.Seconds:D2}";
     }
+
+    /// <summary>
+    /// 预检不放行时，状态行上那句话。
+    ///
+    /// <b>三种失败各说各的下一步动作</b>，不是三句「不能开始」：用户看完得知道去改什么 ——
+    /// 权限不够就重开程序、输入法是中文就切英文、轨弹不了就换轨。说不清下一步的提示
+    /// 等于把人支到错方向上去，比不说更坏。
+    ///
+    /// <b>为什么这段文案要从窗口里搬出来</b>：它原先是 <c>PerformerWindow</c> 里一段写死的
+    /// <c>switch</c>，而「两种预检都要给明确的中文提示、不是静默失败」正是这条工单的硬要求 ——
+    /// 写死在视图里就没人给它加得了断言，日后往 <see cref="PerformanceStartOutcome"/> 里
+    /// 添一个失败原因、忘了配文案，用户看到的就是「按了开始什么都没发生」，
+    /// 而那恰恰是要防的那一件事。文案归这一层（见类注释：以后要英文界面只动这里），
+    /// 于是「每个失败原因都有一句话」这条有测试守着。
+    ///
+    /// <b>放行也照样回一句话，不返回空串。</b>调用方只在 <c>!= Started</c> 时才用它，
+    /// 但空串在这里是个陷阱：哪天真有人漏了那个判断，状态行会变成一片空白 ——
+    /// 又回到「静默失败」。回一句「预检没放行」至少让人知道发生了什么。
+    /// </summary>
+    public static string PreflightRefusal(PerformanceStartOutcome outcome) => outcome switch
+    {
+        PerformanceStartOutcome.NotElevated =>
+            "没开始：要以管理员身份运行。不然发的按键会被系统挡在游戏窗口外面 —— 一个音都收不到，还不报错。",
+        PerformanceStartOutcome.ImeActive =>
+            "没开始：输入法现在是中文。中文态下按键会被输入法截走，弹出来就是整段整段地漏音。切成英文再按一次。",
+        PerformanceStartOutcome.NoPlayableTrack =>
+            "没开始：这条轨弹不了。口琴一次只响一个音，所以只能弹单声部、不带打击乐的轨。换一条试试。",
+        _ => "没开始：预检没放行。"
+    };
 
     /// <summary>轨序号：wireframe 里是两位的 <c>01</c>，对齐全靠它。</summary>
     public static string TrackNumber(int oneBased) =>
