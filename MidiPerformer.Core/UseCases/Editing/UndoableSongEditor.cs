@@ -79,6 +79,16 @@ public sealed class UndoableSongEditor : ISongEditor
     public Song DeleteNotes(Song song, IReadOnlyList<NoteRef> notes)
         => Record(song, _inner.DeleteNotes(song, notes));
 
+    /// <summary>
+    /// 剪掉一段同样是**一格撤销**：一次调用推掉整条轨上一段区间，撤销一步回到剪之前。
+    ///
+    /// 这条挪动的是「后面所有音的位置」，牵动得比 <see cref="MoveNotes"/> 多得多，
+    /// 但装饰器不用为此多记任何账：栈里装的是整份旧 <see cref="Song"/>，
+    /// 位置、时值、音符数一起回去，没有「挪了多少要反向挪回来」这种事。
+    /// </summary>
+    public Song CutRange(Song song, int trackIndex, long startTick, long endTick)
+        => Record(song, _inner.CutRange(song, trackIndex, startTick, endTick));
+
     public Song RenameTrack(Song song, int trackIndex, string name)
         => Record(song, _inner.RenameTrack(song, trackIndex, name));
 

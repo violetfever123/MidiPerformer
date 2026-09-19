@@ -5,7 +5,7 @@ using NUnit.Framework;
 namespace MidiPerformer.Tests.Editing;
 
 /// <summary>
-/// 音符级的编辑命令（挪 / 改时值 / 删 / 改名 / 删轨）的**外部行为** —— 还是 S2 缝：
+/// 音符级的编辑命令（挪 / 改时值 / 删 / 剪一段 / 改名 / 删轨）的**外部行为** —— 还是 S2 缝：
 /// 进去一份 <see cref="Song"/>，出来一份 <see cref="Song"/>，一个私有字段都不碰。
 ///
 /// 与 <c>SongEditorTests</c>（改 BPM / 移调）分开一个文件，是因为这两条命令的**危险形状不一样**：
@@ -575,6 +575,246 @@ public class SongEditorNoteCommandTests
 
         var ex = Assert.Throws<ArgumentOutOfRangeException>(
             () => _editor.DeleteNotes(song, new[] { new NoteRef(0, 0), new NoteRef(0, 7) }));
+
+        Assert.That(ex!.Message, Does.Contain("越界"));
+    }
+
+    // ==================== 剪一段（连时间一起抽走） ====================
+
+    /// <summary>
+    /// 这条命令的正身：中间那段抽走，后面的音**提前落下来**，不是留一段空白。
+    ///
+    /// 和 <see cref="SongEditor.DeleteNotes"/> 摆在一起看最清楚 —— 同一条轨、同一段区间：
+    /// 删音符留下「第 2 小节空着，第 3 小节的东西还在第 3 小节」，
+    /// 剪一段留下「第 2 小节整个没了，第 3 小节的东西挪到第 2 小节」。
+    /// 用户说的「不是清除音符，是自动拼接」就是这条。
+    /// </summary>
+    [Test]
+    public void 剪掉中间一段后面的音整体前移()
+    {
+        var song = SongOf(Map(), Melody(
+            new Note(60, 0, 240, 100),        // 切口之前
+            new Note(64, 1920, 240, 100),     // 切口里
+            new Note(67, 2400, 240, 100),     // 切口里
+            new Note(72, 3840, 240, 100)));   // 切口之后
+
+        var edited = _editor.CutRange(song, 0, 1920, 3840);   // 抽掉 [1920, 3840)，1920 tick
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(Pitches(edited, 0), Is.EqualTo(new[] { 60, 72 }), "切口里的两个没了，外面两个还在");
+            Assert.That(Starts(edited, 0), Is.EqualTo(new long[] { 0, 1920 }),
+                "后面那个提前了整整 1920 tick（3840 - 1920）");
+            Assert.That(edited.Tracks[0].Notes[1].LengthTicks, Is.EqualTo(240), "前移的是位置，时值不跟着变");
+            Assert.That(edited.Tracks[0].Notes[1].Velocity, Is.EqualTo(100), "力度也不动");
+        });
+    }
+
+    /// <summary>
+    /// <b>只剪这一条轨</b>，别的轨一个字节都不动 —— 于是从这一刀往后，这条轨和别的轨**永久错位**。
+    ///
+    /// 那是这个功能的定义，不是副作用：要的就是「把这声部里多余的那段剪掉，剩下的接上」。
+    /// 跟着来的两个事实一并钉在这里：别的轨原样复用引用；
+    /// <see cref="Song.EndTick"/> 是**所有轨**的最大值，剪一条不会让整曲变短。
+    /// </summary>
+    [Test]
+    public void 只剪这一条轨别的轨一个字节都不动()
+    {
+        var song = SongOf(Map(),
+            Melody(new Note(60, 1920, 240, 100), new Note(64, 3840, 240, 100)),
+            Bass(new Note(40, 1920, 240, 100), new Note(43, 3840, 240, 100)));
+
+        var edited = _editor.CutRange(song, 0, 1920, 3840);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(edited.Tracks[1], Is.SameAs(song.Tracks[1]), "没被碰到的轨原样复用");
+            Assert.That(Starts(edited, 1), Is.EqualTo(new long[] { 1920, 3840 }), "贝斯还在原地");
+            Assert.That(Starts(edited, 0), Is.EqualTo(new long[] { 1920 }), "主旋律接上了");
+            Assert.That(edited.EndTick, Is.EqualTo(song.EndTick),
+                "主旋律自己短了，整曲长度是两条轨的最大值，贝斯那条没剪，所以整曲不变");
+            Assert.That(edited.TempoMap, Is.SameAs(song.TempoMap),
+                "速度表不跟着挪 —— 变速曲子里被前移的那段会按它新位置上的速度演奏");
+        });
+    }
+
+    /// <summary>跨过左切口的音在切口处剪断：左边那截留下，右边那截本来就在要抽走的那段里。</summary>
+    [Test]
+    public void 跨过左切口的音在切口处剪断()
+    {
+        var song = SongOf(Map(), Melody(new Note(60, 1440, 720, 100)));   // [1440, 2160)，切口从 1920 起
+
+        var edited = _editor.CutRange(song, 0, 1920, 3840);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(Starts(edited, 0), Is.EqualTo(new long[] { 1440 }), "起点不动");
+            Assert.That(edited.Tracks[0].Notes[0].EndTick, Is.EqualTo(1920), "尾巴剪在切口上");
+        });
+    }
+
+    /// <summary>
+    /// 从切口里伸出右边的音：剪下伸出去的那一截，**挪到左切口接上**。
+    ///
+    /// 这条和下面「整个切口被一个音盖住」是一对，差别只在**起点在不在切口里**：
+    /// 起点在切口里，它留在左切口之前的部分就不存在，右边那截是唯一救得回来的东西。
+    /// </summary>
+    [Test]
+    public void 伸出右切口的音右边那截挪到左切口接上()
+    {
+        var song = SongOf(Map(), Melody(new Note(60, 3360, 720, 100)));   // [3360, 4080)，切口到 3840 止
+
+        var edited = _editor.CutRange(song, 0, 1920, 3840);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(Starts(edited, 0), Is.EqualTo(new long[] { 1920 }), "落到左切口上");
+            Assert.That(edited.Tracks[0].Notes[0].LengthTicks, Is.EqualTo(240),
+                "留下的是伸出去的那截 [3840, 4080)，240 tick，不是整个音的 720");
+        });
+    }
+
+    /// <summary>
+    /// 一个音把整个切口盖住：只在左切口剪断，右边那截**丢掉**，不挪回来。
+    ///
+    /// 挪回来的话它会紧贴着左截 —— 一个音变成两个，「剪」就成了「分裂」。
+    /// 这条命令的不变量是**音符数只减不增**，代价是一个长音会被剪短（这里从 3840 只剩 960）。
+    /// </summary>
+    [Test]
+    public void 整个切口被一个音盖住时只留左边那截()
+    {
+        var song = SongOf(Map(), Melody(new Note(60, 960, 3840, 100)));   // [960, 4800)，切口 [1920, 3840)
+
+        var edited = _editor.CutRange(song, 0, 1920, 3840);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(edited.Tracks[0].NoteCount, Is.EqualTo(1), "一个音还是一个音，不分裂成两个");
+            Assert.That(Starts(edited, 0), Is.EqualTo(new long[] { 960 }));
+            Assert.That(edited.Tracks[0].Notes[0].EndTick, Is.EqualTo(1920), "剪在左切口，右边那截没了");
+        });
+    }
+
+    /// <summary>
+    /// 一条混着各种形状的轨剪一刀，跑完盯着两条不变量：
+    /// <b>音符数只减不增</b>（剪，不是分裂），<b>数组仍然按起点升序</b>。
+    ///
+    /// 第二条要特别看，因为这条命令**结尾没有重排**（挪音符和改时值那两条都有一句 <c>OrderBy</c>）：
+    /// 新的起点是旧起点的单调不减函数，有序数组过一遍出来还有序。这条测试就是那句话的证据 ——
+    /// 哪天实现里把分派顺序改错了，升序这里立刻红。
+    /// </summary>
+    [Test]
+    public void 剪完音符数只减不增而且仍然按起点升序()
+    {
+        var song = SongOf(Map(), Melody(
+            new Note(60, 0, 240, 100),        // 整个在切口之前
+            new Note(62, 480, 1920, 100),     // 跨过左切口
+            new Note(64, 1440, 3840, 100),    // 整个切口都被它盖住
+            new Note(65, 1920, 240, 100),     // 整个在切口里
+            new Note(67, 3360, 720, 100),     // 从切口里伸出右切口
+            new Note(69, 3840, 240, 100),     // 正好从右切口起步，前移之后落在左切口上
+            new Note(72, 4320, 240, 100)));   // 整个在切口之后
+
+        var edited = _editor.CutRange(song, 0, 1920, 3840);
+        var starts = Starts(edited, 0);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(edited.Tracks[0].NoteCount, Is.LessThanOrEqualTo(song.Tracks[0].NoteCount),
+                "剪，不是分裂");
+            Assert.That(starts, Is.Ordered, "按起点升序");
+            Assert.That(edited.Tracks[0].Notes.All(n => n.LengthTicks >= 1), Is.True, "时值至少 1 个 tick");
+            Assert.That(edited.Tracks[0].Notes.All(n => n.StartTick >= 0), Is.True, "起点不为负");
+            // 67 和 69 都落到 1920 上：一个是从切口里伸出去那截挪回来的，一个是正好从右切口起步
+            // 前移过来的。同起点本来就是合法的（和弦就是这样），关键是**两个都在、顺序没乱**。
+            Assert.That(starts, Is.EqualTo(new long[] { 0, 480, 1440, 1920, 1920, 2400 }));
+        });
+    }
+
+    /// <summary>
+    /// 剪了等于没剪：规矩和 <c>DeleteNotes</c> 收到空集一样，是**正常输入**不是错误 ——
+    /// 两个框填成同一小节、或者剪到这条轨的尾巴之外去，都该安安静静什么也不发生。
+    ///
+    /// 「返回同一个引用」在这里是硬要求，不是优化：装饰器拿它当「这条命令改没改」的判据，
+    /// 返回一份内容一样的新对象会让撤销栈里攒下按了没反应的格子。
+    /// </summary>
+    [Test]
+    public void 剪了等于没剪时返回同一份曲子()
+    {
+        var song = SongOf(Map(), Melody(new Note(60, 0, 240, 100)));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(_editor.CutRange(song, 0, 1920, 1920), Is.SameAs(song), "起终点相等：零个 tick");
+            Assert.That(_editor.CutRange(song, 0, 1920, 3840), Is.SameAs(song), "剪在最后一个音之后，没有音要动");
+            Assert.That(_editor.CutRange(song, 0, 0, 0), Is.SameAs(song), "都是 0");
+        });
+    }
+
+    [Test]
+    public void 空轨上剪一段也是返回同一份曲子()
+    {
+        var song = SongOf(Map(), Melody());
+
+        Assert.That(_editor.CutRange(song, 0, 0, 1920), Is.SameAs(song));
+    }
+
+    /// <summary>剪空一条轨之后轨还在，和 <c>DeleteNotes</c> 一个道理：空声部不是没有声部。</summary>
+    [Test]
+    public void 剪空一条轨之后轨还在()
+    {
+        var song = SongOf(Map(),
+            Melody(new Note(60, 0, 240, 100)),
+            Bass(new Note(40, 960, 240, 100)));
+
+        var edited = _editor.CutRange(song, 0, 0, 1920);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(edited.Tracks, Has.Count.EqualTo(2), "轨数不变");
+            Assert.That(edited.Tracks[0].NoteCount, Is.EqualTo(0));
+            Assert.That(edited.Tracks[0].Name, Is.EqualTo("主旋律"), "名字还留着");
+            Assert.That(edited.Tracks[1], Is.SameAs(song.Tracks[1]), "没被碰到的轨原样复用");
+        });
+    }
+
+    /// <summary>
+    /// 负的起点夹到 0，不抛：这两个 tick 是**从用户填的小节号算出来的**，
+    /// 不是调用方写死的参数 —— 算出来的坐标一律夹住，写死的参数才抛（和挪音符的规矩一致）。
+    /// </summary>
+    [Test]
+    public void 负的起点夹到零()
+    {
+        var song = SongOf(Map(), Melody(new Note(60, 0, 240, 100), new Note(64, 1920, 240, 100)));
+
+        Assert.That(
+            Starts(_editor.CutRange(song, 0, -500, 1920), 0),
+            Is.EqualTo(Starts(_editor.CutRange(song, 0, 0, 1920), 0)));
+    }
+
+    /// <summary>
+    /// 终点在起点之前是**调用方的错**，直接抛。
+    ///
+    /// 界面上两个框填反了由界面换过来（那是要照顾的输入），换过来还反着，
+    /// 就说明算小节边界那段代码坏了 —— 那时候悄悄换成「不改」或者「照字面剪」，
+    /// 用户看到的是「点了没反应」或者「剪错了地方」，而没有任何地方报错。
+    /// </summary>
+    [Test]
+    public void 终点在起点之前抛中文错()
+    {
+        var song = SongOf(Map(), Melody(new Note(60, 0, 240, 100)));
+
+        var ex = Assert.Throws<ArgumentException>(() => _editor.CutRange(song, 0, 3840, 1920));
+
+        Assert.That(ex!.Message, Does.Contain("之前"));
+    }
+
+    [Test]
+    public void 剪一段时越界的轨下标抛中文错()
+    {
+        var song = SongOf(Map(), Melody(new Note(60, 0, 240, 100)));
+
+        var ex = Assert.Throws<ArgumentOutOfRangeException>(() => _editor.CutRange(song, 3, 0, 1920));
 
         Assert.That(ex!.Message, Does.Contain("越界"));
     }

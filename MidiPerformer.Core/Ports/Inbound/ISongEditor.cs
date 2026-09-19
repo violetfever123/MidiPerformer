@@ -3,7 +3,8 @@ using MidiPerformer.Core.Model;
 namespace MidiPerformer.Core.Ports.Inbound;
 
 /// <summary>
-/// 编辑命令的入口：改整曲速度、改某条轨的移调与音色、挪音符、改时值、删音符、改轨名、删轨。
+/// 编辑命令的入口：改整曲速度、改某条轨的移调与音色、挪音符、改时值、删音符、剪掉一段、
+/// 改轨名、删轨。
 ///
 /// <b>收散参、返回新的 <see cref="Song"/>。</b>没有 Request、没有 Result ——
 /// <see cref="Song"/> 不可变，「改没改」就等于「返回的引用是不是同一个」，
@@ -118,6 +119,55 @@ public interface ISongEditor
     /// <param name="notes">要删的音。空集时返回 <paramref name="song"/> 本身。</param>
     /// <returns>新的曲子；一个音都没删时返回 <paramref name="song"/> 本身。</returns>
     Song DeleteNotes(Song song, IReadOnlyList<NoteRef> notes);
+
+    /// <summary>
+    /// 把第 <paramref name="trackIndex"/> 条轨上 <c>[startTick, endTick)</c> 这一段
+    /// <b>连时间一起</b>抽走：区间里的音删掉，区间之后（含跨过终点那一截）的音整体前移，
+    /// 让剩下的接上来。
+    ///
+    /// <b>和 <see cref="DeleteNotes"/> 是两件事。</b>那条只把音拿走，谱面长度一个 tick 都不变 ——
+    /// 删掉第 5 小节里的那几个音，第 6 小节还在第 6 小节，留下一段空的。这条是<b>把第 5 小节整个抽走</b>：
+    /// 后面的音提前一小节落下来。用户说的「不是清除音符，是自动拼接」就是这一条。
+    ///
+    /// <b>只动这一条轨。</b>别的轨连引用都不变，于是从这一刀往后这条轨和别的轨<b>永久错位</b> ——
+    /// 那是这个功能的定义，不是副作用：它要的就是「把这声部里多余的那一段剪掉，剩下的接上」。
+    /// 两个后果得说在前面：<see cref="Song.EndTick"/> 是<b>所有轨</b>的最大值，
+    /// 所以剪一条轨不会让整曲变短（导航条和总时长都不缩）；
+    /// 而 <see cref="TempoMap"/> 是整曲共用的、不跟着挪，变速曲子里被前移的那段
+    /// 会按<b>它新位置上的速度</b>演奏。
+    ///
+    /// <b>区间由界面算，命令只认 tick。</b>跟 <see cref="DeleteNotes"/> 同一条规矩：
+    /// 「从第 5 小节到第 8 小节」那种对齐由界面拿小节宽度换算成 tick 再传进来。
+    /// 命令层连「小节」这个概念都没有 —— 小节线是显示层画的东西，不参与时序换算。
+    ///
+    /// <b>剪，不是分裂：跑完这条命令，音符数只会变少或者不变。</b>
+    /// 跨过切口的音就在切口处剪断，绝不一个变两个 —— 一个音变两个的话，
+    /// 左截的尾巴和右截的头会紧紧贴着，看着像一件没剪干净的事。
+    /// 逐个音是这么分的（<c>s</c> = 起点，<c>e</c> = 终点，<c>e</c> 不含）：
+    /// <list type="bullet">
+    /// <item>整个在左切口之前（<c>e &lt;= startTick</c>）—— 一个字节不动。</item>
+    /// <item>整个在右切口之后（<c>s &gt;= endTick</c>）—— 起点减去这段长度，整体前移。</item>
+    /// <item>跨过左切口（<c>s &lt; startTick &lt; e</c>）—— 在左切口剪断，留下左边那截。</item>
+    /// <item>从区间里伸出右切口（<c>s &gt;= startTick</c> 且 <c>e &gt; endTick</c>）——
+    /// 剪下右切口之外那截，<b>挪到左切口接上</b>（起点变成 <c>startTick</c>）。</item>
+    /// <item>整个落在区间里 —— 删掉。</item>
+    /// </list>
+    /// 「跨过左切口」那一条同时管住了<b>整个区间都被同一个音盖住</b>的情形：
+    /// 那种音也只在左切口剪断，右边那截<b>丢掉</b>、不挪回来。它挪回来的话会和左截紧贴成两个音，
+    /// 正好破了上面那条「绝不分裂」。代价是一个长音会被剪短，换来的是这条命令好推理。
+    ///
+    /// 剪完音符数组仍然是<b>起点升序</b>的，而且不用重排：上面那张表里
+    /// 新的起点是旧的起点的<b>单调不减</b>函数（<c>s</c> → <c>s</c> / <c>startTick</c> / <c>s - 长度</c>，
+    /// 三段的取值恰好首尾相接），有序数组过一遍单调函数出来还有序。
+    /// </summary>
+    /// <param name="song">改之前的曲子。</param>
+    /// <param name="trackIndex"><see cref="Song.Tracks"/> 里的下标。越界抛。</param>
+    /// <param name="startTick">要抽掉的那一段的起点，**含**。负数夹到 0。</param>
+    /// <param name="endTick">要抽掉的那一段的终点，**不含**。小于 <paramref name="startTick"/> 时抛 ——
+    /// 界面在传进来之前就该把「起点大于终点」换过来，换过来还反着就是调用方写错了。</param>
+    /// <returns>新的曲子；这段区间里没有音、也没有音要前移时（这段本来就是空的）
+    /// 返回 <paramref name="song"/> 本身。</returns>
+    Song CutRange(Song song, int trackIndex, long startTick, long endTick);
 
     /// <summary>
     /// 给某条轨改名。名字两端的空白会被去掉。

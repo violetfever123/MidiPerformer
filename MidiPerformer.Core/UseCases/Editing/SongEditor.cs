@@ -277,6 +277,81 @@ public sealed class SongEditor : ISongEditor
     }
 
     /// <summary>
+    /// 把这条轨上 <c>[startTick, endTick)</c> 这段连时间一起抽走，后面的音前移补上。
+    ///
+    /// 一边扫一边分派，分派规则见接口上的那张表。这里只补两件实现上的事：
+    ///
+    /// <b>末尾不重排。</b><see cref="MoveNotes"/> 和 <see cref="SetNoteSpan"/> 结尾都得来一句
+    /// <c>OrderBy</c>，因为那两条能把音挪到邻居前面去；这条不会 —— 新的起点是旧起点的
+    /// <b>单调不减</b>函数（<c>s</c> → <c>s</c> / <c>startTick</c> / <c>s - 长度</c>，三段首尾相接），
+    /// 有序数组过一遍单调函数出来还有序。多排一次不只是白干，还会把「这条命令从不重排」
+    /// 这个好推理的性质从代码里抹掉。
+    ///
+    /// <b><see cref="Track.NoteCount"/> 变成 0 的轨保留</b>，和 <see cref="DeleteNotes"/> 一个道理：
+    /// 剪空了是「这条声部这段没东西」，不是「这条声部不要了」。
+    /// </summary>
+    public Song CutRange(Song song, int trackIndex, long startTick, long endTick)
+    {
+        var track = TrackAt(song, trackIndex);
+
+        // 界面在算完小节边界之后就该把「起点大于终点」换过来（用户把两个框填反了是常事，
+        // 那是要照顾的输入，不是错误）。换过来还反着，就是调用方自己写错了 —— 抛，不猜。
+        if (endTick < startTick)
+            throw new ArgumentException(
+                $"切口终点 {endTick} 在起点 {startTick} 之前：这段没有长度，不知道该抽掉哪一块。",
+                nameof(endTick));
+
+        if (startTick < 0) startTick = 0;
+        long span = endTick - startTick;
+
+        // 空区间是「抽掉零个 tick」，和 DeleteNotes 收到空集一样，是正常输入，不是错误。
+        if (span == 0) return song;
+
+        var kept = new List<Note>(track.Notes.Count);
+        bool changed = false;
+
+        foreach (var note in track.Notes)
+        {
+            long start = note.StartTick;
+            long end = note.EndTick;
+
+            if (end <= startTick)
+            {
+                kept.Add(note);                                   // 整个在左切口之前
+            }
+            else if (start >= endTick)
+            {
+                kept.Add(note with { StartTick = start - span }); // 整个在右切口之后：前移
+                changed = true;
+            }
+            else if (start < startTick)
+            {
+                // 跨过左切口（含「整个区间都被它盖住」那种）：在左切口剪断，留下左边那截。
+                // 盖住整个区间的那种，右边那截就此丢掉 —— 挪回来的话它紧贴着左截，
+                // 一个音变成两个，「剪」就成了「分裂」（见接口上的说明）。
+                kept.Add(note with { LengthTicks = startTick - start });
+                changed = true;
+            }
+            else if (end > endTick)
+            {
+                // 从区间里伸出右切口：剪下外面那截，挪到左切口接上。
+                kept.Add(note with { StartTick = startTick, LengthTicks = end - endTick });
+                changed = true;
+            }
+            else
+            {
+                changed = true;                                   // 整个在区间里：删掉，不入队
+            }
+        }
+
+        if (!changed) return song;
+
+        var tracks = song.Tracks.ToArray();
+        tracks[trackIndex] = track.WithNotes(kept);
+        return new Song(tracks, song.TempoMap);
+    }
+
+    /// <summary>
     /// 给某条轨改名。名字两端的空白会被去掉（用户从别处粘过来的名字常带一个尾空格，
     /// 留着它会让「贝斯」和「贝斯 」在列表里看着一模一样、排序和查找却分成两个）。
     /// </summary>

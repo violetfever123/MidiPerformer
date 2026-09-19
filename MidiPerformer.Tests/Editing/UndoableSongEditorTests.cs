@@ -355,6 +355,47 @@ public class UndoableSongEditorTests
         });
     }
 
+    // ==================== 剪一段 ====================
+
+    /// <summary>
+    /// 剪一段也记一格账，而且撤销要把它挪过的东西**一起**退回去。
+    ///
+    /// 这条命令牵动的比别的都多：位置、时值、音符数一起变。装饰器照样一行都没为它改过 ——
+    /// 栈里装的是整份旧 <see cref="Song"/>，怎么变的不用记。
+    /// </summary>
+    [Test]
+    public void 剪一段可以撤销()
+    {
+        var editor = NewEditor();
+        var initial = SongAt(0);
+        var edited = editor.CutRange(initial, 0, 0, 480);
+
+        Assert.That(edited.Tracks[0].NoteCount, Is.EqualTo(0), "先把那一个音剪掉，确认这条真改了什么");
+
+        AssertSameSong("撤销之后", initial, editor.Undo());
+        Assert.That(editor.Redo(), Is.SameAs(edited), "重做拿到的还是当初那一份");
+    }
+
+    /// <summary>这段区间本来就空（起终点相等，或者里面没音、后面也没音要前移）：
+    /// 装饰器不该记一笔「按了没反应」的账。</summary>
+    [Test]
+    public void 剪了等于没剪时不记这一笔()
+    {
+        var editor = NewEditor();
+        var song = SongAt(0);
+        editor.SetTranspose(song, 0, 1);
+        editor.Undo();
+        Assert.That(editor.CanRedo, Is.True, "先摆一个重做在那儿");
+
+        var same = editor.CutRange(song, 0, 480, 480);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(same, Is.SameAs(song), "空区间不改谱面");
+            Assert.That(editor.CanRedo, Is.True, "没改的命令也不该把重做链清掉");
+        });
+    }
+
     // ==================== 转发 ====================
 
     /// <summary>
@@ -398,6 +439,32 @@ public class UndoableSongEditorTests
             Assert.That(editor.Undo(), Is.SameAs(byBpm));
             Assert.That(editor.Undo(), Is.SameAs(song));
             Assert.That(editor.CanUndo, Is.False);
+        });
+    }
+
+    /// <summary>
+    /// 剪一段那两个 tick 是**起点和终点**，不是起点和长度 —— 假编辑器把两个分开记就是为了这条。
+    ///
+    /// 转错（把终点当成长度）不会抛异常，也不会少剪：剪出来的那一块长度是 2880 而不是 960，
+    /// 位置也挪了。只有盯住内层收到的两个数才看得见。
+    /// </summary>
+    [Test]
+    public void 剪一段的两个tick原样转给内层()
+    {
+        var inner = new RecordingSongEditor();
+        var editor = new UndoableSongEditor(inner);
+        var song = SongAt(0);
+
+        var cut = editor.CutRange(song, 0, 1920, 2880);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(inner.LastSong, Is.SameAs(song), "内层收到的就是调用方交的那一份");
+            Assert.That(inner.LastTrack, Is.EqualTo(0), "轨下标原样");
+            Assert.That(inner.LastStartTick, Is.EqualTo(1920), "起点原样");
+            Assert.That(inner.LastEndTick, Is.EqualTo(2880), "终点原样 —— 不是长度 960，两个数都够远，认得出");
+            Assert.That(cut, Is.SameAs(inner.LastResult), "返回的是内层产出的那一份");
+            Assert.That(editor.CanUndo, Is.True, "内层交了新的一份，装饰器就该记上账");
         });
     }
 
@@ -449,6 +516,7 @@ public class UndoableSongEditorTests
         public int LastDeltaPitch { get; private set; }
         public long LastStartTick { get; private set; }
         public long LastLengthTicks { get; private set; }
+        public long LastEndTick { get; private set; }
         public string? LastName { get; private set; }
 
         public Song SetBpm(Song song, double beatsPerMinute)
@@ -474,7 +542,7 @@ public class UndoableSongEditorTests
             return LastResult = new Song(song.Tracks, song.TempoMap);
         }
 
-        // 音符那几条命令的记账（挪 / 改时值 / 删音 / 改名 / 删轨）。这里只留下「收到了什么」，
+        // 音符那几条命令的记账（挪 / 改时值 / 删音 / 剪一段 / 改名 / 删轨）。这里只留下「收到了什么」，
         // 行为归 SongEditorNoteCommandTests 盯着 —— 假编辑器存在的唯一理由是看转发，
         // 让它自己也算一份谱面，就等于在这一层又实现了一遍要被验的东西。
 
@@ -500,6 +568,17 @@ public class UndoableSongEditorTests
         {
             LastSong = song;
             LastNotes = notes;
+            return LastResult = new Song(song.Tracks, song.TempoMap);
+        }
+
+        // 两个 tick 各记各的：剪一段收的是**终点**不是长度，和 SetNoteSpan 的第二个参数
+        // 差得很远，共用一个格子的话这里就再也看不出转错没有。
+        public Song CutRange(Song song, int trackIndex, long startTick, long endTick)
+        {
+            LastSong = song;
+            LastTrack = trackIndex;
+            LastStartTick = startTick;
+            LastEndTick = endTick;
             return LastResult = new Song(song.Tracks, song.TempoMap);
         }
 
