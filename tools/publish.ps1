@@ -14,6 +14,9 @@
       2. 核对发布目录里**只有一个 exe**（没有散落的 dll / pdb / .so）。
       3. 打印 exe 路径与大小。
 
+    「只有一个 exe」这句不算运行时数据：发布目录下的 songs\ 是 exe 自己写的曲库
+    （从发布目录起过一次 app 就会长出来，见 .gitignore），不算夹带 —— 检查跳过它，也不报错。
+
     本脚本会写 MidiPerformer.App\bin 与 obj（发布就是产出物），但**不改任何源码或受版本控制的文件**。
     发布完想验产物就跑 tools\run-selftest.ps1 —— 那是"裁剪后的 exe 上跑通自检"的那条路。
 
@@ -30,7 +33,7 @@
     退出码：
       0 = 发布成功，且发布目录里只有一个 exe
       1 = dotnet publish 失败
-      2 = 发布目录里不止一个 exe（或夹带了 dll / pdb / .so）
+      2 = 发布目录里不止一个 exe（或夹带了 dll / pdb / .so；songs\ 运行时曲库不计）
       3 = 找不到发布目录
 #>
 [CmdletBinding()]
@@ -67,10 +70,21 @@ if ($NoVerify) {
     exit 0
 }
 
-$files = @(Get-ChildItem -LiteralPath $publishDir -File -Recurse)
+# 要拦的是散落的 dll / pdb / .so，**不是这个 exe 自己写出来的运行时数据**。
+# 曲库就住在发布目录下（App.axaml.cs 那句 Path.Combine(AppContext.BaseDirectory, "songs")，
+# .gitignore 里也是按运行时数据收的），从发布目录起过一次 app 它就落在那儿了 ——
+# 这一条 -Recurse 会把它连同里面的 .mproj 一起数进来，于是检查变成「跑过一次就必炸」：
+# 2026-09-19 实测就是这么炸的（5 个 .mproj，退出码 2，而 exe 本身是好的）。
+# 排除按**目录前缀**比，不走文件名白名单 —— 将来再多一个运行时目录也不会重演这一出。
+$runtimeDataDir = Join-Path $publishDir 'songs'
+$sep = [System.IO.Path]::DirectorySeparatorChar
+$files = @(Get-ChildItem -LiteralPath $publishDir -File -Recurse |
+    Where-Object { -not $_.FullName.StartsWith("$runtimeDataDir$sep", [System.StringComparison]::OrdinalIgnoreCase) })
 if ($files.Count -ne 1 -or $files[0].Extension -ne '.exe') {
     Write-Host "!! 发布目录里不止一个文件（$($files.Count) 个）："
-    foreach ($f in $files) { Write-Host "     $($f.Name)" }
+    # 打相对路径不打裸文件名：-Recurse 捞上来的东西可能藏在子目录里，
+    # 只打 Name 的话看着跟顶层散落的一模一样（上面那次误判就是这么看出来的）。
+    foreach ($f in $files) { Write-Host "     $($f.FullName.Substring($publishDir.Length + 1))" }
     Write-Host '   单文件发布的目标是「目录里只有一个 exe」。'
     Write-Host "   常见原因：DebugType 不是 none（多出 .pdb）、"
     Write-Host "            DryWetMidi 的原生库没剔掉（多出 .so / .dylib，见 csproj 的 RemoveForeignNativeLibsFromPublish）。"
@@ -79,6 +93,10 @@ if ($files.Count -ne 1 -or $files[0].Extension -ne '.exe') {
 
 $size = [math]::Round($files[0].Length / 1MB, 1)
 Write-Host ''
-Write-Host ">> 产物 : $exe（$size MB，目录里只有这一个文件）"
+Write-Host ">> 产物 : $exe（$size MB，目录里只有这一个 exe）"
+if (Test-Path -LiteralPath $runtimeDataDir -PathType Container) {
+    $songCount = @(Get-ChildItem -LiteralPath $runtimeDataDir -File -Recurse).Count
+    Write-Host "   旁注：songs\ 下有 $songCount 个曲库文件（运行时数据，未计入上面那句，也没动过）"
+}
 Write-Host '   验产物：pwsh -File tools/run-selftest.ps1'
 exit 0
