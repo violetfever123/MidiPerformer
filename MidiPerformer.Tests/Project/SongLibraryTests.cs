@@ -10,7 +10,7 @@ namespace MidiPerformer.Tests.Project;
 /// <c>.\songs\</c>，测试要是往那儿写，跑一次测试就会往仓库里塞一堆 .mproj。
 ///
 /// 这里盯的是「目录操作」这一层：有哪些名字、名字对应哪个文件、改名/删除真的动了盘。
-/// 至于文件里装的 JSON 对不对，那是 <see cref="SongProject"/> 的事，曲库不认识 JSON
+/// 至于文件里装的 JSON 对不对，那是 <see cref="SongProjectFile"/> 的事，曲库不认识 JSON
 /// （<see cref="读回来的是原样的文本_哪怕它不是合法的工程"/> 就是钉这一条）。
 /// </summary>
 public class SongLibraryTests
@@ -115,7 +115,7 @@ public class SongLibraryTests
     /// <summary>
     /// 曲库不认识 JSON：文件里装的是什么，读出来就是什么，好坏都照原样交出去。
     ///
-    /// 这一条钉的是分层：「读不出来的工程怎么办」是 <see cref="SongProject"/> 的判断，
+    /// 这一条钉的是分层：「读不出来的工程怎么办」是 <see cref="SongProjectFile"/> 的判断，
     /// 曲库在这里自己拦一道的话，同一个判断就有两份，早晚会不一致。
     /// </summary>
     [Test]

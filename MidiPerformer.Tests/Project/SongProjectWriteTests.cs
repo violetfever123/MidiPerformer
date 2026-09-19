@@ -5,6 +5,9 @@ using MidiPerformer.Core.Model;
 using MidiPerformer.Core.UseCases.Project;
 using MidiPerformer.Tests.Corpus;
 using NUnit.Framework;
+// DryWetMidi 也有同名的 MidiReader / MidiWriter，不加别名就分不清说的是哪一边
+using MidiReader = MidiPerformer.Core.UseCases.Project.MidiReader;
+using MidiWriter = MidiPerformer.Core.UseCases.Project.MidiWriter;
 using ModelNote = MidiPerformer.Core.Model.Note;
 using ModelTempoMap = MidiPerformer.Core.Model.TempoMap;
 using ModelTimeDivision = MidiPerformer.Core.Model.TimeDivision;
@@ -28,8 +31,8 @@ public class SongProjectWriteTests
     [TestCaseSource(typeof(MidiCorpus), nameof(MidiCorpus.TestFiles))]
     public void 语料导入导出再导入是同一首曲子(string path)
     {
-        var song = SongProject.Read(path);
-        var again = SongProject.ReadBytes(SongProject.WriteBytes(song));
+        var song = MidiReader.Read(path);
+        var again = MidiReader.ReadBytes(MidiWriter.WriteBytes(song));
 
         SongAssert.Same(song, again, Path.GetFileName(path));
     }
@@ -43,8 +46,8 @@ public class SongProjectWriteTests
     [TestCaseSource(typeof(MidiCorpus), nameof(MidiCorpus.VariableTempoFiles))]
     public void 变速语料的速度事件逐条相等(string path)
     {
-        var song = SongProject.Read(path);
-        var again = SongProject.ReadBytes(SongProject.WriteBytes(song));
+        var song = MidiReader.Read(path);
+        var again = MidiReader.ReadBytes(MidiWriter.WriteBytes(song));
 
         Assert.Multiple(() =>
         {
@@ -71,7 +74,7 @@ public class SongProjectWriteTests
         int withNotes = 0, totalNotes = 0;
         foreach (var path in MidiCorpus.Files)
         {
-            var again = SongProject.ReadBytes(SongProject.WriteBytes(SongProject.Read(path)));
+            var again = MidiReader.ReadBytes(MidiWriter.WriteBytes(MidiReader.Read(path)));
             if (again.Tracks.Count > 0) withNotes++;
             totalNotes += again.Tracks.Sum(t => t.NoteCount);
         }
@@ -124,7 +127,7 @@ public class SongProjectWriteTests
     [TestCase(3)]
     public void 移调在导出时叠加且源音符不动(int transpose)
     {
-        var song = SongProject.ReadBytes(SmfWriter.Build(1, 480,
+        var song = MidiReader.ReadBytes(SmfWriter.Build(1, 480,
             SmfTrack.Named("主旋律").Note(0, 480, 0, 60).Note(480, 480, 0, 64)));
 
         var shifted = song.Tracks.Single() with { Transpose = transpose };
@@ -133,7 +136,7 @@ public class SongProjectWriteTests
         // 导出前先抄一份源音符，导出后逐条比回来
         var before = source.Tracks.Single().Notes.ToArray();
 
-        var again = SongProject.ReadBytes(SongProject.WriteBytes(source));
+        var again = MidiReader.ReadBytes(MidiWriter.WriteBytes(source));
 
         Assert.Multiple(() =>
         {
@@ -149,14 +152,14 @@ public class SongProjectWriteTests
     /// <summary>
     /// 移调把音高推出 0..127 时**夹到边界，不跳过**。
     ///
-    /// 取舍写在 <c>SongProject.ClampPitch</c> 的注释里：导出物要被人编辑、被别的软件读，
+    /// 取舍写在 <c>MidiWriter.ClampPitch</c> 的注释里：导出物要被人编辑、被别的软件读，
     /// 夹住至少保住音数、时值和节奏，跳过则是静默丢音、用户在导出结果里找不到少了哪儿。
     /// 这里把「不丢音」这件事钉死。
     /// </summary>
     [Test]
     public void 移调后音高越界时夹住不丢音()
     {
-        var song = SongProject.ReadBytes(SmfWriter.Build(1, 480,
+        var song = MidiReader.ReadBytes(SmfWriter.Build(1, 480,
             SmfTrack.Named("顶到天花板的").Note(0, 480, 0, 125).Note(480, 480, 0, 120)));
 
         var shifted = new Song(
@@ -167,7 +170,7 @@ public class SongProjectWriteTests
             },
             song.TempoMap);
 
-        var again = SongProject.ReadBytes(SongProject.WriteBytes(shifted));
+        var again = MidiReader.ReadBytes(MidiWriter.WriteBytes(shifted));
 
         Assert.Multiple(() =>
         {
@@ -184,11 +187,11 @@ public class SongProjectWriteTests
     [Test]
     public void 移调到最低端也是夹住()
     {
-        var song = SongProject.ReadBytes(SmfWriter.Build(1, 480,
+        var song = MidiReader.ReadBytes(SmfWriter.Build(1, 480,
             SmfTrack.Named("贴地的").Note(0, 480, 0, 3)));
 
         var shifted = new Song(new[] { song.Tracks.Single() with { Transpose = -10 } }, song.TempoMap);
-        var again = SongProject.ReadBytes(SongProject.WriteBytes(shifted));
+        var again = MidiReader.ReadBytes(MidiWriter.WriteBytes(shifted));
 
         Assert.That(again.Tracks.Single().Notes.Single().Pitch, Is.EqualTo(0));
     }
@@ -202,11 +205,11 @@ public class SongProjectWriteTests
     [Test]
     public void 写出去的文件里有轨名和音色事件()
     {
-        var song = SongProject.ReadBytes(SmfWriter.Build(1, 480,
+        var song = MidiReader.ReadBytes(SmfWriter.Build(1, 480,
             SmfTrack.Named("主旋律").Program(0, 0, 42).Note(0, 480, 0, 60),
             SmfTrack.Named("伴奏").Program(0, 1, 24).Note(0, 960, 1, 48)));
 
-        byte[] bytes = SongProject.WriteBytes(song);
+        byte[] bytes = MidiWriter.WriteBytes(song);
         // 读的时候要自己指 UTF-8：DryWetMidi 的**默认**读写编码都是 ASCII，
         // 这里不指名的话中文轨名会读成一串问号，那是读数的人错了，不是写的人错了。
         var file = MidiFile.Read(new MemoryStream(bytes), new ReadingSettings
@@ -231,10 +234,10 @@ public class SongProjectWriteTests
     [Test]
     public void 中文轨名往返不变()
     {
-        var song = SongProject.ReadBytes(SmfWriter.Build(1, 480,
+        var song = MidiReader.ReadBytes(SmfWriter.Build(1, 480,
             SmfTrack.Named("第一小提琴·主旋律").Note(0, 480, 0, 60)));
 
-        var again = SongProject.ReadBytes(SongProject.WriteBytes(song));
+        var again = MidiReader.ReadBytes(MidiWriter.WriteBytes(song));
 
         Assert.That(again.Tracks.Single().Name, Is.EqualTo("第一小提琴·主旋律"));
     }
@@ -246,12 +249,12 @@ public class SongProjectWriteTests
     [Test]
     public void 格式0的多声道轨名音色都还在()
     {
-        var song = SongProject.ReadBytes(SmfWriter.Build(0, 480,
+        var song = MidiReader.ReadBytes(SmfWriter.Build(0, 480,
             SmfTrack.Named("整首")
                 .Program(0, 0, 0).Note(0, 480, 0, 60)
                 .Program(0, 1, 40).Note(0, 480, 1, 67).Note(480, 480, 1, 69)));
 
-        var again = SongProject.ReadBytes(SongProject.WriteBytes(song));
+        var again = MidiReader.ReadBytes(MidiWriter.WriteBytes(song));
 
         SongAssert.Same(song, again, "格式 0 一个轨块两个声道");
 
@@ -275,7 +278,7 @@ public class SongProjectWriteTests
     [Test]
     public void 只有一条轨但轨块序号不为零()
     {
-        var song = SongProject.ReadBytes(SmfWriter.Build(1, 480,
+        var song = MidiReader.ReadBytes(SmfWriter.Build(1, 480,
             SmfTrack.Named("指挥轨").Tempo(0, 400_000),
             SmfTrack.Named("第二块").Note(0, 480, 0, 60),
             SmfTrack.Named("第三块").Note(480, 480, 0, 62)));
@@ -283,7 +286,7 @@ public class SongProjectWriteTests
         // 导入后第 0 块（纯速度轨）不成轨，剩下两条的序号是 1 和 2
         Assert.That(song.Tracks.Select(t => t.TrackIndex), Is.EqualTo(new[] { 1, 2 }), "前提：序号不从 0 起");
 
-        var again = SongProject.ReadBytes(SongProject.WriteBytes(song));
+        var again = MidiReader.ReadBytes(MidiWriter.WriteBytes(song));
 
         SongAssert.Same(song, again, "序号不从 0 起的曲子");
     }
@@ -301,7 +304,7 @@ public class SongProjectWriteTests
             },
             map);
 
-        var again = SongProject.ReadBytes(SongProject.WriteBytes(song));
+        var again = MidiReader.ReadBytes(MidiWriter.WriteBytes(song));
 
         Assert.Multiple(() =>
         {
@@ -324,7 +327,7 @@ public class SongProjectWriteTests
             new[] { new Track(0, 0, "主旋律", 0, new[] { new ModelNote(60, 7, 13, 100) }) },
             new ModelTempoMap(ModelTimeDivision.PulsesPerQuarter(ticksPerQuarterNote)));
 
-        var again = SongProject.ReadBytes(SongProject.WriteBytes(song));
+        var again = MidiReader.ReadBytes(MidiWriter.WriteBytes(song));
 
         SongAssert.Same(song, again, $"PPQ {ticksPerQuarterNote}");
     }
@@ -339,7 +342,7 @@ public class SongProjectWriteTests
             new[] { new Track(0, 0, "主旋律", 0, new[] { new ModelNote(60, 960, 480, 100) }) },
             new ModelTempoMap(ModelTimeDivision.Smpte(framesPerSecond, ticksPerFrame)));
 
-        var again = SongProject.ReadBytes(SongProject.WriteBytes(song));
+        var again = MidiReader.ReadBytes(MidiWriter.WriteBytes(song));
 
         Assert.Multiple(() =>
         {
@@ -364,11 +367,11 @@ public class SongProjectWriteTests
                 new[] { new TempoChange(0, 400_000), new TempoChange(960, 250_000) },
                 new[] { new TimeSignatureChange(0, 3, 4) }));
 
-        byte[] bytes = SongProject.WriteBytes(song);
+        byte[] bytes = MidiWriter.WriteBytes(song);
 
         Assert.That(bytes, Is.Not.Empty, "空曲也得写出一份合法文件，不能是 0 字节");
 
-        var again = SongProject.ReadBytes(bytes);
+        var again = MidiReader.ReadBytes(bytes);
 
         Assert.Multiple(() =>
         {
@@ -386,7 +389,7 @@ public class SongProjectWriteTests
             new[] { new Track(0, 3, "单音", 7, new[] { new ModelNote(60, 0, 480, 100) }) },
             new ModelTempoMap(ModelTimeDivision.PulsesPerQuarter(480)));
 
-        SongAssert.Same(song, SongProject.ReadBytes(SongProject.WriteBytes(song)), "单轨单音");
+        SongAssert.Same(song, MidiReader.ReadBytes(MidiWriter.WriteBytes(song)), "单轨单音");
     }
 
     /// <summary>
@@ -414,7 +417,7 @@ public class SongProjectWriteTests
             },
             new ModelTempoMap(ModelTimeDivision.PulsesPerQuarter(480)));
 
-        var again = SongProject.ReadBytes(SongProject.WriteBytes(song));
+        var again = MidiReader.ReadBytes(MidiWriter.WriteBytes(song));
 
         Assert.Multiple(() =>
         {
@@ -442,9 +445,9 @@ public class SongProjectWriteTests
         // PPQ 的合法上限是 short 的正半区（最高位用来区分 SMPTE）
         var tooManyTicks = EmptySong(32768);
 
-        var ex1 = Assert.Throws<InvalidDataException>(() => SongProject.WriteBytes(badFrameRate));
-        var ex2 = Assert.Throws<InvalidDataException>(() => SongProject.WriteBytes(badTicksPerFrame));
-        var ex3 = Assert.Throws<InvalidDataException>(() => SongProject.WriteBytes(tooManyTicks));
+        var ex1 = Assert.Throws<InvalidDataException>(() => MidiWriter.WriteBytes(badFrameRate));
+        var ex2 = Assert.Throws<InvalidDataException>(() => MidiWriter.WriteBytes(badTicksPerFrame));
+        var ex3 = Assert.Throws<InvalidDataException>(() => MidiWriter.WriteBytes(tooManyTicks));
 
         Assert.Multiple(() =>
         {
@@ -465,7 +468,7 @@ public class SongProjectWriteTests
             new[] { new Track(-1, 0, "无中生有", 0, new[] { new ModelNote(60, 0, 480, 100) }) },
             new ModelTempoMap(ModelTimeDivision.PulsesPerQuarter(480)));
 
-        var ex = Assert.Throws<InvalidDataException>(() => SongProject.WriteBytes(song));
+        var ex = Assert.Throws<InvalidDataException>(() => MidiWriter.WriteBytes(song));
         Assert.That(ex!.Message, Does.Contain("轨块序号"), "错误消息得是给人看的中文");
     }
 
@@ -478,7 +481,7 @@ public class SongProjectWriteTests
         int gap = 0, multiChannel = 0, drums = 0, multiChunk = 0, format2 = 0;
         foreach (var path in MidiCorpus.Files)
         {
-            var song = SongProject.Read(path);
+            var song = MidiReader.Read(path);
             if (song.Tracks.Count == 0) continue;
 
             var indices = song.Tracks.Select(t => t.TrackIndex).Distinct().OrderBy(i => i).ToArray();

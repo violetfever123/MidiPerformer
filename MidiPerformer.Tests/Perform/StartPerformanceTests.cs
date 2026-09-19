@@ -157,7 +157,7 @@ public class StartPerformanceTests
     /// 它映射出来的事件目标时刻就在起跑点上，所以「有没有等倒计时」一看便知（见上面那条测试）。
     /// 整曲 0.125 秒，放完不用等真时间。
     /// </summary>
-    private static Song 短曲() => SongProject.ReadBytes(SmfWriter.Build(1, 480,
+    private static Song 短曲() => MidiReader.ReadBytes(SmfWriter.Build(1, 480,
         SmfTrack.Named("旋律")
             .Tempo(0, 250_000)
             .Note(0, 240, 0, 60)));

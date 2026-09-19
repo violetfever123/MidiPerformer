@@ -363,7 +363,7 @@ public class SongWalkerTests
         int checkedFiles = 0;
         foreach (var path in MidiCorpus.VariableTempoPaths.Take(5))
         {
-            var song = SongProject.Read(path);
+            var song = MidiReader.Read(path);
             if (song.TotalSeconds <= 0) continue;
 
             var walker = new SongWalker(song, 1.0);
@@ -392,7 +392,7 @@ public class SongWalkerTests
     /// 一首手工造的变速曲：480 tick/四分音符，第 1920 tick 起从 120BPM 变到 240BPM。
     /// 于是音乐时间 0–2.0s 是第一档，2.0s 之后是第二档，总长 3.25s。
     /// </summary>
-    private static Song 变速曲() => SongProject.ReadBytes(SmfWriter.Build(1, 480,
+    private static Song 变速曲() => MidiReader.ReadBytes(SmfWriter.Build(1, 480,
         SmfTrack.Named("旋律")
             .Tempo(0, 500_000)
             .Tempo(1920, 250_000)

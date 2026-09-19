@@ -59,7 +59,7 @@
                               {Binding} 的目标属性只被反射用到（AvaloniaUseCompiledBindingsByDefault=false），
                               按"入口点可达"裁会删掉；
       Avalonia 系列        —— 绑定引擎与 XAML 运行时，反射大户；
-      Melanchall.DryWetMidi —— MIDI 读写（Core 的 SongProject）大量用反射。
+      Melanchall.DryWetMidi —— MIDI 读写（Core 的 MidiReader / MidiWriter）大量用反射。
     改这份名单要同时改 SelfTest\PerformerSelfTest.cs 里的 PinnedAssemblies：那边有一条
     "钉住的程序集裁剪后还加载得起来吗"的运行时断言，名单对不上就白验了。
   -->

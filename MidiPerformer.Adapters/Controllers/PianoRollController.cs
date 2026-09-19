@@ -652,7 +652,7 @@ public sealed class PianoRollController
         // 这个式子里唯一会绕的是 -minStart，而那只在 minStart == long.MinValue 时发生
         //（绕回自己，比较恒为假，这道夹取整个失效）。真要有那么一个音，得先有一份
         // StartTick 是 long.MinValue 的谱面 —— 两条导入路径都给不出来：工程文件那条
-        // 显式拒负数（SongProject 的 NoteConverter），MIDI 那条的 tick 是从非负增量累加出来的。
+        // 显式拒负数（Converters.NoteConverter），MIDI 那条的 tick 是从非负增量累加出来的。
         // 所以这里不为它加一道分支：挡的是一个谁也造不出来的值。
         if (deltaTicks < -minStart) deltaTicks = -minStart;
         if (deltaPitch < -minPitch) deltaPitch = -minPitch;

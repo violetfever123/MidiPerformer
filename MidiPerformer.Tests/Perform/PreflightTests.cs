@@ -62,7 +62,7 @@ public class PreflightTests
     /// 一条音都没有的轨也弹不了。
     ///
     /// <b>这一条只能用 Core 对象摆，SMF 造不出来</b>：解析器是按轨块里的音分组生成轨的，
-    /// 没有音的轨块根本不会成轨（见 <c>SongProject</c>）。空轨来自编辑器 —— 把一条轨的音删光，
+    /// 没有音的轨块根本不会成轨（见 <c>MidiReader</c>）。空轨来自编辑器 —— 把一条轨的音删光，
     /// 轨还在。漏了这一条，预检会放行、起跑、建出一张空事件表，用户看到的是
     /// 「按了开始什么都没发生，也没有任何解释」，而预检存在的全部理由就是给那句解释。
     /// </summary>
@@ -108,7 +108,7 @@ public class PreflightTests
             imeInChinese);
 
     /// <summary>240BPM、480 tick/四分音符 → 480 tick = 0.25 秒。两个音前后错开，是单声部。</summary>
-    private static Song 单声部曲() => SongProject.ReadBytes(SmfWriter.Build(1, 480,
+    private static Song 单声部曲() => MidiReader.ReadBytes(SmfWriter.Build(1, 480,
         SmfTrack.Named("旋律")
             .Tempo(0, 250_000)
             .Note(0, 240, 0, 60)
@@ -120,7 +120,7 @@ public class PreflightTests
         new[] { new TempoChange(0, 500_000) });
 
     /// <summary>同一 tick 上两个起音 —— 口琴同时只能响一个，这条轨弹不了。</summary>
-    private static Song 和弦曲() => SongProject.ReadBytes(SmfWriter.Build(1, 480,
+    private static Song 和弦曲() => MidiReader.ReadBytes(SmfWriter.Build(1, 480,
         SmfTrack.Named("和弦")
             .Tempo(0, 250_000)
             .NoteOn(0, 0, 60)
@@ -129,7 +129,7 @@ public class PreflightTests
             .NoteOff(240, 0, 64)));
 
     /// <summary>GM 规定第 10 声道（下标 9）是打击乐。</summary>
-    private static Song 打击乐曲() => SongProject.ReadBytes(SmfWriter.Build(1, 480,
+    private static Song 打击乐曲() => MidiReader.ReadBytes(SmfWriter.Build(1, 480,
         SmfTrack.Named("鼓")
             .Tempo(0, 250_000)
             .Note(0, 120, TrackRanking.PercussionChannel, 38)

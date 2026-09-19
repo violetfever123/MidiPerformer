@@ -4,7 +4,8 @@ using MidiPerformer.Core.Model;
 using MidiPerformer.Core.UseCases.Project;
 using MidiPerformer.Tests.Corpus;
 using NUnit.Framework;
-// DryWetMidi 也有同名的 TempoMap / TimeDivision，不加别名就分不清说的是哪一边
+// DryWetMidi 也有同名的 MidiReader / TempoMap / TimeDivision，不加别名就分不清说的是哪一边
+using MidiReader = MidiPerformer.Core.UseCases.Project.MidiReader;
 using ModelTempoMap = MidiPerformer.Core.Model.TempoMap;
 using ModelTimeDivision = MidiPerformer.Core.Model.TimeDivision;
 
@@ -33,7 +34,7 @@ public class TempoMapTests
     {
         var file = MidiFile.Read(path);
         var dryTempoMap = file.GetTempoMap();
-        var song = SongProject.Read(path);
+        var song = MidiReader.Read(path);
 
         var ticks = SampleTicks(file);
         Assert.That(ticks, Is.Not.Empty, "语料里一个音符都没有，采样不到 tick");
@@ -53,7 +54,7 @@ public class TempoMapTests
     [TestCaseSource(typeof(MidiCorpus), nameof(MidiCorpus.TestFiles))]
     public void tick到秒再回tick是恒等(string path)
     {
-        var song = SongProject.Read(path);
+        var song = MidiReader.Read(path);
         var ticks = SampleTicks(MidiFile.Read(path));
 
         foreach (long tick in ticks)
@@ -92,7 +93,7 @@ public class TempoMapTests
     [TestCaseSource(typeof(MidiCorpus), nameof(MidiCorpus.VariableTempoFiles))]
     public void 变速语料确实被读成了变速(string path)
     {
-        var song = SongProject.Read(path);
+        var song = MidiReader.Read(path);
         var distinct = song.TempoMap.TempoChanges
             .Select(c => c.MicrosecondsPerQuarterNote)
             .Append(ModelTempoMap.DefaultMicrosecondsPerQuarterNote)

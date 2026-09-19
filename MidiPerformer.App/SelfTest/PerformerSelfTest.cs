@@ -463,8 +463,8 @@ internal static class PerformerSelfTest
             missing.Count == 0 ? $"{PinnedAssemblies.Length} 个" : string.Join(" | ", missing));
 
         // DryWetMidi 是按"大量用反射"钉住的：类型在，且它的公开方法没被裁掉。
-        // 这里只用反射按名字取，不在 App 里直接引用这个包 —— spec 规定 Core 的 SongProject
-        // 是唯一允许出现 DryWetMidi 的地方。
+        // 这里只用反射按名字取，不在 App 里直接引用这个包 —— spec 规定 Core 的 MidiReader / MidiWriter
+        // 是仅有的两个允许出现 DryWetMidi 的地方。
         var t = Type.GetType("Melanchall.DryWetMidi.Core.MidiFile, Melanchall.DryWetMidi");
         bool hasRead = t != null && t.GetMethods().Any(m => m.Name == "Read");
         Check("发布：DryWetMidi 的类型与公开方法没被裁掉", hasRead,
@@ -477,7 +477,7 @@ internal static class PerformerSelfTest
     /// 存一份工程再读回来，逐字段比。
     ///
     /// **这是本自检里唯一压到 <c>System.Text.Json</c> 反射的一条。** 发布时 ILLink 对
-    /// <c>SongProject</c> 报了一串 IL2026 / IL2075，全是 STJ 反射；而 csproj 的
+    /// <c>SongProjectFile</c> 报了一串 IL2026 / IL2075，全是 STJ 反射；而 csproj 的
     /// <c>TrimmerRootAssembly</c> 名单里有 App、有 DryWetMidi、有 Avalonia，
     /// **没有 <c>MidiPerformer.Core</c>** —— Song / Track / Note / TempoMap 这些模型类型的
     /// 属性与构造器，正是按「入口点可达」会被裁掉的东西。
@@ -515,10 +515,10 @@ internal static class PerformerSelfTest
             },
             tempo);
 
-        var header = new ProjectHeader(SongProject.ProjectVersion, "勾指起誓", true, @"C:\下载\起誓.mid");
+        var header = new ProjectHeader(SongProjectFile.ProjectVersion, "勾指起誓", true, @"C:\下载\起誓.mid");
 
-        string json = SongProject.WriteProject(song, header);
-        var (readHeader, read) = SongProject.ReadProject(json);
+        string json = SongProjectFile.WriteProject(song, header);
+        var (readHeader, read) = SongProjectFile.ReadProject(json);
 
         var diffs = new List<string>();
         void Diff(string what, object? want, object? got)

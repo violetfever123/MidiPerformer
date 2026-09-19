@@ -39,7 +39,7 @@ public class PerformChainTests
         // 240BPM、480 tick/四分音符 → 480 tick = 0.25 秒。
         // 三个音从 0.25s 起，各 0.125s —— 刻意不摆在 0 秒：目标时刻落在过去的事件
         // 是「一上来就直接发」的另一条路径，这里要测的是正常的时间轴。
-        var song = SongProject.ReadBytes(SmfWriter.Build(1, 480,
+        var song = MidiReader.ReadBytes(SmfWriter.Build(1, 480,
             SmfTrack.Named("旋律")
                 .Tempo(0, 250_000)
                 .Note(480, 240, 0, 60)
@@ -99,7 +99,7 @@ public class PerformChainTests
     [Test]
     public void 空事件表也走得完()
     {
-        var song = SongProject.ReadBytes(SmfWriter.Build(1, 480,
+        var song = MidiReader.ReadBytes(SmfWriter.Build(1, 480,
             SmfTrack.Named("空的").Tempo(0, 250_000)));
 
         var clock = new FakeClock { AutoStepSeconds = Step };

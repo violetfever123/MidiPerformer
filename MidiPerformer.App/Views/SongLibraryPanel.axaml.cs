@@ -20,7 +20,7 @@ namespace MidiPerformer.App.Views;
 /// 而面板不知道窗口手上有什么。面板只负责「问用户」，问完把名字交出去。
 ///
 /// 「不改盘」说的是**写**：这个类里没有一次 <c>Write</c> / <c>Delete</c> / <c>Rename</c>。
-/// **读是有的** —— <see cref="AddRow"/> 为每一行读一次文件头（<see cref="SongProject.TryReadProjectHeader"/>），
+/// **读是有的** —— <see cref="AddRow"/> 为每一行读一次文件头（<see cref="SongProjectFile.TryReadProjectHeader"/>），
 /// 因为「改过 / 没动过」那格小字就写在文件头里。那是这条路线上唯一碰盘的地方。
 ///
 /// 唯一的例外是删除前那句「真要删？」：它得有个 <see cref="Window"/> 当爹才好居中，
@@ -32,7 +32,7 @@ namespace MidiPerformer.App.Views;
 ///
 /// 看着那格小字不写时长（wireframe 的 .song .mt 是 4:32）是有意的：
 /// 时长要**把整份工程读出来算**，而列表要显示的「改过没改过」只要读文件头就够了
-/// （<see cref="SongProject.TryReadProjectHeader"/>）—— 为一行装饰把每首曲子的谱面
+/// （<see cref="SongProjectFile.TryReadProjectHeader"/>）—— 为一行装饰把每首曲子的谱面
 /// 都反序列化一遍，是这个列表最不该干的事。
 /// </summary>
 public sealed partial class SongLibraryPanel : UserControl
@@ -128,7 +128,7 @@ public sealed partial class SongLibraryPanel : UserControl
 
         // 只读文件头，不读谱面。读不出来的（坏工程、版本比本程序新）返回 null 而不是抛 ——
         // 一首读不出来不能让整个列表消失：用户得有机会把它删掉。
-        ProjectHeader? header = SongProject.TryReadProjectHeader(_library!.PathOf(name));
+        ProjectHeader? header = SongProjectFile.TryReadProjectHeader(_library!.PathOf(name));
         var metaText = new TextBlock { Text = Meta(header), Classes = { "song-meta" } };
         if (header is null) metaText.Classes.Add("bad");
 

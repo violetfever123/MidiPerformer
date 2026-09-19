@@ -10,9 +10,9 @@
     窗口一：编辑器外壳（docs/wireframe.html 那一块 .toolbar / .lanes / .nav / .readout / .transport）。
 
     切片到这儿已经合齐了，工具栏几条命令的着落：
-      · 导入 MIDI… → 本窗口直接读（SongProject.Read）
-      · 保存 / 另存为… → 写进曲库（SongProject.WriteProject），装了曲子才亮
-      · 导出 → 本窗口写回一个标准 MIDI 文件（SongProject.Write），装了曲子才亮
+      · 导入 MIDI… → 本窗口直接读（MidiReader.Read）
+      · 保存 / 另存为… → 写进曲库（SongProjectFile.WriteProject），装了曲子才亮
+      · 导出 → 本窗口写回一个标准 MIDI 文件（MidiWriter.Write），装了曲子才亮
       · 撤销 / 重做 → 08 的编辑脊柱（UndoableSongEditor），没有可撤的就置灰
       · 演奏器… → 组装点给的工厂，另开一个独立窗口（04）
 

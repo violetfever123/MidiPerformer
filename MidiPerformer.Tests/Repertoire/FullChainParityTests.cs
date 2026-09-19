@@ -17,7 +17,7 @@ namespace MidiPerformer.Tests.Repertoire;
 /// </code>
 /// 我们：
 /// <code>
-///   SongProject.Read → tick 模型 → TempoMap → RepertoireToSeconds → NoteMapper.Map → EventBuilder.Build
+///   MidiReader.Read → tick 模型 → TempoMap → RepertoireToSeconds → NoteMapper.Map → EventBuilder.Build
 /// </code>
 ///
 /// **后半段（映射 + 建表）两边是各跑各的，没有一行共用** —— 01 已经把这两段对拍过，
@@ -46,7 +46,7 @@ public class FullChainParityTests
     public void 全链对拍_每条轨的事件表逐条相等(string path)
     {
         var parsed = OriginalMidi.MidiLoader.Parse(path);
-        var song = SongProject.Read(path);
+        var song = MidiReader.Read(path);
 
         Assert.That(song.Tracks.Count, Is.EqualTo(parsed.Candidates.Count),
             $"{Path.GetFileName(path)}：轨数两边对不上");
@@ -59,7 +59,7 @@ public class FullChainParityTests
     public void 全链对拍_各种移调与基准八度下也相等(string path)
     {
         var parsed = OriginalMidi.MidiLoader.Parse(path);
-        var song = SongProject.Read(path);
+        var song = MidiReader.Read(path);
 
         for (int i = 0; i < parsed.Candidates.Count; i++)
             foreach (var (transpose, baseOctave) in MapSettings)
@@ -123,7 +123,7 @@ public class FullChainParityTests
 
         foreach (var path in MidiCorpus.Files)
         {
-            var song = SongProject.Read(path);
+            var song = MidiReader.Read(path);
             if (song.Tracks.Count > 1) multiTrackFiles++;
             if (song.TempoMap.TempoChanges.Count > 0) variableTempoFiles++;
 

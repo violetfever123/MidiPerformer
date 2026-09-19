@@ -21,7 +21,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- 只有 SongProject 能用它，见 spec「DryWetMidi 住在 Core」 -->
+    <!-- 只有 MidiReader / MidiWriter 能用它，见 spec「DryWetMidi 住在 Core」 -->
     <PackageReference Include="Melanchall.DryWetMidi" Version="7.2.0" />
   </ItemGroup>
 

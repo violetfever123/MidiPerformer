@@ -6,7 +6,7 @@ namespace MidiPerformer.Adapters.Gateways;
 /// 曲库：硬盘上一个平铺的目录，一首曲子一个文件，**文件名就是曲名**。
 ///
 /// **纯目录操作，不认识 JSON。** 它收发的是字符串 —— 里面装的是 .mproj 的 JSON，
-/// 但那件事归 <c>Core/UseCases/Project/SongProject</c>：曲库只管「有哪些名字、
+/// 但那件事归 <c>Core/UseCases/Project/SongProjectFile</c>：曲库只管「有哪些名字、
 /// 名字对应哪个文件、把这个名字换掉、把这个名字删掉」。所以它不是 Controller 的料，
 /// 也不需要端口（见 spec「端口与网关是两样东西」：网关是默认的，端口是挣来的）。
 ///

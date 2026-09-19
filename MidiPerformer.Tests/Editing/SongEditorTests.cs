@@ -146,7 +146,7 @@ public class SongEditorTests
     [TestCaseSource(typeof(MidiCorpus), nameof(MidiCorpus.VariableTempoFiles))]
     public void 变速语料改BPM后段与段的关系不变(string path)
     {
-        var song = SongProject.Read(path);
+        var song = MidiReader.Read(path);
         var before = song.TempoMap.TempoChanges;
         Assert.That(before, Is.Not.Empty, "变速语料得有速度事件");
 
@@ -458,7 +458,7 @@ public class SongEditorTests
         foreach (var path in MidiCorpus.Files)
         {
             string file = Path.GetFileName(path);
-            var song = SongProject.Read(path);
+            var song = MidiReader.Read(path);
             var edited = _editor.SetBpm(song, 76);
 
             Assert.That(edited.Tracks, Has.Count.EqualTo(song.Tracks.Count), $"{file}：轨数");

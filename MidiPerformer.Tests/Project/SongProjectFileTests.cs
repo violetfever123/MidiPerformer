@@ -23,7 +23,7 @@ namespace MidiPerformer.Tests.Project;
 public class SongProjectFileTests
 {
     private static ProjectHeader Header(string name = "测试曲", bool edited = false, string? from = null) =>
-        new(SongProject.ProjectVersion, name, edited, from);
+        new(SongProjectFile.ProjectVersion, name, edited, from);
 
     // ==================== 手工拼的曲子：逐字段往返 ====================
 
@@ -35,7 +35,7 @@ public class SongProjectFileTests
             new[] { new Track(0, 0, "主旋律", 12, new[] { new ModelNote(60, 0, 480, 100) }) },
             new ModelTempoMap(ModelTimeDivision.PulsesPerQuarter(480)));
 
-        SongAssert.Same(song, SongProject.ReadProject(SongProject.WriteProject(song, Header())).Song, "最简的曲子");
+        SongAssert.Same(song, SongProjectFile.ReadProject(SongProjectFile.WriteProject(song, Header())).Song, "最简的曲子");
     }
 
     /// <summary>空曲（0 轨）：速度表和分辨率得有地方待，谱面可以是空的。</summary>
@@ -49,7 +49,7 @@ public class SongProjectFileTests
                 new[] { new TempoChange(0, 400_000), new TempoChange(960, 250_000) },
                 new[] { new TimeSignatureChange(0, 3, 4) }));
 
-        var (_, again) = SongProject.ReadProject(SongProject.WriteProject(song, Header()));
+        var (_, again) = SongProjectFile.ReadProject(SongProjectFile.WriteProject(song, Header()));
 
         Assert.Multiple(() =>
         {
@@ -74,7 +74,7 @@ public class SongProjectFileTests
                     new TempoChange(2400, 300_000)
                 }));
 
-        var (_, again) = SongProject.ReadProject(SongProject.WriteProject(song, Header()));
+        var (_, again) = SongProjectFile.ReadProject(SongProjectFile.WriteProject(song, Header()));
 
         Assert.Multiple(() =>
         {
@@ -101,7 +101,7 @@ public class SongProjectFileTests
                     new TimeSignatureChange(3840, 6, 8)
                 }));
 
-        var (_, again) = SongProject.ReadProject(SongProject.WriteProject(song, Header()));
+        var (_, again) = SongProjectFile.ReadProject(SongProjectFile.WriteProject(song, Header()));
 
         Assert.Multiple(() =>
         {
@@ -124,7 +124,7 @@ public class SongProjectFileTests
             new[] { new Track(0, 0, "SMPTE", 0, new[] { new ModelNote(60, 960, 480, 100) }) },
             new ModelTempoMap(ModelTimeDivision.Smpte(framesPerSecond, ticksPerFrame)));
 
-        var (_, again) = SongProject.ReadProject(SongProject.WriteProject(song, Header()));
+        var (_, again) = SongProjectFile.ReadProject(SongProjectFile.WriteProject(song, Header()));
 
         Assert.Multiple(() =>
         {
@@ -148,7 +148,7 @@ public class SongProjectFileTests
             new[] { new Track(0, 0, "PPQ", 0, new[] { new ModelNote(60, 7, 13, 100) }) },
             new ModelTempoMap(ModelTimeDivision.PulsesPerQuarter(ticksPerQuarterNote)));
 
-        var (_, again) = SongProject.ReadProject(SongProject.WriteProject(song, Header()));
+        var (_, again) = SongProjectFile.ReadProject(SongProjectFile.WriteProject(song, Header()));
 
         Assert.Multiple(() =>
         {
@@ -173,7 +173,7 @@ public class SongProjectFileTests
             },
             new ModelTempoMap(ModelTimeDivision.PulsesPerQuarter(480)));
 
-        var (_, again) = SongProject.ReadProject(SongProject.WriteProject(song, Header()));
+        var (_, again) = SongProjectFile.ReadProject(SongProjectFile.WriteProject(song, Header()));
 
         Assert.Multiple(() =>
         {
@@ -195,7 +195,7 @@ public class SongProjectFileTests
             new[] { new Track(0, 0, "移调", 0, notes, transpose) },
             new ModelTempoMap(ModelTimeDivision.PulsesPerQuarter(480)));
 
-        var (_, again) = SongProject.ReadProject(SongProject.WriteProject(song, Header()));
+        var (_, again) = SongProjectFile.ReadProject(SongProjectFile.WriteProject(song, Header()));
 
         Assert.Multiple(() =>
         {
@@ -219,7 +219,7 @@ public class SongProjectFileTests
             },
             new ModelTempoMap(ModelTimeDivision.PulsesPerQuarter(480)));
 
-        var (_, again) = SongProject.ReadProject(SongProject.WriteProject(song, Header()));
+        var (_, again) = SongProjectFile.ReadProject(SongProjectFile.WriteProject(song, Header()));
 
         Assert.Multiple(() =>
         {
@@ -241,7 +241,7 @@ public class SongProjectFileTests
             },
             new ModelTempoMap(ModelTimeDivision.PulsesPerQuarter(480)));
 
-        var (_, again) = SongProject.ReadProject(SongProject.WriteProject(song, Header()));
+        var (_, again) = SongProjectFile.ReadProject(SongProjectFile.WriteProject(song, Header()));
 
         Assert.Multiple(() =>
         {
@@ -262,28 +262,28 @@ public class SongProjectFileTests
     [TestCaseSource(typeof(MidiCorpus), nameof(MidiCorpus.TestFiles))]
     public void 语料存成工程再读回来是同一首曲子(string path)
     {
-        var song = SongProject.Read(path);
-        var (_, again) = SongProject.ReadProject(SongProject.WriteProject(song, Header()));
+        var song = MidiReader.Read(path);
+        var (_, again) = SongProjectFile.ReadProject(SongProjectFile.WriteProject(song, Header()));
 
         SongAssert.Same(song, again, Path.GetFileName(path));
     }
 
-    /// <summary>存在盘上再读回来也一样（<see cref="SongProject.SaveProject"/> / <see cref="SongProject.LoadProject"/> 那条路）。</summary>
+    /// <summary>存在盘上再读回来也一样（<see cref="SongProjectFile.SaveProject"/> / <see cref="SongProjectFile.LoadProject"/> 那条路）。</summary>
     [TestCaseSource(typeof(MidiCorpus), nameof(MidiCorpus.TestFiles))]
     public void 语料落盘成mproj再读回来是同一首曲子(string path)
     {
-        var song = SongProject.Read(path);
+        var song = MidiReader.Read(path);
         string file = Path.Combine(Path.GetTempPath(), $"mp-proj-{Guid.NewGuid():N}.mproj");
 
         try
         {
-            SongProject.SaveProject(song, Header(Path.GetFileNameWithoutExtension(path)), file);
-            var (header, again) = SongProject.LoadProject(file);
+            SongProjectFile.SaveProject(song, Header(Path.GetFileNameWithoutExtension(path)), file);
+            var (header, again) = SongProjectFile.LoadProject(file);
 
             Assert.Multiple(() =>
             {
                 SongAssert.Same(song, again, Path.GetFileName(path));
-                Assert.That(header.Version, Is.EqualTo(SongProject.ProjectVersion));
+                Assert.That(header.Version, Is.EqualTo(SongProjectFile.ProjectVersion));
                 Assert.That(header.Name, Is.EqualTo(Path.GetFileNameWithoutExtension(path)));
             });
         }
@@ -305,8 +305,8 @@ public class SongProjectFileTests
         int withNotes = 0, totalNotes = 0, variableTempo = 0;
         foreach (var path in MidiCorpus.Files)
         {
-            var song = SongProject.Read(path);
-            var (_, again) = SongProject.ReadProject(SongProject.WriteProject(song, Header()));
+            var song = MidiReader.Read(path);
+            var (_, again) = SongProjectFile.ReadProject(SongProjectFile.WriteProject(song, Header()));
 
             if (again.Tracks.Count > 0) withNotes++;
             totalNotes += again.Tracks.Sum(t => t.NoteCount);
@@ -327,13 +327,13 @@ public class SongProjectFileTests
     public void 文件头逐字段往返()
     {
         var song = SingleNoteSong();
-        var header = new ProjectHeader(SongProject.ProjectVersion, "起风了", true, @"C:\下载\起风了.mid");
+        var header = new ProjectHeader(SongProjectFile.ProjectVersion, "起风了", true, @"C:\下载\起风了.mid");
 
-        var (again, _) = SongProject.ReadProject(SongProject.WriteProject(song, header));
+        var (again, _) = SongProjectFile.ReadProject(SongProjectFile.WriteProject(song, header));
 
         Assert.Multiple(() =>
         {
-            Assert.That(again.Version, Is.EqualTo(SongProject.ProjectVersion));
+            Assert.That(again.Version, Is.EqualTo(SongProjectFile.ProjectVersion));
             Assert.That(again.Name, Is.EqualTo("起风了"));
             Assert.That(again.Edited, Is.True);
             Assert.That(again.ImportedFrom, Is.EqualTo(@"C:\下载\起风了.mid"));
@@ -344,7 +344,7 @@ public class SongProjectFileTests
     [Test]
     public void 没有导入来源时往返还是空()
     {
-        var (again, _) = SongProject.ReadProject(SongProject.WriteProject(SingleNoteSong(), Header()));
+        var (again, _) = SongProjectFile.ReadProject(SongProjectFile.WriteProject(SingleNoteSong(), Header()));
 
         Assert.Multiple(() =>
         {
@@ -357,7 +357,7 @@ public class SongProjectFileTests
     [Test]
     public void 中文在文件里是原样的字()
     {
-        string json = SongProject.WriteProject(SingleNoteSong(), Header("夜空中最亮的星", true, @"C:\我的谱子\星.mid"));
+        string json = SongProjectFile.WriteProject(SingleNoteSong(), Header("夜空中最亮的星", true, @"C:\我的谱子\星.mid"));
 
         Assert.Multiple(() =>
         {
@@ -375,9 +375,9 @@ public class SongProjectFileTests
     [Test]
     public void 版本号一律写当前版本()
     {
-        string json = SongProject.WriteProject(SingleNoteSong(), new ProjectHeader(99, "来自于未来", false, null));
+        string json = SongProjectFile.WriteProject(SingleNoteSong(), new ProjectHeader(99, "来自于未来", false, null));
 
-        Assert.That(json, Does.Contain($"\"Version\": {SongProject.ProjectVersion}"));
+        Assert.That(json, Does.Contain($"\"Version\": {SongProjectFile.ProjectVersion}"));
     }
 
     /// <summary>
@@ -386,7 +386,7 @@ public class SongProjectFileTests
     [Test]
     public void 写出来的是缩进过的JSON()
     {
-        string json = SongProject.WriteProject(SingleNoteSong(), Header());
+        string json = SongProjectFile.WriteProject(SingleNoteSong(), Header());
 
         var lines = json.Split('\n');
         Assert.Multiple(() =>
@@ -412,7 +412,7 @@ public class SongProjectFileTests
     [Test]
     public void 文件里没有算出来的属性()
     {
-        string json = SongProject.WriteProject(SingleNoteSong(), Header());
+        string json = SongProjectFile.WriteProject(SingleNoteSong(), Header());
 
         var derived = new[] { "EndTick", "TotalSeconds", "NoteCount", "BeatsPerMinute", "IsSmpte" };
 
@@ -436,10 +436,10 @@ public class SongProjectFileTests
     [Test]
     public void 文件里多出派生字段也能读回来()
     {
-        string json = SongProject.WriteProject(SingleNoteSong(), Header());
+        string json = SongProjectFile.WriteProject(SingleNoteSong(), Header());
         json = json.Replace("\"Tracks\"", "\"EndTick\": 999999, \"TotalSeconds\": 12.5, \"Tracks\"");
 
-        var (_, song) = SongProject.ReadProject(json);
+        var (_, song) = SongProjectFile.ReadProject(json);
 
         SongAssert.Same(SingleNoteSong(), song, "多写了派生字段的工程");
     }
@@ -449,7 +449,7 @@ public class SongProjectFileTests
     public void 文件里的字段就是构造器的参数()
     {
         var song = SingleNoteSong();
-        using var document = JsonDocument.Parse(SongProject.WriteProject(song, Header()));
+        using var document = JsonDocument.Parse(SongProjectFile.WriteProject(song, Header()));
         var songNode = document.RootElement.GetProperty("Song");
 
         var trackFields = songNode.GetProperty("Tracks")[0].EnumerateObject().Select(p => p.Name).ToHashSet();
@@ -475,7 +475,7 @@ public class SongProjectFileTests
     [Test]
     public void 顶层是文件头加Song()
     {
-        using var document = JsonDocument.Parse(SongProject.WriteProject(SingleNoteSong(), Header()));
+        using var document = JsonDocument.Parse(SongProjectFile.WriteProject(SingleNoteSong(), Header()));
 
         Assert.That(document.RootElement.EnumerateObject().Select(p => p.Name), Is.EquivalentTo(
             new[] { "Version", "Name", "Edited", "ImportedFrom", "Song" }));
@@ -486,7 +486,7 @@ public class SongProjectFileTests
     [Test]
     public void 空文件报清楚的错不崩()
     {
-        var ex = Assert.Throws<InvalidDataException>(() => SongProject.ReadProject(""));
+        var ex = Assert.Throws<InvalidDataException>(() => SongProjectFile.ReadProject(""));
         Assert.That(ex!.Message, Does.Contain("空的"), "错误消息得是给人看的中文");
     }
 
@@ -494,10 +494,10 @@ public class SongProjectFileTests
     [Test]
     public void 截断的JSON报清楚的错不崩()
     {
-        string whole = SongProject.WriteProject(SingleNoteSong(), Header());
+        string whole = SongProjectFile.WriteProject(SingleNoteSong(), Header());
         string half = whole[..(whole.Length / 2)];
 
-        var ex = Assert.Throws<InvalidDataException>(() => SongProject.ReadProject(half));
+        var ex = Assert.Throws<InvalidDataException>(() => SongProjectFile.ReadProject(half));
 
         Assert.Multiple(() =>
         {
@@ -509,14 +509,14 @@ public class SongProjectFileTests
     [Test]
     public void 不是JSON的文件报清楚的错不崩()
     {
-        var ex = Assert.Throws<InvalidDataException>(() => SongProject.ReadProject("PK\u0003\u0004这不是 JSON，是个 zip"));
+        var ex = Assert.Throws<InvalidDataException>(() => SongProjectFile.ReadProject("PK\u0003\u0004这不是 JSON，是个 zip"));
         Assert.That(ex!.Message, Does.Contain("JSON"));
     }
 
     [Test]
     public void 顶层不是对象的报清楚的错不崩()
     {
-        var ex = Assert.Throws<InvalidDataException>(() => SongProject.ReadProject("[1, 2, 3]"));
+        var ex = Assert.Throws<InvalidDataException>(() => SongProjectFile.ReadProject("[1, 2, 3]"));
         Assert.That(ex!.Message, Does.Contain("不是一个 JSON 对象"));
     }
 
@@ -524,24 +524,24 @@ public class SongProjectFileTests
     [Test]
     public void 版本比当前新时报清楚的错不崩()
     {
-        string json = SongProject.WriteProject(SingleNoteSong(), Header())
-            .Replace($"\"Version\": {SongProject.ProjectVersion}", $"\"Version\": {SongProject.ProjectVersion + 1}");
+        string json = SongProjectFile.WriteProject(SingleNoteSong(), Header())
+            .Replace($"\"Version\": {SongProjectFile.ProjectVersion}", $"\"Version\": {SongProjectFile.ProjectVersion + 1}");
 
-        var ex = Assert.Throws<InvalidDataException>(() => SongProject.ReadProject(json));
+        var ex = Assert.Throws<InvalidDataException>(() => SongProjectFile.ReadProject(json));
 
         Assert.Multiple(() =>
         {
             Assert.That(ex!.Message, Does.Contain("更新版本"), "错误消息得是给人看的中文");
-            Assert.That(ex.Message, Does.Contain($"{SongProject.ProjectVersion + 1}"), "说清读到的是哪个版本");
+            Assert.That(ex.Message, Does.Contain($"{SongProjectFile.ProjectVersion + 1}"), "说清读到的是哪个版本");
         });
     }
 
     [Test]
     public void 没有版本号时报清楚的错不崩()
     {
-        string json = SongProject.WriteProject(SingleNoteSong(), Header()).Replace("\"Version\": 1,", "");
+        string json = SongProjectFile.WriteProject(SingleNoteSong(), Header()).Replace("\"Version\": 1,", "");
 
-        var ex = Assert.Throws<InvalidDataException>(() => SongProject.ReadProject(json));
+        var ex = Assert.Throws<InvalidDataException>(() => SongProjectFile.ReadProject(json));
         Assert.That(ex!.Message, Does.Contain("版本号"));
     }
 
@@ -550,18 +550,18 @@ public class SongProjectFileTests
     public void 缺Song字段时报清楚的错不崩()
     {
         // 版本号是好的、就是没有谱面 —— 得说「没有 Song」，而不是笼统地说文件坏了
-        string json = $"{{\"Version\": {SongProject.ProjectVersion}, \"Name\": \"只有文件头\"}}";
+        string json = $"{{\"Version\": {SongProjectFile.ProjectVersion}, \"Name\": \"只有文件头\"}}";
 
-        var ex = Assert.Throws<InvalidDataException>(() => SongProject.ReadProject(json));
+        var ex = Assert.Throws<InvalidDataException>(() => SongProjectFile.ReadProject(json));
         Assert.That(ex!.Message, Does.Contain("Song"));
     }
 
     [Test]
     public void Song是null时报清楚的错不崩()
     {
-        string json = $"{{\"Version\": {SongProject.ProjectVersion}, \"Song\": null}}";
+        string json = $"{{\"Version\": {SongProjectFile.ProjectVersion}, \"Song\": null}}";
 
-        var ex = Assert.Throws<InvalidDataException>(() => SongProject.ReadProject(json));
+        var ex = Assert.Throws<InvalidDataException>(() => SongProjectFile.ReadProject(json));
         Assert.That(ex!.Message, Does.Contain("Song"));
     }
 
@@ -569,10 +569,10 @@ public class SongProjectFileTests
     [Test]
     public void 分辨率缺字段时报清楚的错不崩()
     {
-        string json = SongProject.WriteProject(SingleNoteSong(), Header())
+        string json = SongProjectFile.WriteProject(SingleNoteSong(), Header())
             .Replace("\"SmpteFramesPerSecond\": 0,", "");
 
-        var ex = Assert.Throws<InvalidDataException>(() => SongProject.ReadProject(json));
+        var ex = Assert.Throws<InvalidDataException>(() => SongProjectFile.ReadProject(json));
         Assert.That(ex!.Message, Does.Contain("分辨率"), "错误消息得是给人看的中文");
     }
 
@@ -580,10 +580,10 @@ public class SongProjectFileTests
     [TestCase(-480)]
     public void 分辨率是非法值时报清楚的错不崩(int ticksPerQuarterNote)
     {
-        string json = SongProject.WriteProject(SingleNoteSong(), Header())
+        string json = SongProjectFile.WriteProject(SingleNoteSong(), Header())
             .Replace("\"TicksPerQuarterNote\": 480", $"\"TicksPerQuarterNote\": {ticksPerQuarterNote}");
 
-        var ex = Assert.Throws<InvalidDataException>(() => SongProject.ReadProject(json));
+        var ex = Assert.Throws<InvalidDataException>(() => SongProjectFile.ReadProject(json));
         Assert.That(ex!.Message, Does.Contain("分辨率"));
     }
 
@@ -592,21 +592,21 @@ public class SongProjectFileTests
     [TestCase("\"480\"")]
     public void 分辨率不是整数时报清楚的错不崩(string written)
     {
-        string json = SongProject.WriteProject(SingleNoteSong(), Header())
+        string json = SongProjectFile.WriteProject(SingleNoteSong(), Header())
             .Replace("\"TicksPerQuarterNote\": 480", $"\"TicksPerQuarterNote\": {written}");
 
-        var ex = Assert.Throws<InvalidDataException>(() => SongProject.ReadProject(json));
+        var ex = Assert.Throws<InvalidDataException>(() => SongProjectFile.ReadProject(json));
         Assert.That(ex!.Message, Does.Contain("分辨率"));
     }
 
     [Test]
     public void 两种分辨率模式同时有值时报清楚的错不崩()
     {
-        string json = SongProject.WriteProject(SingleNoteSong(), Header())
+        string json = SongProjectFile.WriteProject(SingleNoteSong(), Header())
             .Replace("\"SmpteFramesPerSecond\": 0", "\"SmpteFramesPerSecond\": 25")
             .Replace("\"SmpteTicksPerFrame\": 0", "\"SmpteTicksPerFrame\": 40");
 
-        var ex = Assert.Throws<InvalidDataException>(() => SongProject.ReadProject(json));
+        var ex = Assert.Throws<InvalidDataException>(() => SongProjectFile.ReadProject(json));
         Assert.That(ex!.Message, Does.Contain("分辨率"));
     }
 
@@ -614,10 +614,10 @@ public class SongProjectFileTests
     [Test]
     public void 音符缺字段时报清楚的错不崩()
     {
-        string json = SongProject.WriteProject(SingleNoteSong(), Header())
+        string json = SongProjectFile.WriteProject(SingleNoteSong(), Header())
             .Replace("\"Velocity\": 100", "\"Strength\": 100");
 
-        var ex = Assert.Throws<InvalidDataException>(() => SongProject.ReadProject(json));
+        var ex = Assert.Throws<InvalidDataException>(() => SongProjectFile.ReadProject(json));
 
         Assert.Multiple(() =>
         {
@@ -640,9 +640,9 @@ public class SongProjectFileTests
     [TestCase("\"LengthTicks\": 480", "\"LengthTicks\": -480", "时值")]
     public void 音符的值不合法时报清楚的错不崩(string from, string to, string because)
     {
-        string json = SongProject.WriteProject(SingleNoteSong(), Header()).Replace(from, to);
+        string json = SongProjectFile.WriteProject(SingleNoteSong(), Header()).Replace(from, to);
 
-        var ex = Assert.Throws<InvalidDataException>(() => SongProject.ReadProject(json));
+        var ex = Assert.Throws<InvalidDataException>(() => SongProjectFile.ReadProject(json));
 
         Assert.Multiple(() =>
         {
@@ -655,12 +655,12 @@ public class SongProjectFileTests
     [Test]
     public void 文件头缺字段照样读得出来()
     {
-        string json = SongProject.WriteProject(SingleNoteSong(), Header())
+        string json = SongProjectFile.WriteProject(SingleNoteSong(), Header())
             .Replace("\"Name\": \"测试曲\",", "")
             .Replace("\"Edited\": false,", "")
             .Replace("\"ImportedFrom\": null,", "");
 
-        var (header, song) = SongProject.ReadProject(json);
+        var (header, song) = SongProjectFile.ReadProject(json);
 
         Assert.Multiple(() =>
         {
@@ -678,7 +678,7 @@ public class SongProjectFileTests
     {
         string missing = Path.Combine(Path.GetTempPath(), $"mp-没有这个文件-{Guid.NewGuid():N}.mproj");
 
-        var ex = Assert.Throws<InvalidDataException>(() => SongProject.LoadProject(missing));
+        var ex = Assert.Throws<InvalidDataException>(() => SongProjectFile.LoadProject(missing));
 
         Assert.Multiple(() =>
         {
@@ -695,7 +695,7 @@ public class SongProjectFileTests
 
         try
         {
-            var ex = Assert.Throws<InvalidDataException>(() => SongProject.LoadProject(file));
+            var ex = Assert.Throws<InvalidDataException>(() => SongProjectFile.LoadProject(file));
             Assert.That(ex!.Message, Does.Contain("空的"));
         }
         finally
@@ -712,8 +712,8 @@ public class SongProjectFileTests
 
         try
         {
-            SongProject.SaveProject(song, Header("存读", true, "从哪里来"), file);
-            var (header, again) = SongProject.LoadProject(file);
+            SongProjectFile.SaveProject(song, Header("存读", true, "从哪里来"), file);
+            var (header, again) = SongProjectFile.LoadProject(file);
 
             Assert.Multiple(() =>
             {
@@ -738,16 +738,16 @@ public class SongProjectFileTests
 
         try
         {
-            SongProject.SaveProject(SingleNoteSong(), Header("夜空中最亮的星", true, "C:\\x.mid"), file);
+            SongProjectFile.SaveProject(SingleNoteSong(), Header("夜空中最亮的星", true, "C:\\x.mid"), file);
 
-            var header = SongProject.TryReadProjectHeader(file);
+            var header = SongProjectFile.TryReadProjectHeader(file);
 
             Assert.That(header, Is.Not.Null);
             Assert.Multiple(() =>
             {
                 Assert.That(header!.Name, Is.EqualTo("夜空中最亮的星"));
                 Assert.That(header.Edited, Is.True);
-                Assert.That(header.Version, Is.EqualTo(SongProject.ProjectVersion));
+                Assert.That(header.Version, Is.EqualTo(SongProjectFile.ProjectVersion));
                 Assert.That(header.ImportedFrom, Is.EqualTo("C:\\x.mid"));
             });
         }
@@ -775,7 +775,7 @@ public class SongProjectFileTests
 
         try
         {
-            Assert.That(SongProject.TryReadProjectHeader(file), Is.Null);
+            Assert.That(SongProjectFile.TryReadProjectHeader(file), Is.Null);
         }
         finally
         {
@@ -787,7 +787,7 @@ public class SongProjectFileTests
     public void 文件不在时问文件头也不崩()
     {
         string missing = Path.Combine(Path.GetTempPath(), $"mp-没有这个-{Guid.NewGuid():N}.mproj");
-        Assert.That(SongProject.TryReadProjectHeader(missing), Is.Null);
+        Assert.That(SongProjectFile.TryReadProjectHeader(missing), Is.Null);
     }
 
     /// <summary>
@@ -799,7 +799,7 @@ public class SongProjectFileTests
     [Test]
     public void 问文件头时不碰谱面()
     {
-        string json = SongProject.WriteProject(SingleNoteSong(), Header("只读头"))
+        string json = SongProjectFile.WriteProject(SingleNoteSong(), Header("只读头"))
             .Replace("\"Song\": {", "\"Song\": \"这不是谱面\", \"扔掉\": {");
 
         string file = Path.Combine(Path.GetTempPath(), $"mp-只读头-{Guid.NewGuid():N}.mproj");
@@ -807,7 +807,7 @@ public class SongProjectFileTests
 
         try
         {
-            var header = SongProject.TryReadProjectHeader(file);
+            var header = SongProjectFile.TryReadProjectHeader(file);
 
             Assert.That(header, Is.Not.Null);
             Assert.That(header!.Name, Is.EqualTo("只读头"));

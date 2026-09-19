@@ -192,7 +192,7 @@ public partial class PerformerWindow : Window
             // 两个都是纯 Core，回来的只是 Track 记录，不含任何界面对象。
             var (song, playable) = await Task.Run(() =>
             {
-                var read = SongProject.Read(path);
+                var read = MidiReader.Read(path);
                 return (read, TrackRanking.Of(read));
             });
 

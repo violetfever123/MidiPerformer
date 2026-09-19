@@ -5,6 +5,8 @@ using MidiPerformer.Core.Model;
 using MidiPerformer.Core.UseCases.Project;
 using MidiPerformer.Tests.Corpus;
 using NUnit.Framework;
+// DryWetMidi 也有同名的 MidiReader，不加别名就分不清说的是哪一边
+using MidiReader = MidiPerformer.Core.UseCases.Project.MidiReader;
 using ModelNote = MidiPerformer.Core.Model.Note;
 using ModelTempoMap = MidiPerformer.Core.Model.TempoMap;
 using ModelTimeDivision = MidiPerformer.Core.Model.TimeDivision;
@@ -31,7 +33,7 @@ public class SongProjectReadTests
     public void 真实MIDI的轨与原版逐条对齐(string path)
     {
         var expected = HarpAutoPlayer.Midi.MidiLoader.Parse(path).Candidates;
-        var song = SongProject.Read(path);
+        var song = MidiReader.Read(path);
 
         Assert.That(song.Tracks.Count, Is.EqualTo(expected.Count),
             $"{Path.GetFileName(path)}：轨数不对（一个轨块里的每个声道算一条轨）");
@@ -63,7 +65,7 @@ public class SongProjectReadTests
         // 音符的比对不看文本，所以这里用默认 ReadingSettings 读一遍就够了。
         using var stream = File.OpenRead(path);
         var file = MidiFile.Read(stream);
-        var song = SongProject.Read(path);
+        var song = MidiReader.Read(path);
 
         int trackIndex = 0;
         foreach (var chunk in file.GetTrackChunks())
@@ -92,7 +94,7 @@ public class SongProjectReadTests
     [TestCaseSource(typeof(MidiCorpus), nameof(MidiCorpus.TestFiles))]
     public void 真实MIDI的tick没有被秒污染(string path)
     {
-        var song = SongProject.Read(path);
+        var song = MidiReader.Read(path);
         var map = song.TempoMap;
 
         foreach (var track in song.Tracks)
@@ -118,7 +120,7 @@ public class SongProjectReadTests
     {
         using var stream = File.OpenRead(path);
         var file = MidiFile.Read(stream);
-        var song = SongProject.Read(path);
+        var song = MidiReader.Read(path);
 
         var firstProgram = new Dictionary<int, int>();
         foreach (var chunk in file.GetTrackChunks())
@@ -142,7 +144,7 @@ public class SongProjectReadTests
             SmfTrack.Named("指挥轨").Tempo(0, 400_000).Program(0, 3, 42),
             SmfTrack.Named("主旋律").Note(0, 480, 3, 60));
 
-        var song = SongProject.ReadBytes(bytes);
+        var song = MidiReader.ReadBytes(bytes);
 
         Assert.Multiple(() =>
         {
@@ -159,7 +161,7 @@ public class SongProjectReadTests
             SmfTrack.Named("主旋律").Program(0, 0, 24).Note(0, 480, 0, 60)
                 .Program(960, 0, 42).Note(960, 480, 0, 62));
 
-        Assert.That(SongProject.ReadBytes(bytes).Tracks.Single().Program, Is.EqualTo(24));
+        Assert.That(MidiReader.ReadBytes(bytes).Tracks.Single().Program, Is.EqualTo(24));
     }
 
     /// <summary>
@@ -177,7 +179,7 @@ public class SongProjectReadTests
         int withNotes = 0, totalNotes = 0, totalTracks = 0;
         foreach (var path in MidiCorpus.Files)
         {
-            var song = SongProject.Read(path);
+            var song = MidiReader.Read(path);
             totalTracks += song.Tracks.Count;
             totalNotes += song.Tracks.Sum(t => t.NoteCount);
             if (song.Tracks.Count > 0) withNotes++;
@@ -203,7 +205,7 @@ public class SongProjectReadTests
             using var stream = File.OpenRead(path);
             var file = MidiFile.Read(stream, new ReadingSettings { NotEnoughBytesPolicy = NotEnoughBytesPolicy.Ignore });
             formats.Add((int)file.OriginalFormat);
-            Assert.That(() => SongProject.Read(path), Throws.Nothing, $"{Path.GetFileName(path)} 读不进来");
+            Assert.That(() => MidiReader.Read(path), Throws.Nothing, $"{Path.GetFileName(path)} 读不进来");
         }
 
         Assert.That(formats, Is.SupersetOf(new[] { 0, 1, 2 }), "语料没有覆盖全三种 SMF 格式");
@@ -220,7 +222,7 @@ public class SongProjectReadTests
                 .Program(0, 1, 40).Note(0, 480, 1, 67)
                 .Note(480, 480, 1, 69));
 
-        var song = SongProject.ReadBytes(bytes);
+        var song = MidiReader.ReadBytes(bytes);
 
         Assert.Multiple(() =>
         {
@@ -242,7 +244,7 @@ public class SongProjectReadTests
             SmfTrack.Named("主旋律").Note(0, 96, 0, 72).Note(96, 96, 0, 74),
             SmfTrack.Named("伴奏").Note(48, 192, 1, 48));
 
-        var song = SongProject.ReadBytes(bytes);
+        var song = MidiReader.ReadBytes(bytes);
 
         Assert.Multiple(() =>
         {
@@ -262,7 +264,7 @@ public class SongProjectReadTests
             SmfTrack.Named("第一段").Note(0, 480, 0, 60),
             SmfTrack.Named("第二段").Note(960, 480, 0, 62));
 
-        var song = SongProject.ReadBytes(bytes);
+        var song = MidiReader.ReadBytes(bytes);
 
         Assert.Multiple(() =>
         {
@@ -279,7 +281,7 @@ public class SongProjectReadTests
         var bytes = SmfWriter.Build(1, 480,
             SmfTrack.Named("t").Note(481, 7, 0, 60).Note(1_234_567, 13, 0, 62));
 
-        var notes = SongProject.ReadBytes(bytes).Tracks.Single().Notes;
+        var notes = MidiReader.ReadBytes(bytes).Tracks.Single().Notes;
 
         Assert.Multiple(() =>
         {
@@ -294,7 +296,7 @@ public class SongProjectReadTests
     [Test]
     public void 空文件报清楚的错不崩()
     {
-        var ex = Assert.Throws<InvalidDataException>(() => SongProject.ReadBytes(Array.Empty<byte>()));
+        var ex = Assert.Throws<InvalidDataException>(() => MidiReader.ReadBytes(Array.Empty<byte>()));
         Assert.That(ex!.Message, Does.Contain("0 字节"));
     }
 
@@ -302,7 +304,7 @@ public class SongProjectReadTests
     public void 不是MIDI的文件报清楚的错不崩()
     {
         byte[] notMidi = System.Text.Encoding.ASCII.GetBytes("PK这不是MIDI这是一个zip");
-        var ex = Assert.Throws<InvalidDataException>(() => SongProject.ReadBytes(notMidi));
+        var ex = Assert.Throws<InvalidDataException>(() => MidiReader.ReadBytes(notMidi));
         Assert.That(ex!.Message, Does.Contain("不是标准 MIDI 文件"));
     }
 
@@ -320,7 +322,7 @@ public class SongProjectReadTests
         riff.AddRange(SmfWriter.BE32(midi.Length));
         riff.AddRange(midi);
 
-        var song = SongProject.ReadBytes(riff.ToArray());
+        var song = MidiReader.ReadBytes(riff.ToArray());
 
         Assert.Multiple(() =>
         {
@@ -338,7 +340,7 @@ public class SongProjectReadTests
         riffWithoutMidi.AddRange(SmfWriter.BE32(4));
         riffWithoutMidi.AddRange(SmfWriter.Ascii("WAVE"));
 
-        var ex = Assert.Throws<InvalidDataException>(() => SongProject.ReadBytes(riffWithoutMidi.ToArray()));
+        var ex = Assert.Throws<InvalidDataException>(() => MidiReader.ReadBytes(riffWithoutMidi.ToArray()));
         Assert.That(ex!.Message, Does.Contain("找不到 MIDI"));
     }
 
@@ -346,7 +348,7 @@ public class SongProjectReadTests
     public void 只有文件头没有轨道的文件不崩()
     {
         byte[] headerOnly = SmfWriter.HeaderOnly(1, 480, declaredTracks: 0);
-        var song = SongProject.ReadBytes(headerOnly);
+        var song = MidiReader.ReadBytes(headerOnly);
         Assert.That(song.Tracks, Is.Empty);
         Assert.That(song.EndTick, Is.EqualTo(0));
     }
@@ -367,7 +369,7 @@ public class SongProjectReadTests
         byte[] whole = SmfWriter.HeaderOnly(1, 480, declaredTracks: 0);
         byte[] partial = whole[..length];
 
-        var ex = Assert.Throws<InvalidDataException>(() => SongProject.ReadBytes(partial));
+        var ex = Assert.Throws<InvalidDataException>(() => MidiReader.ReadBytes(partial));
 
         Assert.Multiple(() =>
         {
@@ -382,7 +384,7 @@ public class SongProjectReadTests
     {
         byte[] zeroDivision = SmfWriter.HeaderOnly(1, division: 0, declaredTracks: 0);
 
-        var ex = Assert.Throws<InvalidDataException>(() => SongProject.ReadBytes(zeroDivision));
+        var ex = Assert.Throws<InvalidDataException>(() => MidiReader.ReadBytes(zeroDivision));
         Assert.That(ex!.Message, Does.Contain("分辨率"), "错误消息得是给人看的中文");
     }
 
@@ -393,7 +395,7 @@ public class SongProjectReadTests
         // SMPTE 的分辨率字：高字节是负的格式号（0xE8 = −24，即 24 帧/秒），低字节是每帧 tick 数
         byte[] zeroTicksPerFrame = SmfWriter.HeaderOnly(1, division: 0xE800, declaredTracks: 0);
 
-        var ex = Assert.Throws<InvalidDataException>(() => SongProject.ReadBytes(zeroTicksPerFrame));
+        var ex = Assert.Throws<InvalidDataException>(() => MidiReader.ReadBytes(zeroTicksPerFrame));
         Assert.That(ex!.Message, Does.Contain("分辨率"));
     }
 
@@ -404,7 +406,7 @@ public class SongProjectReadTests
         // 24 帧/秒、每帧 40 tick → 960 tick/秒
         byte[] bytes = SmfWriter.Build(1, 0xE828, SmfTrack.Named("SMPTE").Note(960, 960, 0, 60));
 
-        var song = SongProject.ReadBytes(bytes);
+        var song = MidiReader.ReadBytes(bytes);
 
         Assert.Multiple(() =>
         {
@@ -422,7 +424,7 @@ public class SongProjectReadTests
         var bytes = SmfWriter.Build(1, 480,
             SmfTrack.Named("指挥轨").Tempo(0, 400_000).TimeSignature(0, 3, 2));
 
-        var song = SongProject.ReadBytes(bytes);
+        var song = MidiReader.ReadBytes(bytes);
 
         Assert.Multiple(() =>
         {
@@ -443,7 +445,7 @@ public class SongProjectReadTests
         // 砍掉最后一个轨块的后半截 —— 「网站试听给的残缺文件」就长这样
         byte[] truncated = whole[..(whole.Length - 6)];
 
-        var song = SongProject.ReadBytes(truncated);
+        var song = MidiReader.ReadBytes(truncated);
 
         Assert.Multiple(() =>
         {
@@ -459,7 +461,7 @@ public class SongProjectReadTests
         var bytes = SmfWriter.Build(1, 480,
             SmfTrack.Named("断头音").Note(0, 480, 0, 60).DanglingNoteOn(960, 0, 64));
 
-        Assert.That(() => SongProject.ReadBytes(bytes), Throws.Nothing);
+        Assert.That(() => MidiReader.ReadBytes(bytes), Throws.Nothing);
     }
 
     // ==================== 模型自身的约束 ====================
@@ -484,8 +486,8 @@ public class SongProjectReadTests
     [Test]
     public void 模型的公开签名里没有DryWetMidi()
     {
-        // spec：DryWetMidi 由 SongProject 独占，那个文件之外不许出现它的类型。
-        // SongProject 本身当然有（它就是干这个的），所以这里盯的是**模型**。
+        // spec：DryWetMidi 由 MidiReader / MidiWriter 独占，那两个文件之外不许出现它的类型。
+        // 它俩本身当然有（它们就是干这个的），所以这里盯的是**模型**。
         Type[] model =
         {
             typeof(Song), typeof(Track), typeof(ModelNote),

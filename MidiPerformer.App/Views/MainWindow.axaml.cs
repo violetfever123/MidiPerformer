@@ -245,12 +245,12 @@ public partial class MainWindow : Window
         Song song;
         try
         {
-            song = SongProject.Read(path);
+            song = MidiReader.Read(path);
         }
         catch (Exception ex) when (ex is IOException or InvalidDataException
             or UnauthorizedAccessException or NotSupportedException or InvalidOperationException)
         {
-            // SongProject 抛的就是中文消息，原样报出来 —— 编一句更笼统的话只会把线索弄丢
+            // MidiReader 抛的就是中文消息，原样报出来 —— 编一句更笼统的话只会把线索弄丢
             ShowError(ex.Message);
             return;
         }
@@ -529,7 +529,7 @@ public partial class MainWindow : Window
 
         try
         {
-            var (header, song) = SongProject.LoadProject(library.PathOf(name));
+            var (header, song) = SongProjectFile.LoadProject(library.PathOf(name));
 
             LoadSong(song, name);
             // LoadSong 把这三个都清空了（它不知道新来的是哪一份），所以在这儿补上
@@ -629,8 +629,8 @@ public partial class MainWindow : Window
 
         try
         {
-            library.Write(name, SongProject.WriteProject(song, new ProjectHeader(
-                SongProject.ProjectVersion, name, _edited, _importedFrom)));
+            library.Write(name, SongProjectFile.WriteProject(song, new ProjectHeader(
+                SongProjectFile.ProjectVersion, name, _edited, _importedFrom)));
         }
         catch (InvalidDataException ex)
         {
@@ -1184,13 +1184,13 @@ public partial class MainWindow : Window
         try
         {
             // 写出去的是此刻手上的那一份（含刚做完、还没撤销的编辑），不是屏幕
-            SongProject.Write(song, path);
+            MidiWriter.Write(song, path);
             ShowNotice($"已导出到 {path}");
         }
         catch (Exception ex) when (ex is IOException or InvalidDataException
             or UnauthorizedAccessException or NotSupportedException or InvalidOperationException)
         {
-            // 和导入同一条规矩：SongProject 抛的是中文消息，原样报出来
+            // 和导入同一条规矩：MidiWriter 抛的是中文消息，原样报出来
             ShowError(ex.Message);
         }
     }
