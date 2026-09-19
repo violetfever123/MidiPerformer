@@ -321,8 +321,9 @@ public partial class MainWindow : Window
         EmptyHint.IsVisible = false;
         JumpBox.Text = "1";
 
-        PlayButton.IsEnabled = song.Tracks.Count > 0;
-        StopButton.IsEnabled = false;
+        // 走带条跟着新曲子回位。**就这一处规矩**（RefreshTransport），
+        // 手写 PlayButton/StopButton 那两行的地方从前有三处，改一处漏两处
+        RefreshTransport();
         JumpBox.IsEnabled = true;
         // 有谱面就写得出，哪怕一个音都没有 —— 速度表和分辨率也值得留下来，
         // 所以这条的判据是「装上了曲子」，不是「有轨」
@@ -823,9 +824,11 @@ public partial class MainWindow : Window
         // 收起来的轨照旧不出声 —— 重摊这张表的名单从控件现问（见 MutedTracks）
         _playback.Load(edited, MutedTracks());
         _playback.SeekSeconds(edited.TempoMap.SecondsAt(playheadTick));
-        // 试听被换谱顺手停了（Load 会先松开所有正在响的音），走带条的亮灭跟着回位
-        PlayButton.IsEnabled = edited.Tracks.Count > 0;
-        StopButton.IsEnabled = false;
+        // 试听被换谱顺手停了（Load 会先松开所有正在响的音），走带条的亮灭跟着回位。
+        // **走 RefreshTransport 而不是在这儿手写两行** —— 从前就是手写的，
+        // 于是「■ 该不该灰」这条规矩散在三个地方（换曲子、编辑、播放），
+        // 改速度这一路（也走这里）就把 ■ 弄灰了，而屏幕上没有任何东西解释为什么。
+        RefreshTransport();
 
         // 悬停那个音说的是**上一份**曲子里的下标，编辑之后一概作废
         //（鼠标这会儿也多半正压在刚点的那个按钮上，本来就不在卷帘里）
@@ -1287,19 +1290,43 @@ public partial class MainWindow : Window
 
     // ==================== 播放 ====================
 
-    private void OnPlayClick(object? sender, RoutedEventArgs e) => StartPlayback();
+    private void OnPlayClick(object? sender, RoutedEventArgs e) => TogglePlayback();
 
     /// <summary>
-    /// 开始试听。鼠标按 ▶ 和空格键**走的是同一条**（见 <see cref="OnWindowKeyDown"/> 里的空格那一支）——
-    /// 两条各写一遍的话，置灰、对齐、刷新这些收尾迟早只有一条会被改到，
-    /// 于是「空格播放」和「点按钮播放」在某个角落上开始不一样。
+    /// 走带条上那颗按钮：没在放就开始，正在放就暂停，暂停着就接着放。
+    /// 鼠标按它和空格键**走的是同一条**（见 <see cref="OnWindowKeyDown"/> 里的空格那一支）——
+    /// 两条各写一遍的话，置灰、按钮上的字、刷新这些收尾迟早只有一条会被改到，
+    /// 于是「空格」和「点按钮」在某个角落上开始不一样。
+    /// </summary>
+    private void TogglePlayback()
+    {
+        if (_controller is null) return;
+        if (_playback.IsPlaying) PausePlayback();
+        else StartPlayback();
+    }
+
+    /// <summary>
+    /// 从当前位置开始播。<see cref="PreviewPlayback.Play"/> 那句 <c>Seek(MusicNow)</c> 一个人管三种情况
+    /// —— 从头、暂停之后接着、停止之后再放，这里不必分。
     /// </summary>
     private void StartPlayback()
     {
         if (_controller is null) return;
         _playback.Play();
-        PlayButton.IsEnabled = false;
-        StopButton.IsEnabled = true;
+        RefreshTransport();
+        RefreshView();
+    }
+
+    /// <summary>
+    /// 停在原地。**和 <see cref="StopPlayback"/> 的差别只有两样：不动视野、按钮上写「继续」。**
+    ///
+    /// 那一下 <c>SnapViewToBar</c> 是「这段我听完了」的意思，暂停里做它就等于把视野从人正看着的
+    /// 地方拽走 —— 而暂停要的恰恰是「就在这，别动」。
+    /// </summary>
+    private void PausePlayback()
+    {
+        _playback.Pause();
+        RefreshTransport();
         RefreshView();
     }
 
@@ -1310,18 +1337,40 @@ public partial class MainWindow : Window
     {
         _playback.Stop();
         _controller?.SnapViewToBar();
-        PlayButton.IsEnabled = _controller is not null;
-        StopButton.IsEnabled = false;
+        RefreshTransport();
         RefreshView();
     }
 
     private void OnPlaybackFinished(object? sender, EventArgs e)
     {
-        // 放完了：和按停止一样收尾。**光标留在原地**，别自己跳回开头
+        // 放完了：和按停止一样收尾。**光标留在原地**，别自己跳回开头。
+        // 状态上走的是 Stop（不是 Pause），所以按钮回到「▶ 播放」—— 空格能重新开一段，
+        // 不会卡在「继续」上（那条路的语义是「从刚才停的地方接着听」，这回没有那个地方）
+        _playback.Stop();
         _controller?.SnapViewToBar();
-        PlayButton.IsEnabled = _controller is not null;
-        StopButton.IsEnabled = false;
+        RefreshTransport();
         RefreshView();
+    }
+
+    /// <summary>
+    /// 走带条那两颗按钮的字和亮灭。播放状态一变就调它。
+    ///
+    /// **以播放器为准，不以「上一次点了什么」为准**：暂停、停止、放完自动停、
+    /// 换曲子（<c>Load</c> 里会 <c>Stop</c>）都能把状态改掉，靠记一个「上次是放还是停」
+    /// 的字段迟早会和真身对不上 —— 那时按钮上写着「暂停」而没东西在响。
+    /// 问 <see cref="PreviewPlayback"/> 自己要，没有第二个真相源。
+    /// </summary>
+    private void RefreshTransport()
+    {
+        PlayButton.Content = _playback.IsPlaying ? "⏸ 暂停"
+            : _playback.IsPaused ? "▶ 继续"
+            : "▶ 播放";
+
+        // 判据和换曲子那儿一致：**有轨才放得响**，一条轨都没有的谱面按了也是白按
+        PlayButton.IsEnabled = _song is { Tracks.Count: > 0 };
+        // ■ 始终可用（有谱面就能按）：它是「这段我听完了，视野回小节」，
+        // 没在放的时候按一下也有意义 —— 而灰着会让人以为「停了就不能再停」
+        StopButton.IsEnabled = _song is not null;
     }
 
     /// <summary>
@@ -1468,10 +1517,16 @@ public partial class MainWindow : Window
             if (FocusManager?.GetFocusedElement() is InputElement { Focusable: true })
                 FocusManager.ClearFocus();
 
-            // 能不能按以**那颗按钮**为准，不是另算一套：它在放的时候置灰（StartPlayback 里设的），
-            // 于是空格只负责「开始」，停归 ■、以及 F6 那一下急停；一个键管两头的话，
-            // 连按两下手就不知道自己站在哪一头了。没曲子、没音轨时它也是灰的，空格一并跟着没反应
-            if (PlayButton.IsEnabled) StartPlayback();
+            // 能不能按以**那颗按钮**为准，不是另算一套：它在没曲子、没音轨时是灰的，
+            // 空格一并跟着没反应（见 RefreshTransport）。
+            //
+            // **一个键管两头（放 / 暂停）是 20 号工单推翻的一处旧决定。** 从前空格只负责「开始」，
+            // 理由是「一个键管两头的话，连按两下手就不知道自己站在哪一头了」——
+            // 那条理由缺的正是**暂停**：当时两头是「放」和「停」，按第二下等于把刚放的东西丢掉，
+            // 确实让人迷失。现在的两头是「放」和「停在这，等下接着听」，
+            // 按第二下的结果就写在按钮上（▶ 暂停 → ▶ 继续），迷失不了。
+            // 文档照实改在 27 号工单，这里先把行为改过来。
+            if (PlayButton.IsEnabled) TogglePlayback();
             return;
         }
 

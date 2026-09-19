@@ -259,8 +259,13 @@
           留着 Tab 位就等于摆一个「Tab 得过去、按空格却没反应」的落点，
           比一开始就不给这个落点更坏。鼠标、回车都照旧能按。
         -->
+        <!--
+          走带条是**两颗**：左边一颗切换（▶ 播放 / ⏸ 暂停 / ▶ 继续，字在 RefreshTransport 里换），
+          右边一颗 ■ 停止。合成一颗是不行的 —— 「我就停在这，等下接着听」和「这段我听完了」
+          是两件事，后者顺带把视野拉回小节线，前者一个像素都不动。
+        -->
         <Button Grid.Column="0" x:Name="PlayButton" Classes="primary transport"
-                Content="▶ 从当前位置播放" IsEnabled="False" IsTabStop="False"
+                Content="▶ 播放" IsEnabled="False" IsTabStop="False"
                 ToolTip.Tip="从播放头当前位置开始试听（空格键同效）"
                 Click="OnPlayClick" />
         <Button Grid.Column="1" x:Name="StopButton" Classes="transport"

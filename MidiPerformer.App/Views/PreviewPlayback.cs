@@ -47,6 +47,15 @@ public sealed class PreviewPlayback : IDisposable
     /// <summary>正在播。</summary>
     public bool IsPlaying { get; private set; }
 
+    /// <summary>
+    /// 停在半路（<see cref="Pause"/> 过，还没接着放也没停）。
+    ///
+    /// 和「没在放」不是一回事：<see cref="Stop"/> 之后也是「没在放」，但那一路是
+    /// 「这段听完了」，界面跟着把视野拉回小节线；暂停是「我就停在这，等下接着听」，
+    /// 视野一个像素都不许动。按钮上的 `▶ 继续` 和 `▶ 播放` 也靠这个分开。
+    /// </summary>
+    public bool IsPaused { get; private set; }
+
     /// <summary>装好曲子了没有。没装的时候「播放」按钮该是灰的。</summary>
     public bool HasSong => _walker is not null;
 
@@ -112,6 +121,10 @@ public sealed class PreviewPlayback : IDisposable
     /// <summary>
     /// 从当前位置开始播。
     ///
+    /// 三种情况走的是同一句 <c>Seek(MusicNow)</c>：从头开始、<see cref="Pause"/> 之后接着放、
+    /// <see cref="Stop"/> 之后再放。它们只在**当前位置在哪**上有区别 —— 所以这里不需要
+    /// 知道上一状态是什么，多一个分支就多一处会和 <see cref="IsPaused"/> 对不上的地方。
+    ///
     /// 已经播到（或停在）曲尾时**从头再来** —— 否则按下去什么也不会发生，
     /// 而「按了没反应」比「从头再放一遍」难懂得多。
     /// </summary>
@@ -126,7 +139,33 @@ public sealed class PreviewPlayback : IDisposable
         _sink.Seek(_walker.MusicNow);   // 声音那头从同一个音乐时间起算
         _sink.Play(_notes);
         IsPlaying = true;
+        IsPaused = false;
         _timer.Start();
+        Frame?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>
+    /// 停在原地。声音松开，播放头**一个 tick 都不动** —— 再 <see cref="Play"/> 就从这儿接着放。
+    ///
+    /// 为什么「从这儿接着放」不用在这儿记位置：积分器的位置本来就一直在 <c>_walker</c> 身上，
+    /// 而 <see cref="Play"/> 走的是 <c>Seek(MusicNow)</c> + 重新落锚 —— 也就是「从当前位置起播」。
+    /// 换句话说这条路的正确性靠的是 <see cref="Play"/> 本来就不重置位置，
+    /// 这里**不要**去写什么「保存的暂停点」，那会多出第二个真相源。
+    ///
+    /// 为什么先 <c>AdvanceTo</c> 再停：积分是每帧喂一次墙上钟的，最后一次喂是上一帧的事
+    /// （最多 33ms 之前）。不补这一下的话，恢复时会从 33ms 前接上 —— 听感上是暂停前那一小段
+    /// 又被放了一遍。改静音名单（<see cref="SetMutedTracks"/>）那儿是同一个道理、同一步。
+    /// </summary>
+    public void Pause()
+    {
+        if (!IsPlaying || _walker is not { } walker) return;
+
+        walker.AdvanceTo(_clock.NowSeconds());
+        _timer.Stop();
+        _sink.Stop();
+        IsPlaying = false;
+        IsPaused = true;
+        // 报一帧：按钮上的字（⏸ → ▶ 继续）是靠这一帧刷的
         Frame?.Invoke(this, EventArgs.Empty);
     }
 
@@ -136,6 +175,10 @@ public sealed class PreviewPlayback : IDisposable
         _timer.Stop();
         _sink.Stop();
         IsPlaying = false;
+        // 停是「这段听完了」，不是「停在这」—— 暂停态一并清掉，
+        // 否则按完 ■ 再按空格会显示「继续」，而那一路的语义已经变了
+        //（■ 保留播放头位置是它一直以来的行为，见 Play 的注释；变的是按钮上的字和视野）
+        IsPaused = false;
     }
 
     /// <summary>跳到某个音乐时间（秒）。播放中跳会让声音从新位置接着排。</summary>
