@@ -146,4 +146,45 @@ public class FormatTests
     {
         Assert.That(Format.Beats(960, 0), Is.EqualTo(0));
     }
+
+    // ==================== 抽掉一段的预览 ====================
+
+    /// <summary>
+    /// 那一行预览是「按下抽掉之前，屏幕上唯一说得清会发生什么的地方」，所以逐字钉住。
+    /// 三样都得在：哪几小节、动几个音、这条轨短几小节。
+    /// </summary>
+    [Test]
+    public void 抽掉一段的预览把三样都说出来()
+    {
+        var preview = new CutPreview.Result(Deleted: 12, Trimmed: 2, Shifted: 30, BarsBefore: 96, BarsAfter: 92);
+
+        Assert.That(
+            Format.CutSummary(5, 8, 3, preview),
+            Is.EqualTo("第 5–8 小节（共 4 小节）：删掉 12 个音、在切口上剪短 2 个、后面 30 个提前 4 小节"
+                       + " · 第 03 轨 96 → 92 小节"));
+    }
+
+    /// <summary>
+    /// 只有删、没有前移是常事（剪的是尾巴上那一段）—— 那时不该出现「后面 0 个提前 4 小节」。
+    /// </summary>
+    [Test]
+    public void 某一档是零就不提它()
+    {
+        var preview = new CutPreview.Result(Deleted: 4, Trimmed: 0, Shifted: 0, BarsBefore: 8, BarsAfter: 7);
+
+        Assert.That(
+            Format.CutSummary(3, 3, 1, preview),
+            Is.EqualTo("第 3–3 小节（共 1 小节）：删掉 4 个音 · 第 01 轨 8 → 7 小节"));
+    }
+
+    /// <summary>一个音都不会动的时候直说 —— 那时「抽掉」是灰的，这一行得说清为什么。</summary>
+    [Test]
+    public void 什么都不改的时候直说()
+    {
+        var preview = new CutPreview.Result(0, 0, 0, BarsBefore: 8, BarsAfter: 8);
+
+        Assert.That(
+            Format.CutSummary(5, 8, 3, preview),
+            Is.EqualTo("第 5–8 小节（共 4 小节）：这一段里没有音，抽了和没抽一样"));
+    }
 }

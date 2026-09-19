@@ -138,4 +138,42 @@ public static class Format
     /// <summary>tick → 拍。刻度换算只用四分音符；拍号只影响小节线的位置，不影响「一拍多长」。</summary>
     public static double Beats(long ticks, int ticksPerQuarterNote) =>
         ticksPerQuarterNote <= 0 ? 0 : ticks / (double)ticksPerQuarterNote;
+
+    /// <summary>「抽掉一段」那两个框还没填好的时候，那一行预览里写的话。</summary>
+    public const string CutNeedNumbers = "两个框都填上小节号（1 起，两头都算在内）";
+
+    /// <summary>
+    /// 「抽掉第 5–8 小节」按下去**会发生什么**。
+    ///
+    /// 这条预览是这一步的主心骨：抽掉一段是这个软件里唯一会**改时间轴**的编辑
+    /// （别的编辑只动音高、时值、名字），所以它是唯一一个「光看界面看不出结果」的动作 ——
+    /// 屏幕上得有一句话说出哪几个音会没、后面有多少音会提前、这条轨会短掉几小节。
+    ///
+    /// <b>不说「整曲长度不变」。</b>那句话是错的：整曲长度取的是所有轨的末尾最大值，
+    /// 剪的那条要是本来就是最长的那条（这个软件最常见的用法就是只留一条轨来吹），
+    /// 整曲跟着一起短。所以这里只说**这条轨**的 96 → 92 ——
+    /// 它由 <see cref="CutPreview"/> 算出来，和真跑一遍命令的结果一致（见那边的对照测试）。
+    /// </summary>
+    /// <param name="firstBar">起点小节（1 起，含）。</param>
+    /// <param name="lastBar">终点小节（1 起，含）。</param>
+    /// <param name="trackNumber">轨号，1 起。</param>
+    /// <param name="preview">抽完会怎样，见 <see cref="CutPreview.Of"/>。</param>
+    public static string CutSummary(int firstBar, int lastBar, int trackNumber, CutPreview.Result preview)
+    {
+        int bars = lastBar - firstBar + 1;
+        string range = $"第 {BarNumber(firstBar)}–{BarNumber(lastBar)} 小节（共 {bars} 小节）";
+
+        // 一个音都不动：命令会原样返回同一份曲子，连撤销都不记一笔 —— 直说，别让人按了等着看变化
+        if (!preview.Changes) return $"{range}：这一段里没有音，抽了和没抽一样";
+
+        // 三段分开写、各自可能不出现：只有「删掉」而没有「前移」是常事（剪的是尾巴上的一段），
+        // 硬凑成一句就会出现「后面 0 个提前 4 小节」这种没人看得懂的话
+        var parts = new List<string>();
+        if (preview.Deleted > 0) parts.Add($"删掉 {preview.Deleted} 个音");
+        if (preview.Trimmed > 0) parts.Add($"在切口上剪短 {preview.Trimmed} 个");
+        if (preview.Shifted > 0) parts.Add($"后面 {preview.Shifted} 个提前 {bars} 小节");
+
+        return $"{range}：{string.Join("、", parts)}"
+             + $" · 第 {TrackNumber(trackNumber)} 轨 {preview.BarsBefore} → {preview.BarsAfter} 小节";
+    }
 }

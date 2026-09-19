@@ -413,6 +413,7 @@ public partial class MainWindow : Window
             lane.CollapseChanged += OnLaneCollapseChanged;
             lane.RenameRequested += OnTrackRenameRequested;
             lane.DeleteRequested += OnTrackDeleteRequested;
+            lane.CutRangeRequested += OnTrackCutRequested;
             _lanes.Add(lane);
             LanesHost.Children.Add(lane);
         }
@@ -946,6 +947,24 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
+    /// 抽掉这条轨上的一段（轨道头上两个小节号填好了、预览那一行也看过了）。
+    ///
+    /// 传进来的已经是 tick：小节 → tick 的换算在控件里做完了，
+    /// 靠的是控制器手里那份速度表算出来的小节宽（命令层没有「小节」这个概念）。
+    ///
+    /// 抽完**明确清空选中**，和删轨同一个理由：音符数组被删了一批、后面那批还被整体挪了位置，
+    /// 存下来的下标当场作废；而按值去找会把「挪到选中位置上的另一个音」捡回来选上 ——
+    /// 那比没有选中更坏（用户以为选中的还是刚才那个）。
+    /// </summary>
+    private void OnTrackCutRequested(object? sender, CutRangeRequest request)
+    {
+        if (_song is not { } song || sender is not TrackLaneView lane) return;
+        ApplySong(
+            _editor.CutRange(song, lane.TrackIndex, request.StartTick, request.EndTick),
+            Array.Empty<SelectedNote>());
+    }
+
+    /// <summary>
     /// 卷帘上的选中变了。
     ///
     /// 选中集是**全局**的（一个控制器管所有轨），所以别的轨的高亮也得跟着变 —— 整窗重画一遍。
@@ -1302,13 +1321,17 @@ public partial class MainWindow : Window
         if (e.Handled) return;
         if (FocusManager?.GetFocusedElement() is TextBox) return;
 
-        // Esc：收掉「删掉这条轨？」那一问。它不是弹窗（只是轨道头上换了一排按钮），
+        // Esc：收掉「删掉这条轨？」和「抽掉一段」那两问。它们都不是弹窗（只是轨道头上换了一排控件），
         // 收不掉的话键盘用户除了再点一次「取消」没有别的退路。
-        // 焦点在改名框里时上面那一句已经让开了 —— 那时 Esc 归输入框自己用（取消改名）。
+        // 焦点在改名框 / 小节号框里时上面那一句已经让开了 —— 那时 Esc 归输入框自己用。
         if (e.Key == Key.Escape)
         {
             bool dismissed = false;
-            foreach (var lane in _lanes) dismissed |= lane.CancelPendingDelete();
+            foreach (var lane in _lanes)
+            {
+                dismissed |= lane.CancelPendingDelete();
+                dismissed |= lane.CancelPendingSplit();
+            }
             e.Handled = dismissed;
             return;
         }

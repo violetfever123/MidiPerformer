@@ -6,7 +6,8 @@
     一条轨 = 轨道头 + 卷帘。
 
     轨道头上是活的：**音色**（128 个 GM 音色的下拉，鼓轨换成一句说明）、**移调**
-    （四个步进按钮夹着当前值）、**改名**、**删除**（两下：先问一句，再删）、**折叠**。
+    （四个步进按钮夹着当前值）、**改名**、**删除**（两下：先问一句，再删）、**折叠**、
+    **抽掉一段**（两下：填两个小节号，看明白那一行预览，再抽）。
     还没做、也还没有归属切片的只剩「只看这条」，所以右边那行灰字如实写着它 ——
     摆一排按了没反应的控件比不摆更坏，人会以为是自己没点对。
 
@@ -190,6 +191,21 @@
       <Setter Property="CornerRadius" Value="{DynamicResource TokenRadiusSmall}" />
       <Setter Property="VerticalAlignment" Value="Center" />
     </Style>
+
+    <!--
+      抽掉一段那两个小节号框。窄、居中、数字等宽 —— 一格里最多四位，宽度按「四位数字」定死，
+      框不会随着输进去几个字左右抽动。
+    -->
+    <Style Selector="TextBox.barno">
+      <Setter Property="FontSize" Value="11.5" />
+      <Setter Property="Width" Value="42" />
+      <Setter Property="Padding" Value="3,1" />
+      <Setter Property="MinHeight" Value="0" />
+      <Setter Property="MaxLength" Value="4" />
+      <Setter Property="TextAlignment" Value="Center" />
+      <Setter Property="CornerRadius" Value="{DynamicResource TokenRadiusSmall}" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
   </UserControl.Styles>
 
   <Panel>
@@ -200,11 +216,15 @@
             BorderThickness="0,0,0,1"
             Padding="10,6">
       <!--
-        列从头到尾：轨号 / 名字 / 音色 / 移调 / 改名 / 删除 / 折叠 / 音数 / 右边那行灰字。
+        列从头到尾：轨号 / 名字 / 音色 / 移调 / 改名 / 删除 / 折叠 / 抽掉一段 / 音数 / 右边那行灰字。
         名字那格叠着两个控件（TextBlock 与 TextBox），同一时刻只亮一个 —— 改名是**就地**换的，
         不另开一格，否则一按改名整行会横向错位一下。
+
+        第二行是「抽掉一段」那一问（见下面的 CutBar），平时整行是塌的（IsVisible=False 的
+        子元素不占高度），所以这一格平时就是一行高。
       -->
-      <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,*">
+      <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,*"
+            RowDefinitions="Auto,Auto">
         <TextBlock x:Name="NumberText"
                    Grid.Column="0"
                    FontSize="11" FontWeight="Bold"
@@ -320,18 +340,98 @@
                 Click="OnFoldClick"
                 ToolTip.Tip="把这条轨收成一行，试听时不再出声（谱面一个字节都不动）" />
 
+        <!--
+          抽掉一段。和删除一样是**两下**：按下去在轨道头的第二行换出一排
+          「抽掉第 __ 小节 到 第 __ 小节」，填好、看明白那一行预览，再按「抽掉」才算数。
+
+          这一下和别的编辑不是一回事，提示里必须说清：它改的是**时间轴**，
+          别的编辑只动音高、时值、名字，抽掉之后这条轨后半截整体提前，
+          和别的轨永久错位 —— 这是功能的定义，但用户不一定会往这儿想。
+        -->
+        <Button x:Name="CutButton"
+                Grid.Column="7"
+                Classes="head-action"
+                Margin="6,0,0,0"
+                Content="抽掉一段…"
+                Click="OnCutClick"
+                ToolTip.Tip="把这条轨上某几小节连时间一起抽走、后面的音自动接上来（不是只把音符擦掉）。只动这条轨，别的轨原地不动 —— Ctrl+Z 可以撤销" />
+
         <TextBlock x:Name="CountText"
-                   Grid.Column="7"
+                   Grid.Column="8"
                    FontSize="11.5"
                    Margin="12,0,0,0"
                    Foreground="{DynamicResource TokenInkMuted}"
                    VerticalAlignment="Center" />
         <TextBlock x:Name="LaterText"
-                   Grid.Column="8"
+                   Grid.Column="9"
                    FontSize="11"
                    Foreground="{DynamicResource TokenInkFaint}"
                    HorizontalAlignment="Right" VerticalAlignment="Center"
                    TextTrimming="CharacterEllipsis" />
+
+        <!--
+          抽掉一段那一问。摆在轨道头的**第二行**里 —— 不弹对话框，也不在卷帘上另开一条：
+          它问的是这条轨的事，就该长在这条轨的头上；而且轨道头的底色（含聚焦那一笔）
+          连着它一起变，「现在填的是哪条轨」一眼看得出来 —— 填错轨是这一步最容易犯的错。
+
+          右边那一行预览是这一步的重点（见 TrackLaneView.UpdateCutSummary）：
+          按下「抽掉」之前，屏幕上得有一句话说出哪几个音会没、后面多少音会提前、这条轨短几小节。
+        -->
+        <Grid x:Name="CutBar"
+              Grid.Row="1" Grid.ColumnSpan="10"
+              IsVisible="False"
+              Margin="0,6,0,0"
+              ColumnDefinitions="Auto,Auto,*">
+          <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="5" VerticalAlignment="Center">
+            <TextBlock Text="抽掉第"
+                       FontSize="11.5"
+                       Foreground="{DynamicResource TokenInk}"
+                       VerticalAlignment="Center" />
+            <TextBox x:Name="CutFromBox"
+                     Classes="barno"
+                     TextChanged="OnCutBarChanged"
+                     KeyDown="OnCutBoxKeyDown"
+                     LostFocus="OnCutBoxLostFocus"
+                     ToolTip.Tip="从第几小节（这一小节也算在内）。超出曲子范围会夹到首尾，填反了会自动换过来" />
+            <TextBlock Text="小节 到 第"
+                       FontSize="11.5"
+                       Foreground="{DynamicResource TokenInk}"
+                       VerticalAlignment="Center" />
+            <TextBox x:Name="CutToBox"
+                     Classes="barno"
+                     TextChanged="OnCutBarChanged"
+                     KeyDown="OnCutBoxKeyDown"
+                     LostFocus="OnCutBoxLostFocus"
+                     ToolTip.Tip="到第几小节（这一小节也算在内）" />
+            <TextBlock Text="小节"
+                       FontSize="11.5"
+                       Foreground="{DynamicResource TokenInk}"
+                       VerticalAlignment="Center" />
+          </StackPanel>
+
+          <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6"
+                      Margin="12,0,0,0" VerticalAlignment="Center">
+            <Button x:Name="CutYesButton"
+                    Classes="head-action danger"
+                    Content="抽掉"
+                    IsEnabled="False"
+                    Click="OnCutConfirmClick"
+                    ToolTip.Tip="真的抽掉（Ctrl+Z 可以撤销）" />
+            <Button x:Name="CutCancelButton"
+                    Classes="head-action"
+                    Content="取消"
+                    Click="OnCutCancelClick"
+                    ToolTip.Tip="不抽了（Esc 同效）" />
+          </StackPanel>
+
+          <TextBlock x:Name="CutSummary"
+                     Grid.Column="2"
+                     Margin="14,0,0,0"
+                     FontSize="11.5"
+                     Foreground="{DynamicResource TokenInkMuted}"
+                     VerticalAlignment="Center"
+                     TextTrimming="CharacterEllipsis" />
+        </Grid>
       </Grid>
     </Border>
 

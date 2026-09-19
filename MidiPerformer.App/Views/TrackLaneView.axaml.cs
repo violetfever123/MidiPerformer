@@ -1,3 +1,4 @@
+using System.Globalization;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
@@ -18,14 +19,16 @@ namespace MidiPerformer.App.Views;
 /// <see cref="PianoRollLane"/>。这就是「界面层薄」的意思：这里只有布置，没有数学。
 ///
 /// <b>它也不改谱面。</b>轨道头上那个移调步进器只把「当前值 ± n」算出来喊一声
-/// （<see cref="TransposeRequested"/>），改名、删除、卷帘上拖出来的那几种编辑同样只喊一声
-/// （<see cref="RenameRequested"/> / <see cref="DeleteRequested"/> /
+/// （<see cref="TransposeRequested"/>），改名、删除、卷帘上拖出来的那几种编辑、以及
+/// 「抽掉一段」同样只喊一声
+/// （<see cref="RenameRequested"/> / <see cref="DeleteRequested"/> / <see cref="CutRangeRequested"/> /
 /// <see cref="NotesMoved"/> / <see cref="NoteResized"/> / <see cref="NotesDeleted"/>），
 /// 命令由窗口去调 —— 编辑脊柱只有一条，撤销的记账在装饰器里，谁调命令都自动有撤销，
 /// 但调命令的地方只该有一处。
 ///
-/// 唯一「就地办完」的是**问用户**这件事：改名问在输入框里、删轨问在那一行小字上，
-/// 两句问话都不出这个控件（也不弹对话框）—— 问完的答案才喊出去。
+/// 唯一「就地办完」的是**问用户**这件事：改名问在输入框里、删轨问在那一行小字上、
+/// 抽掉一段问在轨道头第二行那两个小节号框上，
+/// 三句问话都不出这个控件（也不弹对话框）—— 问完的答案才喊出去。
 /// </summary>
 public partial class TrackLaneView : UserControl
 {
@@ -56,6 +59,9 @@ public partial class TrackLaneView : UserControl
 
     /// <summary>「删掉这条轨？」那一问正摆着。</summary>
     private bool _confirmingDelete;
+
+    /// <summary>「抽掉第 __ 到 第 __ 小节」那一问正摆着。</summary>
+    private bool _splitting;
 
     /// <summary>
     /// 最近一次 <see cref="Refresh"/> 时窗口给的播放头状态。
@@ -194,6 +200,9 @@ public partial class TrackLaneView : UserControl
         // 现在轨是复用的，得自己收 —— 不然改名框会带着一个已经作废的下标提交出去
         CancelRename();
         SetConfirmingDelete(false);
+        // 抽掉那一问也一样，而且更要紧：两个框里的小节号在旧谱子上算出来的 tick
+        // 在新谱子上多半还「读得通」（越界会被夹），于是会静悄悄地抽错一段
+        SetSplitting(false);
 
         // 拖动中的预览一并作废：幽灵和框选说的都是旧下标，在新曲子上一个都对不上
         Roll.CancelDrag();
@@ -240,6 +249,16 @@ public partial class TrackLaneView : UserControl
     /// （<c>sender is not TrackLaneView lane</c>），两边保持一致。
     /// </summary>
     public event EventHandler? DeleteRequested;
+
+    /// <summary>
+    /// 用户**已经确认**要抽掉这条轨上的一段（两个小节号填好了，预览那一行也看过了）。
+    ///
+    /// 参数是**tick**，不是小节号：命令层没有「小节」这个概念（小节线是显示层画的东西），
+    /// 从两个框里读出来的小节号在 <see cref="TryReadCutSpan"/> 里当场换算成 tick ——
+    /// 换算要用的两个数（一小节多少 tick、整曲共几小节）只有控制器有。
+    /// 命令由窗口去调，和 <see cref="DeleteRequested"/> 一样：谁的轨看 <c>sender</c>。
+    /// </summary>
+    public event EventHandler<CutRangeRequest>? CutRangeRequested;
 
     /// <summary>卷帘上拖出来的一组音要挪（增量）。转发卷帘的原话，形状一模一样。</summary>
     public event EventHandler<NoteMoveRequest>? NotesMoved;
@@ -472,6 +491,7 @@ public partial class TrackLaneView : UserControl
 
         // 删除那一问先收掉：轨道头上同时开着两件事的话，「取消」该取消哪一个说不清
         SetConfirmingDelete(false);
+        SetSplitting(false);
 
         _renaming = true;
         NameBox.Text = NameText.Text;
@@ -586,6 +606,11 @@ public partial class TrackLaneView : UserControl
     {
         if (_confirmingDelete == confirming) return;
 
+        // 反过来的那一半：摆上删轨这一问时把抽掉那一问收掉（见 BeginRename 里同一句）。
+        // 只在「摆上」那一头收，收摊那一头不用管 —— 两个方法互相收也收不出环来：
+        // SetSplitting(true) 里调的是 SetConfirmingDelete(false)，那一支不再回头
+        if (confirming) SetSplitting(false);
+
         _confirmingDelete = confirming;
         DeleteButton.IsVisible = !confirming;
         DeleteConfirm.IsVisible = confirming;
@@ -604,4 +629,223 @@ public partial class TrackLaneView : UserControl
         SetConfirmingDelete(false);
         return true;
     }
+
+    // ==================== 抽掉一段 ====================
+
+    /// <summary>
+    /// 两个框里读出来的那一段：
+    /// <see cref="FromBar"/> / <see cref="ToBar"/> 是**夹过界、换过序之后**的小节号（给预览那一行看），
+    /// <see cref="StartTick"/> / <see cref="EndTick"/> 是同一段的 tick 形状（给命令用）。
+    ///
+    /// 两样必须一起带出来：预览里写的「第 5–8 小节」和真发出去的 tick
+    /// 得是**同一次**换算的结果，各算一遍迟早会出现「预览说 5–8、实际剪了 5–9」。
+    /// </summary>
+    private readonly record struct CutSpan(int FromBar, int ToBar, long StartTick, long EndTick);
+
+    private void OnCutClick(object? sender, RoutedEventArgs e) => SetSplitting(true);
+
+    private void OnCutCancelClick(object? sender, RoutedEventArgs e) => SetSplitting(false);
+
+    /// <summary>真的抽。摆着的那一问先收掉，再喊命令 —— 和删轨那一下同一个次序。</summary>
+    private void OnCutConfirmClick(object? sender, RoutedEventArgs e) => ConfirmCut();
+
+    /// <summary>
+    /// 两个框里的键盘：回车 = 抽，Esc = 不算。
+    ///
+    /// 别的键一律放行（包括左右键，在框里归光标用）—— 和改名框同一条规矩。
+    /// 窗口那一层的方向键 / 撤销那一段本来就会在焦点是 <see cref="TextBox"/> 时整个让开，
+    /// 所以在这儿打字不会被谁抢走。
+    /// </summary>
+    private void OnCutBoxKeyDown(object? sender, KeyEventArgs e)
+    {
+        switch (e.Key)
+        {
+            case Key.Enter:
+                e.Handled = true;
+                ConfirmCut();
+                break;
+
+            case Key.Escape:
+                e.Handled = true;
+                SetSplitting(false);
+                break;
+        }
+    }
+
+    /// <summary>改了框里的数就重算右边那一行预览。</summary>
+    private void OnCutBarChanged(object? sender, TextChangedEventArgs e) => UpdateCutSummary();
+
+    /// <summary>
+    /// 焦点离开哪个框，就把那个框里写的**换成效的那个数**（夹过界、填反了换过来的那一段）。
+    ///
+    /// 预览那一行说的本来就是夹过之后的结果，框里却还留着 <c>0</c> 或者 <c>999</c>，
+    /// 看着像「它没理我」—— 用户会以为这一刀剪的是第 999 小节。
+    /// 只在失焦这一下改写：边打字边改的话，「10」打到一半会被夹成「96」，手都下不去。
+    /// </summary>
+    private void OnCutBoxLostFocus(object? sender, RoutedEventArgs e)
+    {
+        if (!TryReadCutSpan(out var span)) return;
+
+        string from = Format.BarNumber(span.FromBar);
+        string to = Format.BarNumber(span.ToBar);
+        if (CutFromBox.Text != from) CutFromBox.Text = from;
+        if (CutToBox.Text != to) CutToBox.Text = to;
+        UpdateCutSummary();
+    }
+
+    /// <summary>
+    /// 摆上 / 收掉「抽掉一段」那一问。
+    ///
+    /// 和删轨那一问一样是**两下**的动作，理由也一样（不可逆的那一下要慢一点，
+    /// 而弹窗的代价比多按一下大）。不同的地方是这一问**有内容要填**，
+    /// 所以它换出来的是一整行，不是一排按钮。
+    ///
+    /// 状态存在字段里、不放在 <see cref="Refresh"/> 里重置：窗口每帧都调一次 Refresh，
+    /// 放那儿的话这一问会立刻消失。
+    /// </summary>
+    private void SetSplitting(bool splitting)
+    {
+        if (_splitting == splitting) return;
+
+        // 轨道头上同时开着两件事的话，「取消」该取消哪一个说不清（和 BeginRename 里同一句）
+        if (splitting)
+        {
+            CancelRename();
+            SetConfirmingDelete(false);
+        }
+
+        _splitting = splitting;
+        CutButton.IsVisible = !splitting;
+        CutBar.IsVisible = splitting;
+
+        if (splitting)
+        {
+            // 默认从**播放头所在的那一小节**起，两头都是它：用户多半是先听着不对、停在那儿，
+            // 再回来剪的。填一个小节号比填两个窄，而填反了也会自动换过来
+            int bar = Math.Clamp(_controller.BarOfTick(_lastPlayheadTick), 1, _controller.BarCount);
+            CutFromBox.Text = Format.BarNumber(bar);
+            CutToBox.Text = Format.BarNumber(bar);
+            UpdateCutSummary();
+
+            CutFromBox.Focus();
+            CutFromBox.SelectAll();
+        }
+        else
+        {
+            // 藏起来的输入框要是还攥着焦点，窗口那一套快捷键会一直让着它（见 EndRename）
+            TopLevel.GetTopLevel(this)?.FocusManager?.ClearFocus();
+        }
+    }
+
+    /// <summary>
+    /// 收掉「抽掉一段」那一问。窗口的 Esc 用它，和 <see cref="CancelPendingDelete"/> 成对 ——
+    /// 返回值同样是「刚才是不是真摆着这一问」，好让窗口决定这次 Esc 算不算用掉了。
+    ///
+    /// 焦点在那个小节号框里时窗口那一层接不到 Esc（它先让给输入框），走的是框自己的
+    /// <see cref="OnCutBoxKeyDown"/>；两条路都通到这儿。
+    /// </summary>
+    public bool CancelPendingSplit()
+    {
+        if (!_splitting) return false;
+
+        SetSplitting(false);
+        return true;
+    }
+
+    /// <summary>回车和「抽掉」那颗按钮共用的入口。</summary>
+    private void ConfirmCut()
+    {
+        // 灰着的时候点不到、回车也走不到这儿；真走到了（比如读数的中间态）就当没发生 ——
+        // 这一段里一个音都不用动，命令会原样还回来一份同样的曲子，白记一笔撤销
+        if (!CutYesButton.IsEnabled) return;
+        if (!TryReadCutSpan(out var span)) return;
+
+        SetSplitting(false);
+        CutRangeRequested?.Invoke(this, new CutRangeRequest(span.StartTick, span.EndTick));
+    }
+
+    /// <summary>
+    /// 两个框 → 一段 tick。**预览那一行说的就是这里读出来的结果**。
+    ///
+    /// 三件事都在这儿办（用户填进来的数是「输入」，不是「意图」，得先照顾成意图）：
+    /// <list type="bullet">
+    /// <item>空着、或者不是数字 —— 读不出来，返回 false，预览改成一句「两个框都填上小节号」。</item>
+    /// <item>越界（<c>0</c>、比总小节还大）—— 夹到 <c>[1, BarCount]</c>。用户说「到第 999 小节」
+    /// 意思就是「到末尾」，为这个报错太较真。</item>
+    /// <item>起点大于终点（填反了）—— 换过来。命令收到反的会**抛**（见 <c>CutRange</c> 的参数说明），
+    /// 而填反是常事，不是错误：界面上就该换好再传，抛出去只是把皮球踢给了用户。</item>
+    /// </list>
+    ///
+    /// 夹过、换过之后的两个小节号**一起**带出去，预览那一行和发出去的 tick 于是永远对得上。
+    /// </summary>
+    private bool TryReadCutSpan(out CutSpan span)
+    {
+        span = default;
+        if (!TryReadBar(CutFromBox, out int from) || !TryReadBar(CutToBox, out int to)) return false;
+
+        int barCount = _controller.BarCount;
+        from = Math.Clamp(from, 1, barCount);
+        to = Math.Clamp(to, 1, barCount);
+        if (from > to) (from, to) = (to, from);
+
+        // 含头含尾：从第 5 小节到第 8 小节 = [第 5 小节的起点, 第 9 小节的起点)
+        long startTick = _controller.TickOfBarClamped(from - 1);
+        long endTick = _controller.TickOfBarClamped(to - 1) + _controller.TicksPerBar;
+
+        span = new CutSpan(from, to, startTick, endTick);
+        return true;
+    }
+
+    /// <summary>
+    /// 一个框读成一个小节号。读不出来（空、只有空白、不是整数）返回 false。
+    ///
+    /// 用 <c>InvariantCulture</c>：这一格装的是个纯数字，在各种区域设置下都该按同一套读 ——
+    /// 换个语言就把「1,5」读成 15 或者读不出来，是最难复现的那类毛病。
+    /// </summary>
+    private static bool TryReadBar(TextBox box, out int bar) =>
+        int.TryParse(box.Text?.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out bar);
+
+    /// <summary>
+    /// 重算右边那一行预览：**按下「抽掉」之前，先说清楚会发生什么**。
+    ///
+    /// 这是这一步的主心骨。抽掉一段是这个软件里唯一会改**时间轴**的编辑，
+    /// 别的编辑都在原地（音高、时值、名字），结果一眼看得出来；这一刀下去，
+    /// 后半截整条轨会往前挪，光看谱面根本猜不到会成什么样。
+    ///
+    /// 数字由 <see cref="CutPreview"/> 算 —— 那份预测和真跑一遍 <c>CutRange</c> 的结果
+    /// 由 <c>CutPreviewTests</c> 里的对照测试钉在一起，所以这一行不是「大概齐」。
+    ///
+    /// 一个音都不会动的时候**把「抽掉」灰掉**：那时命令原样返回同一份曲子，
+    /// 连撤销都不记一笔，按下去什么都不发生、还看不出为什么，比灰着更坏。
+    /// </summary>
+    private void UpdateCutSummary()
+    {
+        if (!TryReadCutSpan(out var span))
+        {
+            CutSummary.Text = Format.CutNeedNumbers;
+            CutYesButton.IsEnabled = false;
+            return;
+        }
+
+        var track = _controller.Song.Tracks[_trackIndex];
+        var preview = CutPreview.Of(
+            track.Notes, span.StartTick, span.EndTick, _controller.TicksPerBar);
+
+        CutSummary.Text = Format.CutSummary(span.FromBar, span.ToBar, _trackIndex + 1, preview);
+        CutYesButton.IsEnabled = preview.Changes;
+    }
 }
+
+/// <summary>
+/// 用户确认要从这条轨上抽掉这一段：<c>[StartTick, EndTick)</c>。
+///
+/// <b>装的是 tick，不是小节号。</b>「从第 5 小节到第 8 小节」那种对齐在控件里就换算完了
+/// （见 <c>TrackLaneView.TryReadCutSpan</c>）—— 和 <c>ISongEditor.CutRange</c> 同一条规矩：
+/// 命令层连「小节」这个概念都没有，一小节多少 tick 是显示层拿速度表算的。
+///
+/// 放在命名空间这一层、不嵌在 <see cref="TrackLaneView"/> 里，是跟着
+/// <see cref="NoteMoveRequest"/> 那几条走：窗口要按名字接住这个类型，
+/// 嵌进去就得写成 <c>TrackLaneView.CutRangeRequest</c>，同一条契约在两个类之间来回指。
+/// </summary>
+public sealed record CutRangeRequest(long StartTick, long EndTick);
+
