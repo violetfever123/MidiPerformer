@@ -168,7 +168,9 @@ public static class PianoRollGeometry
     // ==================== 音符块 ====================
 
     /// <summary>卷帘上的一个音符块。**画出来的那一块**就是它 —— 命中判定直接拿它比，所见即所点。</summary>
-    /// <param name="Index">在所属轨的音符数组里的下标。命中之后要用它回到模型。</param>
+    /// <param name="Id">这个音的身份（<see cref="Note.Id"/>）。画的时候用它回到模型、
+    /// 也用它认「这个块是不是选中的」—— 一块画在屏幕上的音块在两次重画之间可能是同一个音挪过来的，
+    /// 下标认不出来它（见 <see cref="NoteRef"/>）。</param>
     /// <param name="StartTick">起始 tick。</param>
     /// <param name="LengthTicks">时值（tick）。</param>
     /// <param name="Pitch">音高（**移调之后**的，也就是听到的那个）。</param>
@@ -178,7 +180,7 @@ public static class PianoRollGeometry
     /// <param name="Width">宽度（像素）。</param>
     /// <param name="Height">高度（像素）。</param>
     public readonly record struct NoteBox(
-        int Index,
+        NoteId Id,
         long StartTick,
         long LengthTicks,
         int Pitch,
@@ -200,14 +202,14 @@ public static class PianoRollGeometry
     /// 不留这点缝，相邻的两个音看着就是一整块，分不出是几个音。
     /// </summary>
     public static NoteBox BoxOf(
-        in Viewport viewport, int index, long startTick, long lengthTicks, int pitch, bool inRange)
+        in Viewport viewport, NoteId id, long startTick, long lengthTicks, int pitch, bool inRange)
     {
         double x = XAtTick(viewport, startTick);
         double right = XAtTick(viewport, startTick + lengthTicks);
         double width = Math.Max(MinNoteWidth, right - x - NoteGap);
 
         return new NoteBox(
-            index, startTick, lengthTicks, pitch, inRange,
+            id, startTick, lengthTicks, pitch, inRange,
             x,
             YAtPitch(viewport, pitch) + NotePad,
             width,

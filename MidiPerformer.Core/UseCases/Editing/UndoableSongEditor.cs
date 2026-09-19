@@ -69,9 +69,13 @@ public sealed class UndoableSongEditor : ISongEditor
         => Record(song, _inner.MoveNotes(song, notes, deltaTicks, deltaPitch));
 
     /// <summary>
-    /// 改时值同样是一格。注意它**可能让音符越位**（<see cref="Track.Notes"/> 会重排，
-    /// 下标跟着变）—— 那是撤销链上的一步，撤回去的时候整份旧 <see cref="Song"/> 一起回去，
-    /// 下标自然也跟着回去了，这里没有额外要记账的东西。
+    /// 改时值同样是一格。注意它**可能让音符越位**（<see cref="Track.Notes"/> 会重排）——
+    /// 那是撤销链上的一步，撤回去的时候整份旧 <see cref="Song"/> 一起回去，位置也就跟着回去了，
+    /// 这里没有额外要记账的东西。
+    ///
+    /// <b>撤销之后界面手里那些坐标照样有效</b>，不用重算：它们是按身份认音的（见 <see cref="NoteRef"/>），
+    /// 而撤销把音放回原位、身份一个都没换 —— 撤销链上装的每一份 <see cref="Song"/> 都是
+    /// 同一批身份的不同版本（改音符那几条命令只 <c>with</c> 内容字段，剪断发的新号只增不改）。
     /// </summary>
     public Song SetNoteSpan(Song song, NoteRef note, long startTick, long lengthTicks)
         => Record(song, _inner.SetNoteSpan(song, note, startTick, lengthTicks));

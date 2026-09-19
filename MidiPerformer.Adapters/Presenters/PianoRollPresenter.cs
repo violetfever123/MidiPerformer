@@ -24,18 +24,21 @@ public static class PianoRollPresenter
     /// 所以拖动期间整个卷帘都不画它，松手后再出现。
     /// </param>
     /// <param name="SelectedNotes">
-    /// 本轨上选中的音符下标，**按加进选中集的先后**（去重，但不是升序）。
+    /// 本轨上选中的音符**身份**（<see cref="NoteId"/>），**按加进选中集的先后**（去重，但不是升序）。
     /// 顺序是**有意义**的：<see cref="LaneScene.SelectedNote"/> 取的是这一串的尾巴，
     /// 也就是「最后点的那一个」= 主选中 —— 排成升序就把这条语义毁了（见那边的说明）。
     /// **跨轨的选中由调用方先筛过一道** ——
     /// 一条轨的卷帘只画自己这条上的音，别条轨的选中在这一屏没有落笔的地方。
+    ///
+    /// 装身份而不是下标：这一串要活到下一次重画，而中间隔着一次编辑的时候，
+    /// 下标已经指到别的音上去了（见 <see cref="NoteRef"/>）。
     /// </param>
     /// <param name="Drag">拖动中「将要落到哪」。没在拖（或者这一帧还没有位移）就是 null。</param>
     /// <param name="Marquee">框选中的那根带子。没在框选就是 null。</param>
     public readonly record struct RollOverlay(
         long PlayheadTick,
         bool PlayheadVisible,
-        IReadOnlyList<int> SelectedNotes,
+        IReadOnlyList<NoteId> SelectedNotes,
         DragPreview? Drag = null,
         MarqueeRange? Marquee = null)
     {
@@ -47,10 +50,12 @@ public static class PianoRollPresenter
         /// 选中集本身仍然只有一份 —— <see cref="LaneScene.SelectedNote"/>
         /// 只是这一串的尾巴（= 主选中），不是另一个真相源。
         /// </summary>
-        /// <param name="selectedNote">选中音符的下标，-1 = 没选中。</param>
-        public RollOverlay(long playheadTick, bool playheadVisible, int selectedNote)
+        /// <param name="selectedNote">选中音符的身份，<see cref="NoteId.None"/> = 没选中。</param>
+        public RollOverlay(long playheadTick, bool playheadVisible, NoteId selectedNote)
             : this(playheadTick, playheadVisible,
-                selectedNote < 0 ? Array.Empty<int>() : new[] { selectedNote })
+                selectedNote == NoteId.None
+                    ? Array.Empty<NoteId>()
+                    : new[] { selectedNote })
         {
         }
     }
@@ -65,15 +70,17 @@ public static class PianoRollPresenter
     /// 拖身体是 <see cref="StartDeltaTicks"/> 变；拖尾巴是 <see cref="LengthDeltaTicks"/> 变；
     /// 拖头是两个一起变，而且**互为相反数**（尾巴钉住 = <c>新起点 + 新时值 == 老尾巴</c>）。
     /// </summary>
-    /// <param name="NoteIndexes">
-    /// 被拖的音符在**本轨**音符数组里的下标 —— 这一条轨上要画幽灵的就是这几个。
+    /// <param name="NoteIds">
+    /// 被拖的音符的**身份**（<see cref="NoteId"/>）—— 这一条轨上要画幽灵的就是这几个。
     /// 是调用方手上的活列表，只在 <see cref="BuildLane"/> 那一次读，场景不留引用。
+    /// 装身份不是为了省事：拖动中间隔着一次重画，而重画的时候正好有一次编辑落了地的话，
+    /// 下标就已经指到别的音上去了。
     /// </param>
     /// <param name="StartDeltaTicks">起点位移（tick，已吸附到网格）。</param>
     /// <param name="LengthDeltaTicks">时值增量（tick，已吸附到网格）。</param>
     /// <param name="DeltaPitch">音高增量（半音）。</param>
     public readonly record struct DragPreview(
-        IReadOnlyList<int> NoteIndexes, long StartDeltaTicks, long LengthDeltaTicks, int DeltaPitch);
+        IReadOnlyList<NoteId> NoteIds, long StartDeltaTicks, long LengthDeltaTicks, int DeltaPitch);
 
     /// <summary>
     /// 框选那根带子盖住的**时间**区间（tick）。
@@ -112,17 +119,17 @@ public static class PianoRollPresenter
         /// <summary>播放头的横坐标。不可见时是 <see cref="double.NaN"/>。</summary>
         public double PlayheadX { get; init; } = double.NaN;
 
-        /// <summary>本轨上选中的音符下标。卷帘给每一个都描一圈 accent 边。</summary>
-        public IReadOnlyList<int> SelectedNotes { get; init; } = Array.Empty<int>();
+        /// <summary>本轨上选中的音符身份。卷帘给每一个都描一圈 accent 边。</summary>
+        public IReadOnlyList<NoteId> SelectedNotes { get; init; } = Array.Empty<NoteId>();
 
         /// <summary>
-        /// 主选中 —— <see cref="SelectedNotes"/> 的最后一个，-1 = 本轨没有选中的音。
+        /// 主选中 —— <see cref="SelectedNotes"/> 的最后一个，<see cref="NoteId.None"/> = 本轨没有选中的音。
         ///
         /// 和 <c>PianoRollController.Selection</c> 是同一条规矩（主选中是选中集的尾巴），
         /// 所以跨轨选中时它指的是**本轨上最后选中的那个**，不一定是全局主选中。
         /// 卷帘的选边框不读它（整组一视同仁），它是给「只想知道选中了谁」的调用方留的。
         /// </summary>
-        public int SelectedNote { get; init; } = -1;
+        public NoteId SelectedNote { get; init; } = NoteId.None;
 
         /// <summary>
         /// 被拖的那几个音**松手之后会落在哪**（虚线幽灵）。不在拖动中就是空的。
@@ -188,15 +195,15 @@ public static class PianoRollPresenter
             // 同名会撞上 CS0136 —— 一个叫「表」一个叫「这个音在不在表里」，本来就该分开叫
             bool playable = InRangeAt(inRange, i);
             notes.Add(PianoRollGeometry.BoxOf(
-                viewport, i, note.StartTick, note.LengthTicks, pitch, playable));
+                viewport, note.Id, note.StartTick, note.LengthTicks, pitch, playable));
 
             // 幽灵走的是**和真音符同一段算法**（BoxOf），不是「把算好的块平移几像素」。
             // 平移看着更省事，但宽度那个 MinNoteWidth 下限会让极短的音在拉长时对不上，
             // 预览和松手之后的落点就差那么一两个像素 —— 预览的价值全在「一模一样」上。
-            if (overlay.Drag is { } drag && Contains(drag.NoteIndexes, i))
+            if (overlay.Drag is { } drag && Contains(drag.NoteIds, note.Id))
             {
                 ghosts.Add(PianoRollGeometry.BoxOf(
-                    viewport, i,
+                    viewport, note.Id,
                     note.StartTick + drag.StartDeltaTicks,
                     note.LengthTicks + drag.LengthDeltaTicks,
                     pitch + drag.DeltaPitch,
@@ -219,7 +226,7 @@ public static class PianoRollPresenter
             BarLabels = labels,
             PlayheadX = playheadX,
             SelectedNotes = CopyOf(overlay.SelectedNotes),
-            SelectedNote = overlay.SelectedNotes.Count > 0 ? overlay.SelectedNotes[^1] : -1,
+            SelectedNote = overlay.SelectedNotes.Count > 0 ? overlay.SelectedNotes[^1] : NoteId.None,
             GhostNotes = ghosts,
             Marquee = MarqueeOf(viewport, overlay.Marquee)
         };
@@ -231,16 +238,16 @@ public static class PianoRollPresenter
     /// 不直接拿传进来的那个列表：它是调用方的，下一帧就会被清掉重填
     /// （卷帘那边复用同一个缓冲），而场景要活到下一次 <c>SetScene</c> ——
     /// 留着引用的话，这一帧刚画到一半，选中集就被下一帧改掉了。
-    /// 一屏也就几个下标，拷一份不值一提。
+    /// 一屏也就几个身份，拷一份不值一提。
     /// </summary>
-    private static IReadOnlyList<int> CopyOf(IReadOnlyList<int> indexes)
-        => indexes.Count == 0 ? Array.Empty<int>() : new List<int>(indexes);
+    private static IReadOnlyList<NoteId> CopyOf(IReadOnlyList<NoteId> ids)
+        => ids.Count == 0 ? Array.Empty<NoteId>() : new List<NoteId>(ids);
 
-    /// <summary>这一串里有没有 <paramref name="index"/>。线性扫一遍 —— 一次拖动也就几个到几十个音。</summary>
-    private static bool Contains(IReadOnlyList<int> indexes, int index)
+    /// <summary>这一串里有没有 <paramref name="id"/>。线性扫一遍 —— 一次拖动也就几个到几十个音。</summary>
+    private static bool Contains(IReadOnlyList<NoteId> ids, NoteId id)
     {
-        for (int i = 0; i < indexes.Count; i++)
-            if (indexes[i] == index) return true;
+        for (int i = 0; i < ids.Count; i++)
+            if (ids[i] == id) return true;
         return false;
     }
 

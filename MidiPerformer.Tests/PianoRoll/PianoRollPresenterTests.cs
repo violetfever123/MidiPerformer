@@ -17,7 +17,30 @@ public class PianoRollPresenterTests
     private const long Bar = 1920;
     private const int TicksPerQuarter = 480;
 
-    private static Track Lane(params Note[] notes) => new(0, 0, "主旋律", 24, notes);
+    private static Track Lane(params Note[] notes) => new(0, 0, "主旋律", 24, Numbered(notes));
+
+    /// <summary>
+    /// 给没写身份的音按数组顺序发 1..N 号（<c>NoteIdentity.AssignInOrder</c> 在测试里的替身）。
+    ///
+    /// 场景里装的是**身份**（<see cref="NoteId"/>），一个没号的音谁都认不出来 ——
+    /// 不编号的话下面这些用例量的就是「认不出来」那套行为，而不是本来要测的那件事。
+    /// </summary>
+    private static Note[] Numbered(Note[] notes)
+    {
+        var numbered = new Note[notes.Length];
+        for (int i = 0; i < notes.Length; i++)
+            numbered[i] = notes[i].Id == NoteId.None ? notes[i] with { Id = new NoteId(i + 1) } : notes[i];
+
+        return numbered;
+    }
+
+    /// <summary>
+    /// 第 <paramref name="index"/> 个音（数组序，0 起）的**号**。
+    ///
+    /// 用例里说的是「第几个音」，模型里存的是号，两边靠这条近路对上 ——
+    /// 近路只活在测试里：真实代码手里的号一律来自模型（<c>Note.Id</c>）。
+    /// </summary>
+    private static NoteId IdOf(int index) => new(index + 1);
 
     private static PianoRollGeometry.Viewport View(
         double width = 800, long viewStart = 0, int low = 48, int high = 72)
@@ -30,7 +53,7 @@ public class PianoRollPresenterTests
         bool[]? inRange = null,
         long playhead = 0,
         bool playheadVisible = true,
-        int selected = -1)
+        NoteId selected = default)
         => PianoRollPresenter.BuildLane(
             track, view, barCount, TicksPerQuarter,
             inRange ?? Array.Empty<bool>(),
@@ -52,8 +75,8 @@ public class PianoRollPresenterTests
         Assert.Multiple(() =>
         {
             Assert.That(scene.Notes.Select(n => n.Pitch), Is.EqualTo(new[] { 60, 62 }));
-            Assert.That(scene.Notes.Select(n => n.Index), Is.EqualTo(new[] { 0, 1 }),
-                "下标要指回原来的音符数组，命中之后才回得到模型");
+            Assert.That(scene.Notes.Select(n => n.Id), Is.EqualTo(new[] { IdOf(0), IdOf(1) }),
+                "块上带的是**身份**，界面凭它认出选中集里的音、也凭它回到模型");
         });
     }
 
@@ -150,9 +173,9 @@ public class PianoRollPresenterTests
     [Test]
     public void 选中的音标出来()
     {
-        var scene = Build(Lane(new Note(60, 0, 240, 100), new Note(62, 480, 240, 100)), View(), selected: 1);
+        var scene = Build(Lane(new Note(60, 0, 240, 100), new Note(62, 480, 240, 100)), View(), selected: IdOf(1));
 
-        Assert.That(scene.SelectedNote, Is.EqualTo(1));
+        Assert.That(scene.SelectedNote, Is.EqualTo(IdOf(1)));
     }
 
     // ==================== 网格 ====================
@@ -280,17 +303,17 @@ public class PianoRollPresenterTests
     private static PianoRollPresenter.LaneScene BuildDragging(
         Track track,
         PianoRollGeometry.Viewport view,
-        int[]? dragging = null,
+        IReadOnlyList<NoteId>? dragging = null,
         long startDelta = 0,
         long lengthDelta = 0,
         int pitchDelta = 0,
         PianoRollPresenter.MarqueeRange? marquee = null,
-        IReadOnlyList<int>? selected = null)
+        IReadOnlyList<NoteId>? selected = null)
         => PianoRollPresenter.BuildLane(
             track, view, 8, TicksPerQuarter,
             Array.Empty<bool>(),
             new PianoRollPresenter.RollOverlay(
-                0, false, selected ?? Array.Empty<int>(),
+                0, false, selected ?? Array.Empty<NoteId>(),
                 dragging is null
                     ? null
                     : new PianoRollPresenter.DragPreview(dragging, startDelta, lengthDelta, pitchDelta),
@@ -309,12 +332,12 @@ public class PianoRollPresenterTests
     {
         var track = Lane(new Note(60, 0, 240, 100), new Note(62, 480, 240, 100));
 
-        var scene = BuildDragging(track, View(), dragging: new[] { 1 }, startDelta: 480);
+        var scene = BuildDragging(track, View(), dragging: new[] { IdOf(1) }, startDelta: 480);
 
         Assert.Multiple(() =>
         {
             Assert.That(scene.GhostNotes, Has.Count.EqualTo(1));
-            Assert.That(scene.GhostNotes[0].Index, Is.EqualTo(1), "拖的是第二个，幽灵也只有第二个");
+            Assert.That(scene.GhostNotes[0].Id, Is.EqualTo(IdOf(1)), "拖的是第二个，幽灵也只有第二个");
         });
     }
 
@@ -331,7 +354,7 @@ public class PianoRollPresenterTests
         var before = Lane(new Note(60, 0, 1, 100));
         var after = Lane(new Note(60, 480, 481, 100));
 
-        var ghost = BuildDragging(before, View(), dragging: new[] { 0 }, startDelta: 480, lengthDelta: 480)
+        var ghost = BuildDragging(before, View(), dragging: new[] { IdOf(0) }, startDelta: 480, lengthDelta: 480)
             .GhostNotes.Single();
         var landed = Build(after, View()).Notes.Single();
 
@@ -348,7 +371,7 @@ public class PianoRollPresenterTests
     public void 幽灵块跟着音高位移换行()
     {
         var ghost = BuildDragging(Lane(new Note(60, 0, 240, 100)), View(),
-            dragging: new[] { 0 }, pitchDelta: 2).GhostNotes.Single();
+            dragging: new[] { IdOf(0) }, pitchDelta: 2).GhostNotes.Single();
         var landed = Build(Lane(new Note(62, 0, 240, 100)), View()).Notes.Single();
 
         Assert.That(ghost.Y, Is.EqualTo(landed.Y).Within(1e-9), "幽灵得落在升两个半音那一行上");
@@ -394,12 +417,12 @@ public class PianoRollPresenterTests
     {
         var track = Lane(new Note(60, 0, 240, 100), new Note(62, 480, 240, 100));
 
-        var scene = BuildDragging(track, View(), selected: new[] { 0, 1 });
+        var scene = BuildDragging(track, View(), selected: new[] { IdOf(0), IdOf(1) });
 
         Assert.Multiple(() =>
         {
-            Assert.That(scene.SelectedNotes, Is.EqualTo(new[] { 0, 1 }));
-            Assert.That(scene.SelectedNote, Is.EqualTo(1), "主选中 = 选中集的尾巴，不是另存的第二份状态");
+            Assert.That(scene.SelectedNotes, Is.EqualTo(new[] { IdOf(0), IdOf(1) }));
+            Assert.That(scene.SelectedNote, Is.EqualTo(IdOf(1)), "主选中 = 选中集的尾巴，不是另存的第二份状态");
         });
     }
 
@@ -407,7 +430,8 @@ public class PianoRollPresenterTests
     /// 选中集**按加进来的先后**留着，不被排成升序。
     ///
     /// 这条挡的是「顺手把它排一下」：<see cref="PianoRollPresenter.LaneScene.SelectedNote"/>
-    /// 取的是尾巴，排成升序就等于把手上的「主选中」换成了下标最大的那个 ——
+    /// 取的是尾巴，排成升序就等于把手上的「主选中」换成了**号最大的那个** ——
+    /// 而号是发的不是排的（见 <c>NoteIdentity</c>），跟时间顺序没关系。
     /// 用户先点 5 号、再按住 Shift 点 2 号，主选中会从 2 号跳回 5 号。
     /// 顺序在这条链上是有含义的数据，不是随手排的容器。
     /// </summary>
@@ -416,13 +440,13 @@ public class PianoRollPresenterTests
     {
         var track = Lane(new Note(60, 0, 240, 100), new Note(62, 480, 240, 100));
 
-        // 先点后面那个（1），再 Shift 点前面那个（0）
-        var scene = BuildDragging(track, View(), selected: new[] { 1, 0 });
+        // 先点后面那个，再 Shift 点前面那个 —— 说的就是「先 9 号后 8 号」
+        var scene = BuildDragging(track, View(), selected: new[] { new NoteId(9), new NoteId(8) });
 
         Assert.Multiple(() =>
         {
-            Assert.That(scene.SelectedNotes, Is.EqualTo(new[] { 1, 0 }), "原样留着，别排");
-            Assert.That(scene.SelectedNote, Is.EqualTo(0), "主选中是最后加的那个，不是下标最大的那个");
+            Assert.That(scene.SelectedNotes, Is.EqualTo(new[] { new NoteId(9), new NoteId(8) }), "原样留着，别排");
+            Assert.That(scene.SelectedNote, Is.EqualTo(new NoteId(8)), "主选中是最后加的那个，不是号最大的那个");
         });
     }
 
@@ -431,12 +455,12 @@ public class PianoRollPresenterTests
     {
         // 卷帘那边复用同一个缓冲，下一帧就清掉重填，而场景要活到下一次 SetScene ——
         // 留着引用的话，这一帧刚画到一半选中集就被改了
-        var buffer = new List<int> { 0, 1 };
+        var buffer = new List<NoteId> { IdOf(0), IdOf(1) };
         var track = Lane(new Note(60, 0, 240, 100), new Note(62, 480, 240, 100));
 
         var scene = BuildDragging(track, View(), selected: buffer);
         buffer.Clear();
 
-        Assert.That(scene.SelectedNotes, Is.EqualTo(new[] { 0, 1 }), "调用方清空之后场景还得是原来那两个");
+        Assert.That(scene.SelectedNotes, Is.EqualTo(new[] { IdOf(0), IdOf(1) }), "调用方清空之后场景还得是原来那两个");
     }
 }

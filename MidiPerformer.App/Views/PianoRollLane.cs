@@ -111,12 +111,12 @@ public sealed class PianoRollLane : Control
 
     private TokenSource? _tokens;
     private PianoRollPresenter.LaneScene? _scene;
-    private int _hoveredNote = -1;
+    private NoteId _hoveredNote = NoteId.None;
 
     private DragKind _drag = DragKind.None;
 
-    /// <summary>按下时命中的那个音（本轨音符数组里的下标）。框选时它是 -1。</summary>
-    private int _anchor = -1;
+    /// <summary>按下时命中的那个音的**身份**（<see cref="Note.Id"/>）。框选时它是 <see cref="NoteId.None"/>。</summary>
+    private NoteId _anchor = NoteId.None;
 
     /// <summary>
     /// 按下那一刻指针底下的 tick 与音高。
@@ -156,8 +156,8 @@ public sealed class PianoRollLane : Control
     /// <summary>这一次要动的整组音（按下那一刻的快照，见 <see cref="NoteMoveRequest"/>）。</summary>
     private readonly List<NoteRef> _group = new();
 
-    /// <summary>其中落在**本轨**上的下标 —— 幽灵只画得动这一条轨上的。</summary>
-    private readonly List<int> _ghostIndexes = new();
+    /// <summary>其中落在**本轨**上的那几个的身份 —— 幽灵只画得动这一条轨上的。</summary>
+    private readonly List<NoteId> _ghostIds = new();
 
     public PianoRollLane()
     {
@@ -193,8 +193,8 @@ public sealed class PianoRollLane : Control
         }
     }
 
-    /// <summary>悬停到的音符变了。参数是音符下标，-1 = 移开了或没命中。</summary>
-    public event EventHandler<int>? HoverChanged;
+    /// <summary>悬停到的音符变了。参数是那个音的**身份**，<see cref="NoteId.None"/> = 移开了或没命中。</summary>
+    public event EventHandler<NoteId>? HoverChanged;
 
     /// <summary>这一组音被拖到了别处，命令由窗口去调（一次拖动只发一次）。</summary>
     public event EventHandler<NoteMoveRequest>? NotesMoved;
@@ -237,10 +237,10 @@ public sealed class PianoRollLane : Control
         {
             if (_drag is not (DragKind.Move or DragKind.ResizeHead or DragKind.ResizeTail)) return null;
             if (_startDelta == 0 && _lengthDelta == 0 && _pitchDelta == 0) return null;
-            if (_ghostIndexes.Count == 0) return null;
+            if (_ghostIds.Count == 0) return null;
 
             // 把活列表交出去是安全的：它只在这次 BuildLane 里被读一遍，场景不留引用
-            return new PianoRollPresenter.DragPreview(_ghostIndexes, _startDelta, _lengthDelta, _pitchDelta);
+            return new PianoRollPresenter.DragPreview(_ghostIds, _startDelta, _lengthDelta, _pitchDelta);
         }
     }
 
@@ -294,7 +294,7 @@ public sealed class PianoRollLane : Control
         // 音符块：压在网格上面，播放头再压在音符上面
         foreach (var box in scene.Notes)
         {
-            DrawNote(context, palette, box, scene.SelectedNotes.Contains(box.Index));
+            DrawNote(context, palette, box, scene.SelectedNotes.Contains(box.Id));
         }
 
         // 幽灵压在真音符上面：拖到哪儿去了，看的就是它。下面那一块**不动**，
@@ -359,14 +359,14 @@ public sealed class PianoRollLane : Control
                 // 拉成什么样由幽灵说，不需要先给它点亮一圈边 —— 那反而会让人以为
                 // 「要先选中才能改」（框选出来的那一组里，是谁被拉了也看不出来）。
                 _drag = hit == PianoRollGeometry.RollHit.Head ? DragKind.ResizeHead : DragKind.ResizeTail;
-                _anchor = note.Index;
+                _anchor = note.Id;
                 CaptureAnchor(controller);
-                _ghostIndexes.Add(note.Index);
+                _ghostIds.Add(note.Id);
                 break;
 
             case PianoRollGeometry.RollHit.Body:
                 _drag = DragKind.Move;
-                _anchor = note.Index;
+                _anchor = note.Id;
                 CaptureAnchor(controller);
 
                 // Shift 点一下 = 把它也带上。堆多选有两条路：这一条，和空白处横拖框一段
@@ -393,7 +393,7 @@ public sealed class PianoRollLane : Control
                 _group.Clear();
                 _group.AddRange(controller.SelectedNotes);
                 foreach (var item in _group)
-                    if (item.Track == TrackIndex) _ghostIndexes.Add(item.Index);
+                    if (item.Track == TrackIndex) _ghostIds.Add(item.Id);
                 break;
 
             default:
@@ -437,7 +437,7 @@ public sealed class PianoRollLane : Control
         var point = e.GetPosition(this);
         var hit = controller.HitTestRef(TrackIndex, scene.Viewport, point.X, point.Y, out var note);
         UpdateCursor(hit);
-        SetHover(hit == PianoRollGeometry.RollHit.None ? -1 : note.Index);
+        SetHover(hit == PianoRollGeometry.RollHit.None ? NoteId.None : note.Id);
     }
 
     protected override void OnPointerExited(PointerEventArgs e)
@@ -448,7 +448,7 @@ public sealed class PianoRollLane : Control
         // 这时候把悬停清掉，读数条会在用户还在拖的时候突然空掉
         if (_drag != DragKind.None) return;
 
-        SetHover(-1);
+        SetHover(NoteId.None);
     }
 
     // ==================== 指针：抬起 ====================
@@ -482,12 +482,23 @@ public sealed class PianoRollLane : Control
 
     // ==================== 拖动 ====================
 
-    /// <summary>把锚音在模型里的位置记下来 —— 吸附是「锚的起点 + 原始位移」算的，得有个起点。</summary>
+    /// <summary>
+    /// 把锚音在模型里的位置记下来 —— 吸附是「锚的起点 + 原始位移」算的，得有个起点。
+    ///
+    /// 按**身份**在现场扫一遍找它，不存下标：按下那一刻这个号一定在这条轨上，
+    /// 但下一次编辑之后它就可能挪到数组别处去了（见 <see cref="NoteRef"/>）——
+    /// 存下标的话，那个下标会在下一次重画时指着别人。一条轨几千个音，扫一遍是常数级的小事，
+    /// 而且这里一次拖动只走一次（在按下那一刻）。
+    /// </summary>
     private void CaptureAnchor(PianoRollController controller)
     {
-        var note = controller.Song.Tracks[TrackIndex].Notes[_anchor];
-        _anchorStart = note.StartTick;
-        _anchorLength = note.LengthTicks;
+        foreach (var note in controller.Song.Tracks[TrackIndex].Notes)
+        {
+            if (note.Id != _anchor) continue;
+            _anchorStart = note.StartTick;
+            _anchorLength = note.LengthTicks;
+            return;
+        }
     }
 
     /// <summary>
@@ -622,7 +633,7 @@ public sealed class PianoRollLane : Control
         long startDelta = _startDelta, lengthDelta = _lengthDelta;
         int pitchDelta = _pitchDelta;
         double marqueeStart = _marqueeStart, marqueeEnd = _marqueeEnd;
-        int anchor = _anchor;
+        var anchor = _anchor;
         long anchorStart = _anchorStart, anchorLength = _anchorLength;
         // 要挪的那组先拷出来，**必须在 ResetDrag 之前**：它清的就是 _group，
         // 清完再取就是把一条「挪 0 个音」的命令发出去
@@ -639,7 +650,9 @@ public sealed class PianoRollLane : Control
         switch (kind)
         {
             case DragKind.Move when startDelta != 0 || pitchDelta != 0:
-                // 快照一份交给窗口：它处理完命令要重新算选中集，而算的时候会改控制器里那一串
+                // 快照一份交给窗口：窗口收到它之后会重建控制器，而 `_group` 是这条控件的活字段 ——
+                // 重建那一趟里它可能被下一次按下清掉。从前的理由还有一条「窗口要重新算选中集」，
+                // 31 号工单之后没有这回事了（坐标按身份寻址，命令跑完照样指着同一批音）。
                 NotesMoved?.Invoke(this, new NoteMoveRequest(group, startDelta, pitchDelta));
                 break;
 
@@ -678,9 +691,15 @@ public sealed class PianoRollLane : Control
     /// <summary>
     /// 这次拖动作废：什么都不提交，把预览和状态一起收掉。
     ///
-    /// **外面也要用**：窗口每次编辑都会换一份曲子，而这条轨是就地重挂的（不是重建控件），
-    /// 拖动中那一份快照（<c>_group</c>、幽灵下标、框选区间）指的全是旧曲子上的下标，
-    /// 不在这儿清掉的话，下一次拖动结算出来的会是一条指着别人的命令。
+    /// **外面也要用**：窗口每次编辑都会换一份曲子，而这条轨是就地重挂的（不是重建控件）。
+    /// 手上这一份快照（<c>_group</c>、幽灵身份、框选区间）虽然**按身份讲在新曲子上照样成立**，
+    /// 这一次手势本身还是得作废：它是照着旧谱面上的那一帧算出来的，而位移的基准
+    /// （<c>_anchorStart</c>、按下时的 tick）没有跟着新曲子重算 ——
+    /// 接着拖下去，结算出来的会是一条尺寸对不上的命令。
+    /// 另外框选那一段也是 tick，编辑会让它框到另一批音上去。
+    ///
+    /// （从前这里的理由是「快照指的全是旧曲子上的下标」—— 下标那一半随着
+    /// 31 号工单的按身份寻址一起没了，但「这次手势作废」这件事没变。）
     /// </summary>
     public void CancelDrag()
     {
@@ -693,14 +712,14 @@ public sealed class PianoRollLane : Control
     private void ResetDrag()
     {
         _drag = DragKind.None;
-        _anchor = -1;
+        _anchor = NoteId.None;
         _startDelta = 0;
         _lengthDelta = 0;
         _pitchDelta = 0;
         _marqueeStart = 0;
         _marqueeEnd = 0;
         _group.Clear();
-        _ghostIndexes.Clear();
+        _ghostIds.Clear();
     }
 
     /// <summary>拖动预览变了，让场景重算一遍。没有订阅者时是空操作。</summary>
@@ -725,7 +744,7 @@ public sealed class PianoRollLane : Control
         };
     }
 
-    private void SetHover(int note)
+    private void SetHover(NoteId note)
     {
         if (note == _hoveredNote) return;
         _hoveredNote = note;
@@ -870,9 +889,10 @@ public sealed class PianoRollLane : Control
 /// 用户把选中的一组音拖到了别处。<b>参数是整组 + 一个共同的位移</b>（增量，不是目标位置）——
 /// 一组音保住彼此的相对关系，只有「都挪这么远」说得清（和 <c>ISongEditor.MoveNotes</c> 一个形状）。
 ///
-/// <see cref="Notes"/> 是一份**快照**：窗口处理完这条命令之后要重新算选中集
-/// （下标只在算出来的那一份曲子上有效），而算的时候会改控制器里的选中集 ——
-/// 不拷一份的话，窗口手上那串会在读到一半时被换掉。
+/// <see cref="Notes"/> 是一份**快照**：卷帘那边交出来的是它自己的活字段（<c>_group</c>），
+/// 而窗口处理这条命令时会重建控制器 —— 那一趟里下一次按下的手势会把那个字段清掉，
+/// 不拷一份的话，命令可能读到一半就变了。（从前这里还写着「窗口要重新算选中集」，
+/// 那是按值认音那套镜像的活，31 号工单之后没有了：坐标按身份寻址，命令跑完照样指着同一批音。）
 ///
 /// 放在命名空间这一层、而不是嵌在 <see cref="PianoRollLane"/> 里：卷帘和轨头**两边都要**喊这条
 /// （<see cref="TrackLaneView.NotesMoved"/> 转发的是同一条），嵌在其中一个里面，

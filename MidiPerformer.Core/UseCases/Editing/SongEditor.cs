@@ -129,9 +129,11 @@ public sealed class SongEditor : ISongEditor
     /// 轨上是 <c>A@0</c> 和 <c>B@100</c>，只选中 A 往右挪 200，轨就成了 <c>[A@200, B@100]</c> ——
     /// <see cref="Track.Notes"/> 的升序承诺当场破掉，而且是**一声不吭**地破。
     ///
-    /// 破了之后按下标认音的东西全部错位，导出那一侧更糟：它会写出「后一个音先响」的事件序列，
+    /// 破了之后挨打的是导出那一侧：它会写出「后一个音先响」的事件序列，
     /// 同一个音高上的 note-off / note-on 一乱，发出去就是漏音或卡音。
     /// 对一个演奏器来说这不是排版问题。
+    ///（从前还有第二条罪状：「按下标认音的东西全部错位」—— 界面存的是下标，重排一次就指错音。
+    /// 那一条已经不存在了：坐标按身份寻址，重排改不掉谁是谁，见 <see cref="NoteRef"/>。）
     ///
     /// 修它的是 <see cref="Track.WithNotes"/>：下面每个改过的音都从那一扇门写回去，
     /// 于是「重排」就发生在写回去这一句里 —— 这条命令自己不排。
@@ -178,9 +180,14 @@ public sealed class SongEditor : ISongEditor
             if (!touched.TryGetValue(reference.Track, out var edited))
                 touched[reference.Track] = edited = song.Tracks[reference.Track].Notes.ToArray();
 
+            // 位置从**原数组**现查：身份在一条轨里不重复（见 NoteIdentity），
+            // 于是同一个坐标说两遍查到的是同一格，两次写进去的值一样。
+            // 这也是这里唯一用到下标的地方 —— 它是个中间量，出了这一句就没用了。
+            int at = IndexAt(song, reference, nameof(notes));
+
             // with 只点这两个字段：身份（Id）原样带过去 —— 挪一个音不换身份，它是同一个音换了个位置
             //（和 CutRange 里剪断留下的碎片正相反，那条命令的判据写在它的方法注释上）。
-            edited[reference.Index] = original with
+            edited[at] = original with
             {
                 Pitch = AddPitch(original.Pitch, pitch),
                 StartTick = SaturatingAdd(original.StartTick, ticks),
@@ -201,8 +208,9 @@ public sealed class SongEditor : ISongEditor
     ///
     /// <b>改时值可能让这个音越过邻居。</b><see cref="Track.Notes"/> 承诺按起点升序，
     /// 而把起点右移、或者把时值拉长，都可能让这个音排到后面的音后面去 —— 破了这个承诺，
-    /// 后面所有「按下标认音」的东西（<see cref="NoteRef"/>、卷帘的命中测试、导出）
-    /// 就全都错位，而且错得一声不吭。
+    /// 导出会写出「后一个音先响」的事件序列（同 <see cref="MoveNotes"/>，那里说了代价）。
+    /// 界面那一头**不再受它影响**：坐标按身份寻址，这个音排到哪儿去了都还是它
+    /// （理由写在 <see cref="NoteRef"/> 上）。
     ///
     /// 重排本身不在这里：改完的音符从 <see cref="Track.WithNotes"/> 写回去，那一扇门保证有序
     /// （为什么收在 <see cref="Track"/> 里、为什么必须是稳定排序，理由都写在那条方法上）。
@@ -229,9 +237,11 @@ public sealed class SongEditor : ISongEditor
         if (original.StartTick == startTick && original.LengthTicks == lengthTicks) return song;
 
         var track = song.Tracks[note.Track];
+        // 位置现查（上面那句已经确认过它存在，所以这里查得到）—— 下标只是写回那一格用的中间量
+        int at = IndexAt(song, note, nameof(note));
         var notes = track.Notes.ToArray();
         // 同样只点这两个字段：身份跟着这个音走（改时值不换身份，见 Note.Id）
-        notes[note.Index] = original with { StartTick = startTick, LengthTicks = lengthTicks };
+        notes[at] = original with { StartTick = startTick, LengthTicks = lengthTicks };
 
         var tracks = song.Tracks.ToArray();
         tracks[note.Track] = track.WithNotes(notes);
@@ -250,26 +260,30 @@ public sealed class SongEditor : ISongEditor
     {
         if (notes.Count == 0) return song;
 
-        // 去重：同一份 Song 上同一个 (轨, 下标) 说的是同一个音，说三遍还是删那一个。
+        // 去重：同一份 Song 上同一个 (轨, 身份) 说的是同一个音，说三遍还是删那一个。
         // 「要删的音」本来就该按集合理解 —— 界面横拖出来的选中集是顺手并起来的，重叠是常态，
-        // 而「把第 3 个音删两次」这句话本身没有意义。用 HashSet 而不是 List，
-        // 下面那句「这个下标要不要留」才是一次判断，也不用担心重复扣。
-        var doomed = new Dictionary<int, HashSet<int>>();
+        // 而「把 7 号音删两次」这句话本身没有意义。用 HashSet 而不是 List，
+        // 下面那句「这个音要不要留」才是一次判断，也不用担心重复扣。
+        //
+        // 按**身份**去重、按身份挑要留下的音：内容一模一样的两个音（同刻同音高同力度）
+        // 现在是分得开的两个音了 —— 从前按下标删也能分开，但前提是界面手上有对的下标；
+        // 内容相同而下标错位那一下，删掉的是另一个音，而且不报错。
+        var doomed = new Dictionary<int, HashSet<NoteId>>();
         foreach (var reference in notes)
         {
             NoteAt(song, reference, nameof(notes));
-            if (!doomed.TryGetValue(reference.Track, out var indexes))
-                doomed[reference.Track] = indexes = new HashSet<int>();
-            indexes.Add(reference.Index);
+            if (!doomed.TryGetValue(reference.Track, out var ids))
+                doomed[reference.Track] = ids = new HashSet<NoteId>();
+            ids.Add(reference.Id);
         }
 
         var tracks = song.Tracks.ToArray();
-        foreach (var (trackIndex, indexes) in doomed)
+        foreach (var (trackIndex, ids) in doomed)
         {
             var track = song.Tracks[trackIndex];
-            var kept = new List<Note>(track.Notes.Count - indexes.Count);
-            for (int i = 0; i < track.Notes.Count; i++)
-                if (!indexes.Contains(i)) kept.Add(track.Notes[i]);
+            var kept = new List<Note>(track.Notes.Count);
+            foreach (var note in track.Notes)
+                if (!ids.Contains(note.Id)) kept.Add(note);
 
             tracks[trackIndex] = track.WithNotes(kept);
         }
@@ -434,16 +448,26 @@ public sealed class SongEditor : ISongEditor
     }
 
     /// <summary>
-    /// 取出一个 <see cref="NoteRef"/> 指着的音，顺手把坐标查一遍。
+    /// 查一个坐标：这条轨上那个身份的音**在数组里的位置**，查不到就抛。
     ///
-    /// 越界在这里**抛**，而不是当成「没这个音」悄悄跳过：<see cref="NoteRef"/> 只在它被算出来的
-    /// 那一份 <see cref="Song"/> 上有效，拿旧下标来用是调用方的 bug，不是正常状态 ——
+    /// <b>位置只在命令层内部用</b>（写回一个音符要指向它在数组里的那一格），对外一律是身份。
+    /// 这就是「按身份寻址」落地的样子：签名上收的是 <see cref="NoteRef"/>（轨 + 身份），
+    /// 下标是这里现算出来的一个中间量 —— 命令跑完它就没了，不留到下一份曲子上。
+    ///
+    /// <b>查不到就抛</b>，而不是当成「没这个音」悄悄跳过：坐标只该指着**同一份曲子**里
+    /// 确实存在的那个音，拿别处算出来的号来用是调用方的 bug，不是正常状态 ——
     /// 悄悄跳过的话，用户看到的是「拖了五个音，只有一个动了」，而没有任何地方报错。
+    /// 从前这里判的是「下标越界」；换成身份之后判的是「这条轨上没有这个号」，
+    /// 触发的情形其实变多了（不只是算错，还可能是那个音刚被删掉），所以更要抛。
+    ///
+    /// 找不到时用的字眼是「不是这条轨上的音」而不是「越界」：号是发的不是排的
+    /// （见 <see cref="NoteIdentity"/>），一个号不在这条轨上未必说明它大得离谱 ——
+    /// 它可能只是**另一条轨**上的音，说「越界」会把人往「号太大」那个方向带。
     ///
     /// <paramref name="paramName"/> 由调用方给：报的该是调用方签名里的那个参数名
     /// （<c>note</c> / <c>notes</c>），不是这里这个内部参数名，否则报错指着的地方在调用栈上找不到。
     /// </summary>
-    private static Note NoteAt(Song song, NoteRef reference, string paramName)
+    private static int IndexAt(Song song, NoteRef reference, string paramName)
     {
         if (reference.Track < 0 || reference.Track >= song.Tracks.Count)
             throw new ArgumentOutOfRangeException(
@@ -451,12 +475,45 @@ public sealed class SongEditor : ISongEditor
                 $"轨下标 {reference.Track} 越界：这首曲子有 {song.Tracks.Count} 条轨。");
 
         var track = song.Tracks[reference.Track];
-        if (reference.Index < 0 || reference.Index >= track.Notes.Count)
+        int at = IndexOfId(track, reference.Id);
+        if (at < 0)
             throw new ArgumentOutOfRangeException(
                 paramName, reference,
-                $"音符下标 {reference.Index} 越界：第 {reference.Track} 条轨有 {track.Notes.Count} 个音。");
+                // 报的是 reference.Id.Value 而不是 reference.Id：NoteId.ToString() 会带上类型名
+                // （「NoteId { 7 }」），那是给写代码的人看的，这句话是给用户看的
+                $"{reference.Id.Value} 号音不是第 {reference.Track} 条轨上的音："
+                + $"这条轨有 {track.Notes.Count} 个音，没有一个是这个号。");
 
-        return track.Notes[reference.Index];
+        return at;
+    }
+
+    /// <summary>
+    /// 取出一个 <see cref="NoteRef"/> 指着的音，顺手把坐标查一遍。
+    /// 只是 <see cref="IndexAt"/> 外面套一层取值 —— 两处查的是同一件事，规矩只有一份。
+    ///
+    /// <b>先查再索引，顺序不能反。</b>写成 <c>song.Tracks[reference.Track].Notes[IndexAt(…)]</c>
+    /// 看着更短，但 C# 从左往右求值，轨下标越界时先炸的是 <c>List</c> 那句英文错误
+    /// （<c>Index was out of range…</c>），下面那句中文消息根本轮不到 —— 测试逮到过这一下。
+    /// </summary>
+    private static Note NoteAt(Song song, NoteRef reference, string paramName)
+    {
+        int at = IndexAt(song, reference, paramName);
+        return song.Tracks[reference.Track].Notes[at];
+    }
+
+    /// <summary>
+    /// 这条轨上身份是 <paramref name="id"/> 的音在数组里的位置；没有就是 -1（<b>不抛</b>）。
+    ///
+    /// 线性扫一遍，不建索引表：一条轨最多几千个音，而一次编辑只查那几下
+    /// （用户敲一下才跑一次，不在这条链的热路上）。建表的代价是**每次改音符都得维护它**，
+    /// 而维护它的地方正是「音符数组换了一份」的那扇门 —— 一张会过期的表比一次线性扫危险得多。
+    /// </summary>
+    private static int IndexOfId(Track track, NoteId id)
+    {
+        for (int i = 0; i < track.Notes.Count; i++)
+            if (track.Notes[i].Id == id) return i;
+
+        return -1;
     }
 
     /// <summary>

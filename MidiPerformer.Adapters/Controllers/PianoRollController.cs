@@ -19,22 +19,24 @@ namespace MidiPerformer.Adapters.Controllers;
 /// 编辑命令从它旁边过去，控制器只出三样东西给它们：
 /// <list type="bullet">
 /// <item><b>选中集</b>（<see cref="SelectedNotes"/> / <see cref="SetSelection"/>）——
-/// 命令收的是 <see cref="NoteRef"/> 列表，界面得先能把它算出来、编辑之后再重算一遍。</item>
+/// 命令收的是 <see cref="NoteRef"/> 列表，界面得先能把它算出来。
+/// <b>编辑之后不必重算</b>：坐标按身份寻址（见 <see cref="NoteRef"/>），改完把同一串原样
+/// 交给新控制器就行。</item>
 /// <item><b>区间查询</b>（<see cref="NotesInRange"/>）—— 「框住哪几个音」是几何问题，
 /// 命令那边不该知道像素，也不该知道框。</item>
 /// <item><b>带 ref 的命中判定</b>（<see cref="HitTestRef"/>）—— 点中的是谁，一步到位。</item>
 /// </list>
 ///
 /// 控制器自己不改谱面，是因为它是照着某一份 <see cref="Song"/> 建出来的一次性对象：
-/// 命令换个引用就换了一份曲子，控制器跟着重建（见 <see cref="RestoreSelection"/>）。
+/// 命令换个引用就换了一份曲子，控制器跟着重建（见 <see cref="SetSelection"/>）。
 /// 它要是自己也改，就得同时维护「手上这份曲子」和「界面那份」两个真相源。
 /// </summary>
 public sealed class PianoRollController
 {
     private readonly Song _song;
 
-    /// <summary>每条轨「按键盘定位的顺序」排好的音符下标（见 <see cref="BuildNavigationOrder"/>）。</summary>
-    private readonly List<int>[] _navigationOrder;
+    /// <summary>每条轨「按键盘定位的顺序」排好的音符身份（见 <see cref="BuildNavigationOrder"/>）。</summary>
+    private readonly List<NoteId>[] _navigationOrder;
 
     private readonly List<bool>[] _inRange;
     private readonly (int Low, int High)[] _pitchRanges;
@@ -108,14 +110,17 @@ public sealed class PianoRollController
     public int ViewStartBar => PianoRollGeometry.BarAtTick(ViewStartTick, TicksPerBar);
 
     /// <summary>
-    /// 主选中（轨下标, 音下标）。读数条与滚动定位只认这一个；没选中是 null。
+    /// 主选中（轨下标, 音的身份）。读数条与滚动定位只认这一个；没选中是 null。
     ///
     /// **它永远是 <see cref="SelectedNotes"/> 里的某一个**（最后加进去的那个），不是另存的第二份状态 ——
     /// 所以不存在「主选中指着一个已经不在选中集里的音」这种两张嘴对不上的情况。
     /// 取最后一个，是因为它正好是用户最后点的那一个，也就是他此刻在看的那一个。
+    ///
+    /// 音那一半是**身份**不是下标（见 <see cref="NoteRef"/>）：读数条、键盘定位要的都是
+    /// 「哪一个音」，而那个音在一次编辑之后照样是它，下标却可能换了地方。
     /// </summary>
-    public (int Track, int Note)? Selection
-        => _selected.Count > 0 ? (_selected[^1].Track, _selected[^1].Index) : null;
+    public (int Track, NoteId Note)? Selection
+        => _selected.Count > 0 ? (_selected[^1].Track, _selected[^1].Id) : null;
 
     /// <summary>
     /// 选中的一组音。09 起选中不再是一个音：框选一组、一组一起挪，命令那边要的就是这一串
@@ -130,26 +135,10 @@ public sealed class PianoRollController
     public int BarOfTick(long tick) => PianoRollGeometry.BarAtTick(tick, TicksPerBar) + 1;
 
     /// <summary>
-    /// 把选中放回某个音符上。<b>编辑之后重建控制器时用它。</b>
-    ///
-    /// 改速度、改移调都会换一份 <see cref="Song"/>，而控制器是照着曲子建出来的一次性对象，
-    /// 只能重建 —— 重建之后新控制器不认识上一个的选中，用户改一下就会丢掉选中。
-    /// 音符数组本身一个字节都没动，所以下标照旧有效；这里仍然夹一道，越界就当没选中
-    /// （曲子换成另一首、或将来某条命令删掉了音符时，不该抛在这儿）。
-    /// </summary>
-    /// <param name="track">轨下标（0 起）。</param>
-    /// <param name="note">音在该轨音符数组里的下标。</param>
-    public void RestoreSelection(int track, int note)
-    {
-        // 「选中一个音」就是「选中集里只有它」，走同一条路 —— 越界当没选中的规矩只有一份
-        SelectOnly(new NoteRef(track, note));
-    }
-
-    /// <summary>
     /// 清空再选一个（在卷帘上点某个音用它）。
     ///
-    /// 越界的 ref 会被丢掉，于是等于清空 —— 和 <see cref="RestoreSelection"/> 一样不抛：
-    /// 曲子刚被换掉、轨刚被删掉的时候会碰上，那不是错误。
+    /// 认不出的 ref 会被丢掉，于是等于清空 —— <b>不抛</b>：
+    /// 曲子刚被换掉、轨刚被删掉的时候会碰上，那不是错误，是「它不在了」。
     /// </summary>
     public void SelectOnly(NoteRef note)
     {
@@ -158,12 +147,22 @@ public sealed class PianoRollController
     }
 
     /// <summary>
-    /// 整体替换选中集。框选，以及**每次编辑之后拿新曲子重新算一遍**都用它
-    /// （<see cref="NoteRef"/> 的下标只在算出来的那一份曲子上有效，改完必须重算）。
+    /// 整体替换选中集：框选、以及**每次编辑之后把选中集放回新控制器上**都用它。
     ///
-    /// 越界的 ref 丢掉、重复的 ref 只留一个。后者不是洁癖：这一串是要原样交给 <c>MoveNotes</c> 的，
+    /// 编辑之后**不必重新认音**：坐标按身份寻址（见 <see cref="NoteRef"/>），
+    /// 换了一份 <see cref="Song"/> 之后同一串 ref 指的仍然是同一批音，原样交回来就行 ——
+    /// 从前这里要「拿新曲子重新算一遍」，那是下标寻址逼出来的（31 号工单删掉了那套镜像）。
+    /// 这里唯一要做的判断是**这一串在新曲子上还成立吗**：不成立的丢掉，见下。
+    ///
+    /// 认不出的 ref 丢掉、重复的 ref 只留一个。后者不是洁癖：这一串是要原样交给 <c>MoveNotes</c> 的，
     /// 同一个音出现两次就会被挪两倍距离 —— 界面上「选中了两次」没有任何意义，不该被翻译成「动了两次」。
     /// 顺序原样保留，于是主选中仍然是传进来的最后一个。
+    ///
+    /// <b>代价写清楚：身份只在**一份曲子**里有意义。</b>两条读取路径都是从 1 开始连号发的
+    /// （见 <see cref="NoteIdentity"/>），所以换一首曲子之后旧坐标「碰巧撞上一个号」是常事 ——
+    /// 那样它不会被丢掉，而是**静默地指到另一个音上**。这条规矩因此是：换曲子时不许把旧坐标带过来
+    /// （窗口那一路是重建控制器，选中集本来就是空的，见 <c>MainWindow.LoadSong</c>）；
+    /// 而「同一首曲子的两个版本之间」带过来是安全的 —— 编辑命令只改内容不换号。
     /// </summary>
     public void SetSelection(IReadOnlyList<NoteRef> notes)
     {
@@ -198,7 +197,23 @@ public sealed class PianoRollController
     /// <summary>这个 ref 指向的音在不在这份曲子里。选中集里的每个口子都要过它一道。</summary>
     private bool IsValidNote(NoteRef note) =>
         note.Track >= 0 && note.Track < _song.Tracks.Count
-        && note.Index >= 0 && note.Index < _song.Tracks[note.Track].Notes.Count;
+        && IndexOfId(_song.Tracks[note.Track], note.Id) >= 0;
+
+    /// <summary>
+    /// 这条轨上身份是 <paramref name="id"/> 的音在数组里的位置；没有就是 -1。
+    ///
+    /// 线性扫一遍：一条轨最多几千个音，而过这道口的都是用户点一下才走一次的地方
+    /// （选中一个音、看一眼某个音的描述）。建索引表就得跟着音符数组一起维护，
+    /// 而数组每次编辑都换一份 —— 一张会过期的表比一次线性扫危险得多。
+    /// <b>位置只在控制器内部用</b>（要读那个音的内容、要算它在屏幕上的块），对外一律是身份。
+    /// </summary>
+    private int IndexOfId(Track track, NoteId id)
+    {
+        for (int i = 0; i < track.Notes.Count; i++)
+            if (track.Notes[i].Id == id) return i;
+
+        return -1;
+    }
 
     // ==================== 聚焦轨 ====================
 
@@ -220,7 +235,7 @@ public sealed class PianoRollController
     /// 把聚焦挪到第 <paramref name="trackIndex"/> 条轨上。越界夹进范围，不抛。
     ///
     /// 两条路走它：窗口换完控制器把聚焦放回原来那条轨上（那条轨可能刚好被删掉了，
-    /// 同 <see cref="RestoreSelection"/>：越界不是错误，是「它不在了」），
+    /// 越界不是错误，是「它不在了」—— 和 <see cref="SetSelection"/> 对认不出的坐标是同一条规矩），
     /// 以及卷帘上点了一下、焦点跟着手走（见 <c>PianoRollLane.OnPointerPressed</c>）。
     /// 一条轨都没有时落在 0 —— 那时候没轨可指，但读数总得有个值。
     ///
@@ -301,7 +316,7 @@ public sealed class PianoRollController
     /// 这不是特例，是兜底：空白处横拖删音时，「点了空白但没拖」是一次零长度的手势，
     /// 要是让它把光标底下那个音算进来，一次误点就删掉了一个音。
     ///
-    /// 越界的轨下标返回空集而不抛，理由同 <see cref="RestoreSelection"/>。
+    /// 越界的轨下标返回空集而不抛，理由同 <see cref="SetSelection"/>：那不是错误，是「它不在了」。
     /// </summary>
     /// <param name="trackIndex">轨下标（0 起）。</param>
     /// <param name="startTick">区间起点（含）。</param>
@@ -320,7 +335,8 @@ public sealed class PianoRollController
             // 所以起点已经够到右边缘之后，后面全是更靠后的，直接收工
             if (note.StartTick >= endTick) break;
             if (note.EndTick <= startTick) continue;
-            hits.Add(new NoteRef(trackIndex, i));
+            // 这里用下标只是因为**正在遍历数组**：出这道门的坐标是身份，不是位置
+            hits.Add(new NoteRef(trackIndex, note.Id));
         }
 
         return hits;
@@ -459,38 +475,32 @@ public sealed class PianoRollController
     }
 
     /// <summary>
-    /// 命中判定：这根轨的这个点上有没有音，命中的是头、尾还是身体。
-    /// 没命中返回 <see cref="PianoRollGeometry.RollHit.None"/>，<paramref name="noteIndex"/> 为 -1。
-    /// </summary>
-    public PianoRollGeometry.RollHit HitTest(
-        int trackIndex, in PianoRollGeometry.Viewport viewport, double x, double y, out int noteIndex)
-    {
-        var hit = HitTestRef(trackIndex, viewport, x, y, out var note);
-        // 没命中时不给 `note.Index`（那是 -1，和这个约定的 -1 撞不出问题，但别让两条路各自算一遍）
-        noteIndex = hit == PianoRollGeometry.RollHit.None ? -1 : note.Index;
-        return hit;
-    }
-
-    /// <summary>
-    /// 和 <see cref="HitTest"/> 是**同一次判定**，只是给的是 <see cref="NoteRef"/> 而不是一个下标。
+    /// 命中判定：这根轨的这个点上有没有音，命中的是头、尾还是身体；
+    /// <paramref name="note"/> 是命中那个音的身份坐标（<see cref="NoteRef"/>）。
+    /// 没命中返回 <see cref="PianoRollGeometry.RollHit.None"/>。
     ///
     /// 09 的编辑命令收的都是 ref（<c>MoveNotes</c> / <c>SetNoteSpan</c> / <c>DeleteNotes</c>），
     /// 让界面自己拿下标拼一个出来，等于把「下标是从哪个数组来的」这件事又抄一遍。
-    /// 两者共用同一段循环（老的转发到新的），所以同一个点永远得到同一个答案。
     ///
-    /// 没命中时 <paramref name="note"/> 是 <c>(-1, -1)</c>：和 <see cref="HitTest"/> 那边的 <c>-1</c>
-    /// 一个意思，是个**明确不存在的**坐标。不返回 <c>default</c>，是因为 <c>default(NoteRef)</c>
-    /// 正好是 <c>(0, 0)</c> —— 一个完全合法的音，谁忘了判就会默默选中第一个音。
+    /// <b>从前这里还有一对方法</b>：一个给下标、一个给 ref，共用同一段循环，
+    /// 各自的注释都写着「两者必须给同一个答案」。31 号工单把给下标的那一个删了 ——
+    /// 坐标改成按身份寻址之后，「这个下标」在编辑之后就不再指着同一个音了，
+    /// 留着它就等于留着一张嘴在说另一种地址（而且只有测试在用）。只剩一扇门，就没有「两处要对齐」这件事。
+    ///
+    /// 没命中时 <paramref name="note"/> 是 <c>(-1, None)</c>：一个**明确不存在的**坐标。
+    /// 不返回 <c>default</c>，是因为 <c>default(NoteRef)</c> 正好是 <c>(0, 0)</c> ——
+    /// 0 是 <see cref="NoteId.None"/>，看着也不像真的，但轨那一半的 0 是条真轨，
+    /// 谁忘了判就会默默选中第一条轨上那个「没有身份」的位置。
     ///
     /// **多个音在屏幕上叠着的时候，给的是数组里靠前的那个**（也就是起点更早的那个）。
-    /// 这不是「对」，是**和现有 <see cref="HitTest"/> 保持一致**：两个方法必须给同一个答案，
-    /// 否则界面高亮的那个和命令动的那个会是两个音。要改成「取视觉上压在最上面的」，
-    /// 得两处一起改，而且要先想清楚「画在最上面的」在同一个音高上是不是真的更符合直觉。
+    /// 这不是「对」，只是这趟循环的顺序：按数组序碰到第一个命中的就返回。
+    /// 要改成「取视觉上压在最上面的」，得先想清楚「画在最上面的」在同一个音高上
+    /// 是不是真的更符合直觉（数组序至少是确定的、和导出的事件顺序一致）。
     /// </summary>
     public PianoRollGeometry.RollHit HitTestRef(
         int trackIndex, in PianoRollGeometry.Viewport viewport, double x, double y, out NoteRef note)
     {
-        note = new NoteRef(-1, -1);
+        note = new NoteRef(-1, NoteId.None);
         // 越界的轨下标当没命中：删光所有轨之后还会被问一次，见 PitchRangeOf 的说明
         if (trackIndex < 0 || trackIndex >= _song.Tracks.Count) return PianoRollGeometry.RollHit.None;
 
@@ -504,14 +514,15 @@ public sealed class PianoRollController
             if (model.StartTick > viewport.ViewStartTick + viewport.TicksVisible) break;
             if (model.EndTick < viewport.ViewStartTick) continue;
 
+            // 这里按下标建块只是因为**正在遍历数组**：出的那门是身份，不是位置
             var box = PianoRollGeometry.BoxOf(
-                viewport, i, model.StartTick, model.LengthTicks, model.Pitch + track.Transpose,
+                viewport, model.Id, model.StartTick, model.LengthTicks, model.Pitch + track.Transpose,
                 i < flags.Count && flags[i]);
 
             var hit = PianoRollGeometry.HitTest(box, x, y);
             if (hit == PianoRollGeometry.RollHit.None) continue;
 
-            note = new NoteRef(trackIndex, i);
+            note = new NoteRef(trackIndex, model.Id);
             return hit;
         }
 
@@ -522,36 +533,41 @@ public sealed class PianoRollController
 
     /// <summary>读数条要的那几个数：某个音符在谱面上的位置。</summary>
     /// <param name="Track">轨下标（0 起）。</param>
-    /// <param name="Note">音在该轨音符数组里的下标。</param>
+    /// <param name="Note">音的身份（<see cref="Note.Id"/>）。<b>不是下标</b> —— 读数条要问的是
+    /// 「我手上这个音现在什么样」，而一个音在一次编辑之后可能已经换了位置。</param>
     /// <param name="Pitch">**移调之后**的音高 —— 和卷帘上看到、耳朵听到的是同一个。</param>
     /// <param name="Bar">第几小节（1 起）。</param>
     /// <param name="BeatInBar">小节内第几拍（1 起，带小数）。</param>
     /// <param name="LengthBeats">时值，单位拍。</param>
     public readonly record struct NoteInfo(
-        int Track, int Note, int Pitch, int Bar, double BeatInBar, double LengthBeats);
+        int Track, NoteId Note, int Pitch, int Bar, double BeatInBar, double LengthBeats);
 
-    /// <summary>把某个音符描述出来。下标越界返回 null（悬停时轨道刚被换掉就会碰上）。</summary>
-    public NoteInfo? Describe(int trackIndex, int noteIndex)
+    /// <summary>
+    /// 把某个音符描述出来。认不出来返回 null —— 轨下标越界、或者这条轨上没有这个号
+    /// （悬停时音符刚被删掉、轨刚被换掉就会碰上）。
+    /// </summary>
+    public NoteInfo? Describe(int trackIndex, NoteId noteId)
     {
         if (trackIndex < 0 || trackIndex >= _song.Tracks.Count) return null;
         var track = _song.Tracks[trackIndex];
-        if (noteIndex < 0 || noteIndex >= track.Notes.Count) return null;
+        int at = IndexOfId(track, noteId);
+        if (at < 0) return null;
 
-        var note = track.Notes[noteIndex];
+        var note = track.Notes[at];
         long barTicks = TicksPerBar;
         long intoBar = note.StartTick - PianoRollGeometry.TickOfBar(
             PianoRollGeometry.BarAtTick(note.StartTick, barTicks), barTicks);
 
         return new NoteInfo(
             trackIndex,
-            noteIndex,
+            note.Id,
             note.Pitch + track.Transpose,
             PianoRollGeometry.BarAtTick(note.StartTick, barTicks) + 1,
             Format.Beats(intoBar, _ticksPerQuarterNote) + 1,
             Format.Beats(note.LengthTicks, _ticksPerQuarterNote));
     }
 
-    /// <summary>当前选中的音符描述。没选中是 null。</summary>
+    /// <summary>当前选中的音符描述。没选中是 null（选中集里的坐标认不出来时也是）。</summary>
     public NoteInfo? DescribeSelection() =>
         Selection is { } s ? Describe(s.Track, s.Note) : null;
 
@@ -589,7 +605,9 @@ public sealed class PianoRollController
         if (order.Count == 0) return null;
 
         // 「此刻在哪」只认**焦点轨上的**那个选中音。选中音在别的轨上时当没选中（current = -1），
-        // 于是 next 落在第一个音上：-1 + 1 = 0 正好是它，-1 - 1 = -2 被下面那道夹取拉回 0
+        // 于是 next 落在第一个音上：-1 + 1 = 0 正好是它，-1 - 1 = -2 被下面那道夹取拉回 0。
+        // 比的是**身份**（NoteRef 里那一半就是它），所以选中那个音后来被挪到数组别处、
+        // 或者它前面插进来一个新音，这里照样认得它。
         int current = Selection is { } s && s.Track == FocusedTrack
             ? order.IndexOf(s.Note)
             : -1;
@@ -600,10 +618,13 @@ public sealed class PianoRollController
         // 但 order.Count 为 1 时 next = 0 ≠ -1），要紧的是别把「刚从别的轨过来」当成「到头了」
         if (next == current && current >= 0) return DescribeSelection();
 
-        int noteIndex = order[next];
-        SelectOnly(new NoteRef(FocusedTrack, noteIndex));
+        var id = order[next];
+        SelectOnly(new NoteRef(FocusedTrack, id));
 
-        long startTick = _song.Tracks[FocusedTrack].Notes[noteIndex].StartTick;
+        // 定位表就是照着这条轨的音符建的，所以这个号一定找得到 —— 控制器活着的这一阵
+        // 手上这份曲子不会换（见类注释：命令换个引用就重建控制器）
+        var track = _song.Tracks[FocusedTrack];
+        long startTick = track.Notes[IndexOfId(track, id)].StartTick;
         // 视图左边缘对齐到这个音所在的小节 —— 横向「滚进视野」就是这一步
         SetViewStart(PianoRollGeometry.TickOfBar(
             PianoRollGeometry.BarAtTick(startTick, TicksPerBar), TicksPerBar));
@@ -618,15 +639,16 @@ public sealed class PianoRollController
     /// <c>SongEditor.MoveNotes</c> 是规矩的出处，界面拖动那一路拿它算预览
     /// （预览画到命令去不了的地方，松手那一下整块会跳回来一次），
     /// 窗口的方向键微调拿它算「挪完的新位置」—— 微调没有拖动那个「先夹再发」的前置，
-    /// 不在这儿夹一次的话，顶到边界那一下算出来的新位置是不存在的，
-    /// 重算选中集就会把选中集弄丢。
+    /// 不在这儿夹一次的话，顶到边界那一下算出来的新位置是不存在的。
+    /// （从前这里跟着一句「就会把选中集弄丢」—— 那是按值认音那套镜像的毛病，它已经删了。
+    /// 夹取这一步本身照旧要，理由换成上面那条：预览 / 微调算出来的位置得真能落下去。）
     ///
     /// 规矩和命令那边一模一样：时间不挪到 0 之前、音高出不了 0..127，
     /// 两头都按**整组最小的那个可挪量**缩 —— 形状保住，
     /// 不是把每个音各自夹回去压成一摞（那样相对位置就没了）。
     ///
-    /// 认不出的 <see cref="NoteRef"/>（下标越界，或者手里那份 <see cref="Song"/> 已经过期）
-    /// 当它不存在；一个都认不出时原样返回 —— 空组本来就没得夹。
+    /// 认不出的 <see cref="NoteRef"/>（轨下标越界，或者这条轨上没有这个号）当它不存在；
+    /// 一个都认不出时原样返回 —— 空组本来就没得夹。
     /// </summary>
     public (long DeltaTicks, int DeltaPitch) ClampMoveDelta(
         IReadOnlyList<NoteRef> notes, long deltaTicks, int deltaPitch)
@@ -637,7 +659,8 @@ public sealed class PianoRollController
         foreach (var reference in notes)
         {
             if (!IsValidNote(reference)) continue;
-            var note = _song.Tracks[reference.Track].Notes[reference.Index];
+            var track = _song.Tracks[reference.Track];
+            var note = track.Notes[IndexOfId(track, reference.Id)];
             if (note.StartTick < minStart) minStart = note.StartTick;
             if (note.Pitch < minPitch) minPitch = note.Pitch;
             if (note.Pitch > maxPitch) maxPitch = note.Pitch;
@@ -664,38 +687,41 @@ public sealed class PianoRollController
     // ==================== 内部 ====================
 
     /// <summary>
-    /// 每条轨按**定位顺序**排好的音符下标，<see cref="MoveSelection"/> 走它。
+    /// 每条轨按**定位顺序**排好的音符身份，<see cref="MoveSelection"/> 走它。
     ///
     /// 顺序是「时间优先」：起点升序，**同一个起点上按音高降序**。降序不是随便挑的 ——
     /// 卷帘上高音画在上头，降序读出来才是「先上到下、再左到右」，
     /// 和眼睛扫一行谱的方向一致（升序会从下往上走）。
+    ///
+    /// <b>表里装的是 <see cref="NoteId"/>，不是 <see cref="Note"/>。</b>看着多绕一手，
+    /// 但换成音符本身会踩一个很隐蔽的坑：<see cref="Note.Equals"/> 刻意不比 <see cref="Note.Id"/>
+    /// （见那边的说明，S1 缝要的逐字段相等），于是 <c>order.IndexOf(某个音)</c> 会把
+    /// **内容恰好相同的另一个音**认成当前这个 —— 两个音都是 C4、都从 480 起、都一拍长的时候，
+    /// 按方向键会从第二个音跳回第一个音上。这正是这张工单要消灭的那类错认。
     ///
     /// <b>一条轨一张表，不是一条大表。</b>定位只在**焦点轨**里走、不跨轨（见
     /// <see cref="MoveSelection"/>），所以要的是「这条轨的下一个音」，
     /// 「所有轨的下一个音」是另一个问题（换轨是 Ctrl+↑/↓）。
     ///
     /// 顺序必须是**确定的**，否则同一份谱子按两次方向键走到的地方可能不一样：
-    /// <c>OrderBy</c> / <c>ThenByDescending</c> 是稳定排序，而下标数组本来就是 0,1,2… 的顺序，
+    /// <c>OrderBy</c> / <c>ThenByDescending</c> 是稳定排序，而输入本来就是音符数组的次序，
     /// 于是完全重复的音（同刻、同音高）之间也按原次序站定 —— 这是最后那一级的兜底，
-    /// 不用再补一个 <c>ThenBy(下标)</c>。
+    /// 不用再补一个「然后按下标」。
     ///
     /// <see cref="Track.Notes"/> 本来就承诺起点升序，所以「起点」那一级看着是白排的；
     /// 留着它是因为**这条顺序的依据是音符自己、不是数组碰巧怎么排的** ——
     /// 拿掉它，这里的正确性就变成依赖别人一条不变量，而那正是最难发现的那类回归。
     /// </summary>
-    private List<int>[] BuildNavigationOrder()
+    private List<NoteId>[] BuildNavigationOrder()
     {
-        var order = new List<int>[_song.Tracks.Count];
+        var order = new List<NoteId>[_song.Tracks.Count];
 
         for (int t = 0; t < _song.Tracks.Count; t++)
         {
-            var notes = _song.Tracks[t].Notes;
-            var indexes = new int[notes.Count];
-            for (int n = 0; n < notes.Count; n++) indexes[n] = n;
-
-            order[t] = indexes
-                .OrderBy(i => notes[i].StartTick)
-                .ThenByDescending(i => notes[i].Pitch)
+            order[t] = _song.Tracks[t].Notes
+                .OrderBy(n => n.StartTick)
+                .ThenByDescending(n => n.Pitch)
+                .Select(n => n.Id)
                 .ToList();
         }
 

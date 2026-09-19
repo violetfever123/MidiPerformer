@@ -32,7 +32,7 @@ public class SongEditorNoteCommandTests
     {
         var song = SongOf(Map(), Melody(new Note(60, 480, 240, 90)));
 
-        var edited = _editor.MoveNotes(song, new[] { new NoteRef(0, 0) }, 240, 2);
+        var edited = _editor.MoveNotes(song, new[] { Ref(0, 0) }, 240, 2);
 
         var note = edited.Tracks[0].Notes[0];
         Assert.Multiple(() =>
@@ -70,7 +70,7 @@ public class SongEditorNoteCommandTests
             Melody(new Note(60, 0, 240, 100)),
             Bass(new Note(40, 480, 240, 100)));
 
-        var edited = _editor.MoveNotes(song, new[] { new NoteRef(0, 0), new NoteRef(1, 0) }, 240, 12);
+        var edited = _editor.MoveNotes(song, new[] { Ref(0, 0), Ref(1, 0) }, 240, 12);
 
         Assert.Multiple(() =>
         {
@@ -122,7 +122,7 @@ public class SongEditorNoteCommandTests
             new Note(64, 480, 240, 100)));
 
         // 只挪第一个音，一口气越过第二个 —— 第二个没被选中，不在 notes 里
-        var edited = _editor.MoveNotes(song, new[] { new NoteRef(0, 0) }, 960, 0);
+        var edited = _editor.MoveNotes(song, new[] { Ref(0, 0) }, 960, 0);
 
         Assert.Multiple(() =>
         {
@@ -249,7 +249,7 @@ public class SongEditorNoteCommandTests
             Bass(new Note(40, 0, 240, 100)),
             Third(new Note(50, 0, 240, 100)));
 
-        var edited = _editor.MoveNotes(song, new[] { new NoteRef(1, 0) }, 240, 0);
+        var edited = _editor.MoveNotes(song, new[] { Ref(1, 0) }, 240, 0);
 
         Assert.Multiple(() =>
         {
@@ -263,34 +263,42 @@ public class SongEditorNoteCommandTests
     }
 
     /// <summary>
-    /// 越界的 <see cref="NoteRef"/> 抛，而不是「这个音不存在，跳过」。
+    /// 认不出的 <see cref="NoteRef"/> 抛，而不是「这个音不存在，跳过」。
     ///
-    /// <see cref="NoteRef"/> 只在它被算出来的那一份 <see cref="Song"/> 上有效，拿旧下标来用是
-    /// 调用方的 bug。悄悄跳过的话，用户看到的是「拖了五个音只有一个动了」，却没有任何地方报错。
+    /// 坐标只在它被算出来的那一份 <see cref="Song"/> 上有效：拿**别处**（另一份曲子、别的轨）
+    /// 算出来的号来用是调用方的 bug。悄悄跳过的话，用户看到的是「拖了五个音只有一个动了」，
+    /// 却没有任何地方报错。
+    ///
+    /// 两种坏法**报的不是同一句话**，这里分别钉住：轨那头还是下标，越界说「越界」；
+    /// 号那头是发的不是排的，不在这条轨上未必说明它大得离谱（它可能只是别的轨上的音），
+    /// 所以说的是「不是这条轨上的音」，把人往「号太大」那个方向带是错的。
     ///
     /// 增量为 0 时**也照抛**：同一个坏坐标不该一会儿没事一会儿炸 ——
     /// 「没改就还回来同一个」说的是结果，不是「跳过所有检查」。
     /// </summary>
     [Test]
-    public void 挪动时越界的音符坐标抛中文错()
+    public void 挪动时认不出的音符坐标抛中文错()
     {
         var song = SongOf(Map(), Melody(new Note(60, 0, 240, 100)));
 
         var byTrack = Assert.Throws<ArgumentOutOfRangeException>(
-            () => _editor.MoveNotes(song, new[] { new NoteRef(2, 0) }, 10, 0));
-        var byIndex = Assert.Throws<ArgumentOutOfRangeException>(
-            () => _editor.MoveNotes(song, new[] { new NoteRef(0, 5) }, 10, 0));
+            () => _editor.MoveNotes(song, new[] { Ref(2, 0) }, 10, 0));
+        // 这条轨上只有 1 号一个音，7 号是凭空来的 —— 不能用 Ref(0, 5)：那个帮手算出来的
+        // 是「第 6 个音的号」，本身还是照位置来的，而这里要的恰恰是**不照位置来**的坏号
+        var byId = Assert.Throws<ArgumentOutOfRangeException>(
+            () => _editor.MoveNotes(song, new[] { new NoteRef(0, new NoteId(7)) }, 10, 0));
         var byZeroDelta = Assert.Throws<ArgumentOutOfRangeException>(
-            () => _editor.MoveNotes(song, new[] { new NoteRef(0, 5) }, 0, 0));
+            () => _editor.MoveNotes(song, new[] { new NoteRef(0, new NoteId(7)) }, 0, 0));
 
         Assert.Multiple(() =>
         {
             Assert.That(byTrack!.Message, Does.Contain("越界"), "错误消息得是给人看的中文");
             Assert.That(byTrack.Message, Does.Contain("2"), "把实际值写出来");
             Assert.That(byTrack.Message, Does.Contain("1 条轨"), "合法范围也写出来");
-            Assert.That(byIndex!.Message, Does.Contain("越界"));
-            Assert.That(byIndex.Message, Does.Contain("5"));
-            Assert.That(byZeroDelta!.Message, Does.Contain("越界"));
+            Assert.That(byId!.Message, Does.Contain("7 号音"), "报的是那个号，不是「越界」");
+            Assert.That(byId.Message, Does.Contain("1 个音"), "顺带说清这条轨上有几个音");
+            Assert.That(byId.Message, Does.Not.Contain("越界"), "说「越界」会把人往「号太大」带");
+            Assert.That(byZeroDelta!.Message, Does.Contain("7 号音"));
         });
     }
 
@@ -301,7 +309,7 @@ public class SongEditorNoteCommandTests
     {
         var song = SongOf(Map(), Melody(new Note(60, 480, 240, 100)));
 
-        var edited = _editor.SetNoteSpan(song, new NoteRef(0, 0), 480, 960);
+        var edited = _editor.SetNoteSpan(song, Ref(0, 0), 480, 960);
 
         Assert.That(edited.Tracks[0].Notes[0], Is.EqualTo(new Note(60, 480, 960, 100)));
     }
@@ -311,7 +319,7 @@ public class SongEditorNoteCommandTests
     {
         var song = SongOf(Map(), Melody(new Note(60, 480, 960, 100)));
 
-        var edited = _editor.SetNoteSpan(song, new NoteRef(0, 0), 480, 240);
+        var edited = _editor.SetNoteSpan(song, Ref(0, 0), 480, 240);
 
         Assert.That(edited.Tracks[0].Notes[0], Is.EqualTo(new Note(60, 480, 240, 100)), "起点不动，只有时值变短");
     }
@@ -325,7 +333,7 @@ public class SongEditorNoteCommandTests
     {
         var song = SongOf(Map(), Melody(new Note(60, 480, 480, 100)));
 
-        var edited = _editor.SetNoteSpan(song, new NoteRef(0, 0), 240, 720);
+        var edited = _editor.SetNoteSpan(song, Ref(0, 0), 240, 720);
 
         Assert.Multiple(() =>
         {
@@ -341,9 +349,9 @@ public class SongEditorNoteCommandTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(_editor.SetNoteSpan(song, new NoteRef(0, 0), 480, 0).Tracks[0].Notes[0].LengthTicks,
+            Assert.That(_editor.SetNoteSpan(song, Ref(0, 0), 480, 0).Tracks[0].Notes[0].LengthTicks,
                 Is.EqualTo(1), "0 不算时值");
-            Assert.That(_editor.SetNoteSpan(song, new NoteRef(0, 0), 480, -100).Tracks[0].Notes[0].LengthTicks,
+            Assert.That(_editor.SetNoteSpan(song, Ref(0, 0), 480, -100).Tracks[0].Notes[0].LengthTicks,
                 Is.EqualTo(1));
         });
     }
@@ -353,7 +361,7 @@ public class SongEditorNoteCommandTests
     {
         var song = SongOf(Map(), Melody(new Note(60, 480, 480, 100)));
 
-        var edited = _editor.SetNoteSpan(song, new NoteRef(0, 0), -500, 480);
+        var edited = _editor.SetNoteSpan(song, Ref(0, 0), -500, 480);
 
         Assert.Multiple(() =>
         {
@@ -371,8 +379,8 @@ public class SongEditorNoteCommandTests
     {
         var song = SongOf(Map(), Melody(new Note(60, 0, 480, 100)));
 
-        var stretched = _editor.SetNoteSpan(song, new NoteRef(0, 0), long.MaxValue - 10, 480);
-        var pinned = _editor.SetNoteSpan(song, new NoteRef(0, 0), long.MaxValue, 480);
+        var stretched = _editor.SetNoteSpan(song, Ref(0, 0), long.MaxValue - 10, 480);
+        var pinned = _editor.SetNoteSpan(song, Ref(0, 0), long.MaxValue, 480);
 
         Assert.Multiple(() =>
         {
@@ -402,7 +410,7 @@ public class SongEditorNoteCommandTests
             new Note(64, 480, 240, 100),    // 乙
             new Note(67, 960, 240, 100)));  // 丙
 
-        var edited = _editor.SetNoteSpan(song, new NoteRef(0, 0), 700, 240);
+        var edited = _editor.SetNoteSpan(song, Ref(0, 0), 700, 240);
 
         var notes = edited.Tracks[0].Notes;
         Assert.Multiple(() =>
@@ -432,7 +440,7 @@ public class SongEditorNoteCommandTests
             new Note(64, 480, 240, 100),    // 乙
             new Note(67, 960, 240, 100)));  // 丙：被挪到 0，和甲撞在一起
 
-        var edited = _editor.SetNoteSpan(song, new NoteRef(0, 2), 0, 240);
+        var edited = _editor.SetNoteSpan(song, Ref(0, 2), 0, 240);
 
         var notes = edited.Tracks[0].Notes;
         Assert.Multiple(() =>
@@ -451,10 +459,10 @@ public class SongEditorNoteCommandTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(_editor.SetNoteSpan(song, new NoteRef(0, 0), 480, 240), Is.SameAs(song));
+            Assert.That(_editor.SetNoteSpan(song, Ref(0, 0), 480, 240), Is.SameAs(song));
             // 夹完正好等于原来：一个 1 tick 的音，起点要 -5、时值要 -5，夹完还是 (0, 1)
             var one = SongOf(Map(), Melody(new Note(60, 0, 1, 100)));
-            Assert.That(_editor.SetNoteSpan(one, new NoteRef(0, 0), -5, -5), Is.SameAs(one), "夹完等于没夹");
+            Assert.That(_editor.SetNoteSpan(one, Ref(0, 0), -5, -5), Is.SameAs(one), "夹完等于没夹");
         });
     }
 
@@ -465,7 +473,7 @@ public class SongEditorNoteCommandTests
             Melody(new Note(60, 0, 240, 100)),
             Bass(new Note(40, 0, 240, 100)));
 
-        var edited = _editor.SetNoteSpan(song, new NoteRef(0, 0), 0, 480);
+        var edited = _editor.SetNoteSpan(song, Ref(0, 0), 0, 480);
 
         Assert.Multiple(() =>
         {
@@ -481,7 +489,7 @@ public class SongEditorNoteCommandTests
         var song = SongOf(Map(), Melody(new Note(60, 0, 240, 100)));
 
         var ex = Assert.Throws<ArgumentOutOfRangeException>(
-            () => _editor.SetNoteSpan(song, new NoteRef(9, 0), 0, 240));
+            () => _editor.SetNoteSpan(song, Ref(9, 0), 0, 240));
 
         Assert.That(ex!.Message, Does.Contain("越界"));
     }
@@ -493,7 +501,7 @@ public class SongEditorNoteCommandTests
     {
         var song = SongOf(Map(), Melody(new Note(60, 0, 240, 100), new Note(64, 480, 240, 100)));
 
-        var edited = _editor.DeleteNotes(song, new[] { new NoteRef(0, 0) });
+        var edited = _editor.DeleteNotes(song, new[] { Ref(0, 0) });
 
         Assert.That(edited.Tracks[0].Notes.Select(n => n.Pitch), Is.EqualTo(new[] { 64 }), "删掉的是说到的那个");
     }
@@ -505,7 +513,7 @@ public class SongEditorNoteCommandTests
             Melody(new Note(60, 0, 240, 100), new Note(64, 480, 240, 100), new Note(67, 960, 240, 100)),
             Bass(new Note(40, 0, 240, 100)));
 
-        var edited = _editor.DeleteNotes(song, new[] { new NoteRef(0, 0), new NoteRef(0, 2), new NoteRef(1, 0) });
+        var edited = _editor.DeleteNotes(song, new[] { Ref(0, 0), Ref(0, 2), Ref(1, 0) });
 
         Assert.Multiple(() =>
         {
@@ -527,7 +535,7 @@ public class SongEditorNoteCommandTests
         var song = SongOf(Map(), Melody(new Note(60, 0, 240, 100), new Note(64, 480, 240, 100)));
 
         var edited = _editor.DeleteNotes(
-            song, new[] { new NoteRef(0, 0), new NoteRef(0, 0), new NoteRef(0, 0) });
+            song, new[] { Ref(0, 0), Ref(0, 0), Ref(0, 0) });
 
         Assert.Multiple(() =>
         {
@@ -547,7 +555,7 @@ public class SongEditorNoteCommandTests
             Melody(new Note(60, 0, 240, 100)),
             Bass(new Note(40, 0, 240, 100)));
 
-        var edited = _editor.DeleteNotes(song, new[] { new NoteRef(0, 0) });
+        var edited = _editor.DeleteNotes(song, new[] { Ref(0, 0) });
 
         Assert.Multiple(() =>
         {
@@ -570,14 +578,15 @@ public class SongEditorNoteCommandTests
     }
 
     [Test]
-    public void 删音时越界的音符坐标抛中文错()
+    public void 删音时认不出的音符坐标抛中文错()
     {
         var song = SongOf(Map(), Melody(new Note(60, 0, 240, 100)));
 
+        // 一好一坏：坏的那个不该把好的那个一起拖下水（这条命令是先查完再动手的）
         var ex = Assert.Throws<ArgumentOutOfRangeException>(
-            () => _editor.DeleteNotes(song, new[] { new NoteRef(0, 0), new NoteRef(0, 7) }));
+            () => _editor.DeleteNotes(song, new[] { Ref(0, 0), new NoteRef(0, new NoteId(7)) }));
 
-        Assert.That(ex!.Message, Does.Contain("越界"));
+        Assert.That(ex!.Message, Does.Contain("7 号音"));
     }
 
     // ==================== 剪一段（连时间一起抽走） ====================
@@ -838,7 +847,7 @@ public class SongEditorNoteCommandTests
             new Note(64, 480, 240, 100, new NoteId(2)),
             new Note(67, 960, 240, 100, new NoteId(3))));
 
-        var edited = _editor.MoveNotes(song, new[] { new NoteRef(0, 0), new NoteRef(0, 2) }, 240, 2);
+        var edited = _editor.MoveNotes(song, new[] { Ref(0, 0), Ref(0, 2) }, 240, 2);
 
         Assert.Multiple(() =>
         {
@@ -861,7 +870,7 @@ public class SongEditorNoteCommandTests
             new Note(60, 0, 240, 100, new NoteId(1)),
             new Note(64, 480, 240, 100, new NoteId(2))));
 
-        var edited = _editor.MoveNotes(song, new[] { new NoteRef(0, 0) }, 960, 0);
+        var edited = _editor.MoveNotes(song, new[] { Ref(0, 0) }, 960, 0);
 
         Assert.Multiple(() =>
         {
@@ -880,7 +889,7 @@ public class SongEditorNoteCommandTests
             new Note(60, 0, 240, 100, new NoteId(1)),
             new Note(64, 480, 240, 100, new NoteId(2))));
 
-        var edited = _editor.SetNoteSpan(song, new NoteRef(0, 1), 240, 960);
+        var edited = _editor.SetNoteSpan(song, Ref(0, 1), 240, 960);
 
         Assert.Multiple(() =>
         {
@@ -902,7 +911,9 @@ public class SongEditorNoteCommandTests
             new Note(60, 0, 240, 100, new NoteId(3)),
             new Note(64, 480, 240, 100, new NoteId(7))));
 
-        var edited = _editor.DeleteNotes(song, new[] { new NoteRef(0, 0) });
+        // 号刻意不是 1、2：Ref 那个帮手算的是「第 i 个音 = i+1 号」，这里要的正是
+        // 「号跟位置无关」，所以坐标得手写 —— 删的是排在最前面、号却是 3 的那个音
+        var edited = _editor.DeleteNotes(song, new[] { new NoteRef(0, new NoteId(3)) });
 
         Assert.That(Ids(edited, 0), Is.EqualTo(new[] { 7 }),
             "删掉的是 3 号那个音，7 号原样留着");
@@ -1178,9 +1189,9 @@ public class SongEditorNoteCommandTests
         var editor = new UndoableSongEditor(new SongEditor());
         var song = SongOf(Map(), Melody(new Note(60, 0, 240, 100), new Note(64, 480, 240, 100)));
 
-        var moved = editor.MoveNotes(song, new[] { new NoteRef(0, 0) }, 240, 0);
-        var spanned = editor.SetNoteSpan(moved, new NoteRef(0, 0), 240, 120);
-        var deleted = editor.DeleteNotes(spanned, new[] { new NoteRef(0, 1) });
+        var moved = editor.MoveNotes(song, new[] { Ref(0, 0) }, 240, 0);
+        var spanned = editor.SetNoteSpan(moved, Ref(0, 0), 240, 120);
+        var deleted = editor.DeleteNotes(spanned, new[] { Ref(0, 1) });
         var renamed = editor.RenameTrack(deleted, 0, "低音");
         var dropped = editor.DeleteTrack(renamed, 0);
 
@@ -1205,8 +1216,8 @@ public class SongEditorNoteCommandTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(editor.MoveNotes(song, new[] { new NoteRef(0, 0) }, 0, 0), Is.SameAs(song));
-            Assert.That(editor.SetNoteSpan(song, new NoteRef(0, 0), 0, 240), Is.SameAs(song));
+            Assert.That(editor.MoveNotes(song, new[] { Ref(0, 0) }, 0, 0), Is.SameAs(song));
+            Assert.That(editor.SetNoteSpan(song, Ref(0, 0), 0, 240), Is.SameAs(song));
             Assert.That(editor.DeleteNotes(song, Array.Empty<NoteRef>()), Is.SameAs(song));
             Assert.That(editor.RenameTrack(song, 0, "主旋律"), Is.SameAs(song));
             Assert.That(editor.CanUndo, Is.False, "一下都没改，一格都不该占");
@@ -1219,15 +1230,42 @@ public class SongEditorNoteCommandTests
 
     private static TempoMap Map() => new(TimeDivision.PulsesPerQuarter(480));
 
-    private static Track Melody(params Note[] notes) => new(0, 0, "主旋律", 24, notes);
+    private static Track Melody(params Note[] notes) => new(0, 0, "主旋律", 24, Numbered(notes));
 
-    private static Track Bass(params Note[] notes) => new(1, 1, "贝斯", 33, notes);
+    private static Track Bass(params Note[] notes) => new(1, 1, "贝斯", 33, Numbered(notes));
 
-    private static Track Third(params Note[] notes) => new(2, 9, "鼓点", 0, notes);
+    private static Track Third(params Note[] notes) => new(2, 9, "鼓点", 0, Numbered(notes));
+
+    /// <summary>
+    /// 给没写身份的音按数组顺序发 1..N 号 —— 和导入那条路做的是同一件事
+    /// （<c>NoteIdentity.AssignInOrder</c>），于是测试里的音和真曲子里的音一样**有身份**。
+    ///
+    /// **显式写好号的音一个都不动**：那几条测试本来就是冲着「号」去的
+    /// （挪动之后身份不换、剪出来的碎片发新号…），覆盖掉的话它们盯的那件事就没了。
+    /// 安全的前提是那些曲子要么全写了号要么全没写 —— 混着写的话，
+    /// 「只补没号的」也可能补出一个重号来，而重号会让身份查找认错音。
+    /// </summary>
+    private static Note[] Numbered(Note[] notes)
+    {
+        var numbered = new Note[notes.Length];
+        for (int i = 0; i < notes.Length; i++)
+            numbered[i] = notes[i].Id == NoteId.None ? notes[i] with { Id = new NoteId(i + 1) } : notes[i];
+
+        return numbered;
+    }
+
+    /// <summary>
+    /// 第 <paramref name="track"/> 条轨上**第 <paramref name="index"/> 个**音（数组序，0 起）的坐标。
+    ///
+    /// 这是给测试用的近路：曲子是 <see cref="Numbered"/> 发的号，第 i 个音就是 i+1 号。
+    /// 真实代码里没人能这么算 —— 界面手上的号来自模型，从来不是自己数出来的
+    /// （那正是 31 号工单要的：**别再把位置当身份**）。所以这个帮手只活在测试里。
+    /// </summary>
+    private static NoteRef Ref(int track, int index) => new(track, new NoteId(index + 1));
 
     /// <summary>第 <paramref name="track"/> 条轨的前 <paramref name="count"/> 个音，按数组顺序。</summary>
     private static NoteRef[] All(int track, int count)
-        => Enumerable.Range(0, count).Select(i => new NoteRef(track, i)).ToArray();
+        => Enumerable.Range(0, count).Select(i => Ref(track, i)).ToArray();
 
     private static long[] Starts(Song song, int track)
         => song.Tracks[track].Notes.Select(n => n.StartTick).ToArray();

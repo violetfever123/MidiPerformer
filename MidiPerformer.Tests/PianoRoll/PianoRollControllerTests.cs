@@ -1,6 +1,7 @@
 using MidiPerformer.Adapters;
 using MidiPerformer.Adapters.Controllers;
 using MidiPerformer.Core.Model;
+using MidiPerformer.Core.UseCases.Editing;
 using NUnit.Framework;
 
 namespace MidiPerformer.Tests.PianoRoll;
@@ -13,6 +14,9 @@ namespace MidiPerformer.Tests.PianoRoll;
 ///
 /// 用例里凡是「视图滚到某处」的断言，都拿 16 小节的曲子 —— 8 小节的曲子上「滚到第 6 小节」
 /// 会被合法的上界夹住，测出来的就不是「跳转对不对」，而是「夹取对不对」了（夹取另有专门用例）。
+///
+/// 断言里出现的那一串音符坐标是**身份**（<see cref="NoteRef"/>），不是下标 ——
+/// 见 <c>换了一份曲子之后坐标还落在同一个音上</c> 那条。
 /// </summary>
 public class PianoRollControllerTests
 {
@@ -21,10 +25,10 @@ public class PianoRollControllerTests
     private static Song SongOf(params Track[] tracks)
         => new(tracks, new TempoMap(TimeDivision.PulsesPerQuarter(480)));
 
-    private static Track Melody(params Note[] notes) => new(0, 0, "主旋律", 24, notes);
+    private static Track Melody(params Note[] notes) => new(0, 0, "主旋律", 24, Numbered(notes));
 
     private static Track Bass(int transpose, params Note[] notes)
-        => new(1, 1, "贝斯", 33, notes, transpose);
+        => new(1, 1, "贝斯", 33, Numbered(notes), transpose);
 
     /// <summary>每小节一个音的曲子，够滚、够跳、够算小节数。</summary>
     private static Song BarsOf(int bars)
@@ -33,6 +37,31 @@ public class PianoRollControllerTests
         for (int bar = 0; bar < bars; bar++) notes.Add(new Note(60 + bar % 5, Bar * bar, 480, 100));
         return SongOf(Melody(notes.ToArray()));
     }
+
+    /// <summary>
+    /// 给没写身份的音按数组顺序发 1..N 号。（<c>NoteIdentity.AssignInOrder</c> 在测试里的替身 ——
+    /// 那个类型是 Core 内部的，测试看不见。）
+    ///
+    /// **一条轨上的音都有身份**，和真曲子一样：卷帘这套东西现在按 <see cref="NoteId"/> 认音，
+    /// 一个没号的音谁都认不出来，测出来的就是「认不出来」那套行为，而不是本来要测的那件事。
+    /// 显式写了号的音一个都不动 —— 冲着号去的那几条用例还在别处。
+    /// </summary>
+    private static Note[] Numbered(Note[] notes)
+    {
+        var numbered = new Note[notes.Length];
+        for (int i = 0; i < notes.Length; i++)
+            numbered[i] = notes[i].Id == NoteId.None ? notes[i] with { Id = new NoteId(i + 1) } : notes[i];
+
+        return numbered;
+    }
+
+    /// <summary>
+    /// 第 <paramref name="track"/> 条轨上**第 <paramref name="index"/> 个**音（数组序，0 起）的坐标。
+    ///
+    /// 号是 <see cref="Numbered"/> 按位置发的，所以第 i 个音就是 i+1 号。这条近路只活在测试里：
+    /// 真实代码手里的号来自模型（<c>Note.Id</c>），从来不是自己数出来的。
+    /// </summary>
+    private static NoteRef Ref(int track, int index) => new(track, new NoteId(index + 1));
 
     // ==================== 小节与视图位置 ====================
 
@@ -219,7 +248,7 @@ public class PianoRollControllerTests
             Melody(new Note(60, Bar, 480, 100), new Note(62, Bar * 2, 480, 100)),
             Bass(0, new Note(40, Bar * 5, 480, 100))));
 
-        controller.SelectOnly(new NoteRef(1, 0));
+        controller.SelectOnly(Ref(1, 0));
         controller.SetFocusedTrack(0);
 
         Assert.Multiple(() =>
@@ -228,7 +257,7 @@ public class PianoRollControllerTests
             Assert.That(controller.Selection!.Value.Track, Is.EqualTo(0), "选中集落到焦点轨上");
         });
 
-        controller.SelectOnly(new NoteRef(1, 0));
+        controller.SelectOnly(Ref(1, 0));
         controller.SetFocusedTrack(0);
         Assert.That(controller.MoveSelection(1)?.Pitch, Is.EqualTo(60), "Ctrl+→ 也从头起算，不是找最近的");
     }
@@ -307,14 +336,15 @@ public class PianoRollControllerTests
     }
 
     [Test]
-    public void 下标越界时读数条拿到的是空的()
+    public void 认不出的音符与越界的轨读数条都拿到空的()
     {
         var controller = new PianoRollController(SongOf(Melody(new Note(60, 0, 480, 100))));
 
         Assert.Multiple(() =>
         {
-            Assert.That(controller.Describe(0, 99), Is.Null);
-            Assert.That(controller.Describe(9, 0), Is.Null, "悬停时轨刚好被换掉就会碰上");
+            Assert.That(controller.Describe(0, new NoteId(99)), Is.Null, "这条轨上没有这个号");
+            // 轨那头也不作数：号是 1 号（这条轨上真有），但第 9 条轨不存在
+            Assert.That(controller.Describe(9, new NoteId(1)), Is.Null, "悬停时轨刚好被换掉就会碰上");
         });
     }
 
@@ -454,12 +484,12 @@ public class PianoRollControllerTests
         double x = PianoRollGeometry.XAtTick(viewport, 240) + 8;
         double y = PianoRollGeometry.YAtPitch(viewport, 60) + viewport.RowHeight / 2;
 
-        var hit = controller.HitTest(0, viewport, x, y, out int index);
+        var hit = controller.HitTestRef(0, viewport, x, y, out var note);
 
         Assert.Multiple(() =>
         {
             Assert.That(hit, Is.EqualTo(PianoRollGeometry.RollHit.Body));
-            Assert.That(index, Is.EqualTo(0), "下标要能回到模型里的那个音");
+            Assert.That(note, Is.EqualTo(Ref(0, 0)), "给出来的坐标要能回到模型里的那个音");
         });
     }
 
@@ -469,12 +499,12 @@ public class PianoRollControllerTests
         var controller = new PianoRollController(SongOf(Melody(new Note(60, 0, 480, 100))));
         var viewport = controller.ViewportOf(0, 800, 200);
 
-        var hit = controller.HitTest(0, viewport, 700, 100, out int index);
+        var hit = controller.HitTestRef(0, viewport, 700, 100, out var note);
 
         Assert.Multiple(() =>
         {
             Assert.That(hit, Is.EqualTo(PianoRollGeometry.RollHit.None));
-            Assert.That(index, Is.EqualTo(-1));
+            Assert.That(note, Is.EqualTo(new NoteRef(-1, NoteId.None)));
         });
     }
 
@@ -490,9 +520,9 @@ public class PianoRollControllerTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(controller.HitTest(0, viewport, x, y, out int index),
+            Assert.That(controller.HitTestRef(0, viewport, x, y, out var note),
                 Is.EqualTo(PianoRollGeometry.RollHit.Body));
-            Assert.That(index, Is.EqualTo(0));
+            Assert.That(note, Is.EqualTo(Ref(0, 0)));
         });
     }
 
@@ -505,9 +535,9 @@ public class PianoRollControllerTests
 
         // 横坐标 1010 已经出了卷帘的右边缘（宽 800）。第 5 小节那个音要是参与判定，
         // 它的块正好落在这儿 —— 屏幕外的东西点了不该有反应
-        Assert.That(controller.HitTest(0, viewport, 1010, y, out int index),
+        Assert.That(controller.HitTestRef(0, viewport, 1010, y, out var note),
             Is.EqualTo(PianoRollGeometry.RollHit.None));
-        Assert.That(index, Is.EqualTo(-1));
+        Assert.That(note, Is.EqualTo(new NoteRef(-1, NoteId.None)));
     }
 
     // ==================== 导航条的柱子 ====================
@@ -591,15 +621,15 @@ public class PianoRollControllerTests
     {
         var controller = new PianoRollController(ThreeNotes());
 
-        controller.SelectOnly(new NoteRef(0, 1));
+        controller.SelectOnly(Ref(0, 1));
 
         Assert.Multiple(() =>
         {
-            Assert.That(controller.SelectedNotes, Is.EqualTo(new[] { new NoteRef(0, 1) }));
+            Assert.That(controller.SelectedNotes, Is.EqualTo(new[] { Ref(0, 1) }));
             Assert.That(controller.Selection?.Track, Is.EqualTo(0));
-            Assert.That(controller.Selection?.Note, Is.EqualTo(1));
-            Assert.That(controller.IsSelected(new NoteRef(0, 1)), Is.True);
-            Assert.That(controller.IsSelected(new NoteRef(0, 0)), Is.False);
+            Assert.That(controller.Selection?.Note, Is.EqualTo(Ref(0, 1).Id));
+            Assert.That(controller.IsSelected(Ref(0, 1)), Is.True);
+            Assert.That(controller.IsSelected(Ref(0, 0)), Is.False);
         });
     }
 
@@ -607,26 +637,26 @@ public class PianoRollControllerTests
     public void 选一个会顶掉之前的一整组()
     {
         var controller = new PianoRollController(ThreeNotes());
-        controller.SetSelection(new[] { new NoteRef(0, 0), new NoteRef(0, 1) });
+        controller.SetSelection(new[] { Ref(0, 0), Ref(0, 1) });
 
-        controller.SelectOnly(new NoteRef(0, 2));
+        controller.SelectOnly(Ref(0, 2));
 
-        Assert.That(controller.SelectedNotes, Is.EqualTo(new[] { new NoteRef(0, 2) }), "「只选它」就是只剩它");
+        Assert.That(controller.SelectedNotes, Is.EqualTo(new[] { Ref(0, 2) }), "「只选它」就是只剩它");
     }
 
     [Test]
     public void 框选一组音符()
     {
         var controller = new PianoRollController(ThreeNotes());
-        var box = new[] { new NoteRef(0, 0), new NoteRef(0, 1), new NoteRef(0, 2) };
+        var box = new[] { Ref(0, 0), Ref(0, 1), Ref(0, 2) };
 
         controller.SetSelection(box);
 
         Assert.Multiple(() =>
         {
             Assert.That(controller.SelectedNotes, Is.EqualTo(box), "顺序原样保留，一条轨里就是时间顺序");
-            Assert.That(controller.Selection?.Note, Is.EqualTo(2), "主选中是最后加进去的那个");
-            Assert.That(controller.IsSelected(new NoteRef(0, 1)), Is.True, "一组里的每一个都在选中集里");
+            Assert.That(controller.Selection?.Note, Is.EqualTo(Ref(0, 2).Id), "主选中是最后加进去的那个");
+            Assert.That(controller.IsSelected(Ref(0, 1)), Is.True, "一组里的每一个都在选中集里");
         });
     }
 
@@ -641,14 +671,14 @@ public class PianoRollControllerTests
             Assert.That(controller.SelectedNotes, Is.Empty);
         });
 
-        controller.ExtendSelection(new NoteRef(0, 0));
-        controller.ExtendSelection(new NoteRef(0, 2));
+        controller.ExtendSelection(Ref(0, 0));
+        controller.ExtendSelection(Ref(0, 2));
         var primary = controller.Selection!.Value;
 
         Assert.Multiple(() =>
         {
             Assert.That(controller.SelectedNotes, Has.Count.EqualTo(2), "加一个就是往组里加，不是替换");
-            Assert.That(primary.Note, Is.EqualTo(2), "最后加的那个是主选中");
+            Assert.That(primary.Note, Is.EqualTo(Ref(0, 2).Id), "最后加的那个是主选中");
             Assert.That(controller.SelectedNotes, Does.Contain(new NoteRef(primary.Track, primary.Note)),
                 "主选中永远指在选中集里 —— 它不是另存的一份状态");
         });
@@ -666,70 +696,84 @@ public class PianoRollControllerTests
     public void 加一个已经选中的音不会把主选中顶掉()
     {
         var controller = new PianoRollController(ThreeNotes());
-        controller.SetSelection(new[] { new NoteRef(0, 0), new NoteRef(0, 1) });
+        controller.SetSelection(new[] { Ref(0, 0), Ref(0, 1) });
 
-        controller.ExtendSelection(new NoteRef(0, 0));
+        controller.ExtendSelection(Ref(0, 0));
 
         Assert.Multiple(() =>
         {
-            Assert.That(controller.SelectedNotes, Is.EqualTo(new[] { new NoteRef(0, 0), new NoteRef(0, 1) }),
+            Assert.That(controller.SelectedNotes, Is.EqualTo(new[] { Ref(0, 0), Ref(0, 1) }),
                 "Shift 点一个已经选中的音，意思是「留着它」，不是「再来一份」");
-            Assert.That(controller.Selection?.Note, Is.EqualTo(1), "主选中也不该被它顶掉");
+            Assert.That(controller.Selection?.Note, Is.EqualTo(Ref(0, 1).Id), "主选中也不该被它顶掉");
         });
 
-        controller.ExtendSelection(new NoteRef(0, 9));
+        // 9 号这条轨上没有（三个音是 1、2、3 号）—— 加一个不存在的音等于没加
+        controller.ExtendSelection(new NoteRef(0, new NoteId(9)));
 
         Assert.That(controller.SelectedNotes, Has.Count.EqualTo(2), "加一个不存在的音等于没加");
     }
 
     [Test]
-    public void 越界的音符被静默丢掉()
+    public void 认不出的音符被静默丢掉()
     {
-        // 曲子刚被换掉、轨刚被删掉的时候会碰上 —— 那不是错误，不该抛（和 RestoreSelection 一条规矩）
+        // 曲子刚被换掉、轨刚被删掉的时候会碰上 —— 那不是错误，不该抛
+        // （和 SetSelection 一条规矩：认不出来的坐标当没选中，等下一次编辑/重画自己好）
         var controller = new PianoRollController(ThreeNotes());
 
-        controller.SelectOnly(new NoteRef(0, 99));
+        controller.SelectOnly(new NoteRef(0, new NoteId(99)));
         Assert.That(controller.SelectedNotes, Is.Empty, "点了个不存在的音 = 什么都没选中");
 
-        controller.SelectOnly(new NoteRef(9, 0));
+        controller.SelectOnly(Ref(9, 0));
         Assert.That(controller.SelectedNotes, Is.Empty, "轨下标越界也一样");
 
-        controller.SelectOnly(new NoteRef(0, -1));
-        Assert.That(controller.SelectedNotes, Is.Empty, "负数下标也不是音");
+        // 号是从 1 发起的，负数号不可能指到任何音上 —— 但也别抛，那只是个认不出来的坐标
+        controller.SelectOnly(new NoteRef(0, new NoteId(-1)));
+        Assert.That(controller.SelectedNotes, Is.Empty, "负数号也不是音");
     }
 
     [Test]
-    public void 整体替换时越界的和重复的都丢掉()
+    public void 整体替换时认不出的和重复的都丢掉()
     {
         var controller = new PianoRollController(ThreeNotes());
 
         controller.SetSelection(new[]
         {
-            new NoteRef(0, 0), new NoteRef(0, 99), new NoteRef(-1, 0), new NoteRef(0, 0), new NoteRef(0, 1)
+            Ref(0, 0), new NoteRef(0, new NoteId(99)), Ref(-1, 0), Ref(0, 0), Ref(0, 1)
         });
 
-        Assert.That(controller.SelectedNotes, Is.EqualTo(new[] { new NoteRef(0, 0), new NoteRef(0, 1) }),
-            "越界的丢掉；重复的只留一个 —— 这一串要原样交给 MoveNotes，同一个音出现两次就会被挪两倍距离");
+        Assert.That(controller.SelectedNotes, Is.EqualTo(new[] { Ref(0, 0), Ref(0, 1) }),
+            "认不出的丢掉；重复的只留一个 —— 这一串要原样交给 MoveNotes，同一个音出现两次就会被挪两倍距离");
     }
 
+    /// <summary>
+    /// **编辑换了一份曲子之后，坐标还落在同一个音上** —— 这条是这次工单的命根子。
+    ///
+    /// 界面每次编辑都是这个形状：拿旧坐标去 <c>SongEditor</c> 改出**新的一份 Song**，
+    /// 重开一个控制器，再把坐标原样交回去（<c>MainWindow.ApplySong</c>）。
+    /// 从前靠的是窗口里那套「把选中的音的内容抄下来、改完在新数组里按内容找回来」的镜像，
+    /// 现在不许有那套东西了 —— 坐标自己就得活过这一次编辑。
+    ///
+    /// 按下标认音的话这条必挂：这里挪的第一个音**越过了邻居**，数组重排之后
+    /// 「第 0 个」已经换成了另一个音（音高 64 的那个），交回去的坐标就选错了音，
+    /// 而且一声不吭。
+    /// </summary>
     [Test]
-    public void 放回选中就是只选它一个()
+    public void 换了一份曲子之后坐标还落在同一个音上()
     {
-        var controller = new PianoRollController(ThreeNotes());
-        controller.SetSelection(new[] { new NoteRef(0, 0), new NoteRef(0, 1) });
+        var before = SongOf(Melody(new Note(60, 0, 240, 100), new Note(64, 480, 240, 100)));
+        var controller = new PianoRollController(before);
+        controller.SelectOnly(Ref(0, 0));
 
-        controller.RestoreSelection(0, 1);
+        var edited = new SongEditor().MoveNotes(before, controller.SelectedNotes, 960, 0);
+        var next = new PianoRollController(edited);
+        next.SetSelection(controller.SelectedNotes);
+
         Assert.Multiple(() =>
         {
-            Assert.That(controller.SelectedNotes, Is.EqualTo(new[] { new NoteRef(0, 1) }));
-            Assert.That(controller.Selection?.Note, Is.EqualTo(1));
-        });
-
-        controller.RestoreSelection(0, 99);
-        Assert.Multiple(() =>
-        {
-            Assert.That(controller.Selection, Is.Null, "越界当没选中 —— 08 时就是这个行为，没变");
-            Assert.That(controller.SelectedNotes, Is.Empty);
+            Assert.That(edited.Tracks[0].Notes[0].Pitch, Is.EqualTo(64), "前提：越过邻居之后数组确实重排了");
+            Assert.That(next.SelectedNotes, Is.EqualTo(new[] { Ref(0, 0) }), "坐标原样交回去");
+            Assert.That(next.DescribeSelection()!.Value.Pitch, Is.EqualTo(60),
+                "选中的还是被挪走的那个音，不是重排之后占了第 0 格的那个");
         });
     }
 
@@ -739,7 +783,7 @@ public class PianoRollControllerTests
     private static Song ThreeTracks() => SongOf(
         Melody(new Note(60, Bar * 6, 480, 100)),
         Bass(0, new Note(48, Bar * 6, 480, 100)),
-        new Track(2, 9, "鼓点", 0, new[] { new Note(36, Bar * 6, 480, 100) }));
+        new Track(2, 9, "鼓点", 0, Numbered(new[] { new Note(36, Bar * 6, 480, 100) })));
 
     [Test]
     public void 初始聚焦在第一条()
@@ -897,7 +941,7 @@ public class PianoRollControllerTests
     public void 换聚焦不动选中集也不动视图()
     {
         var controller = new PianoRollController(ThreeTracks());
-        controller.SelectOnly(new NoteRef(0, 0));
+        controller.SelectOnly(Ref(0, 0));
         controller.SetViewStart(Bar * 2);
         long view = controller.ViewStartTick;
 
@@ -905,7 +949,7 @@ public class PianoRollControllerTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(controller.SelectedNotes.ToArray(), Is.EqualTo(new[] { new NoteRef(0, 0) }));
+            Assert.That(controller.SelectedNotes.ToArray(), Is.EqualTo(new[] { Ref(0, 0) }));
             Assert.That(controller.ViewStartTick, Is.EqualTo(view));
         });
     }
@@ -934,15 +978,15 @@ public class PianoRollControllerTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(hits, Is.EqualTo(new[] { new NoteRef(0, 1), new NoteRef(0, 2), new NoteRef(0, 3) }),
+            Assert.That(hits, Is.EqualTo(new[] { Ref(0, 1), Ref(0, 2), Ref(0, 3) }),
                 "按音符数组的顺序给出来（也就是时间顺序）");
-            Assert.That(hits, Does.Contain(new NoteRef(0, 1)),
+            Assert.That(hits, Does.Contain(Ref(0, 1)),
                 "**从框左边伸进来的长音**：只判「起点落在区间里」的话它会原地留着，而用户框住它就是要删掉它");
-            Assert.That(hits, Does.Contain(new NoteRef(0, 2)), "起点正好落在框的左边缘：算在内");
-            Assert.That(hits, Does.Not.Contain(new NoteRef(0, 0)),
+            Assert.That(hits, Does.Contain(Ref(0, 2)), "起点正好落在框的左边缘：算在内");
+            Assert.That(hits, Does.Not.Contain(Ref(0, 0)),
                 "尾巴正好抵着框的左边缘：EndTick 不含，一丝都不重叠");
-            Assert.That(hits, Does.Not.Contain(new NoteRef(0, 4)), "起点正好落在框的右边缘：右边缘是开的");
-            Assert.That(hits, Does.Not.Contain(new NoteRef(0, 5)), "起在框后面");
+            Assert.That(hits, Does.Not.Contain(Ref(0, 4)), "起点正好落在框的右边缘：右边缘是开的");
+            Assert.That(hits, Does.Not.Contain(Ref(0, 5)), "起在框后面");
         });
     }
 
@@ -955,8 +999,8 @@ public class PianoRollControllerTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(controller.NotesInRange(0, Bar, Bar + 480), Is.EqualTo(new[] { new NoteRef(0, 0) }));
-            Assert.That(controller.NotesInRange(1, Bar, Bar + 480), Is.EqualTo(new[] { new NoteRef(1, 0) }));
+            Assert.That(controller.NotesInRange(0, Bar, Bar + 480), Is.EqualTo(new[] { Ref(0, 0) }));
+            Assert.That(controller.NotesInRange(1, Bar, Bar + 480), Is.EqualTo(new[] { Ref(1, 0) }));
         });
     }
 
@@ -1003,29 +1047,16 @@ public class PianoRollControllerTests
         });
     }
 
-    // ==================== 带 ref 的命中判定 ====================
+    // ==================== 命中判定的边角 ====================
 
+    /// <summary>
+    /// 没命中时给出来的坐标**是个明确不存在的坐标**，不是「随便填个默认值」。
+    ///
+    /// <c>default(NoteRef)</c> 是 <c>(0, 0 号)</c> —— 在一条真有 0 号音的轨上那是个完全合法的音，
+    /// 谁忘了判这一下，就会默默选中第一个音。
+    /// </summary>
     [Test]
-    public void 命中判定同时给出音符的坐标()
-    {
-        var controller = new PianoRollController(SongOf(Melody(new Note(60, 0, 480, 100))));
-        var viewport = controller.ViewportOf(0, 800, 200);
-        double x = PianoRollGeometry.XAtTick(viewport, 240) + 8;
-        double y = PianoRollGeometry.YAtPitch(viewport, 60) + viewport.RowHeight / 2;
-
-        var hit = controller.HitTestRef(0, viewport, x, y, out var note);
-        var indexHit = controller.HitTest(0, viewport, x, y, out int index);
-
-        Assert.Multiple(() =>
-        {
-            Assert.That(hit, Is.EqualTo(PianoRollGeometry.RollHit.Body));
-            Assert.That(hit, Is.EqualTo(indexHit), "同一个点，两个方法必须给同一个答案");
-            Assert.That(note, Is.EqualTo(new NoteRef(0, index)), "ref 和下标得指着同一个音");
-        });
-    }
-
-    [Test]
-    public void 没命中时的ref是个明确不存在的坐标()
+    public void 没命中时的坐标是个明确不存在的坐标()
     {
         var controller = new PianoRollController(SongOf(Melody(new Note(60, 0, 480, 100))));
         var viewport = controller.ViewportOf(0, 800, 200);
@@ -1035,9 +1066,9 @@ public class PianoRollControllerTests
         Assert.Multiple(() =>
         {
             Assert.That(hit, Is.EqualTo(PianoRollGeometry.RollHit.None));
-            Assert.That(note, Is.EqualTo(new NoteRef(-1, -1)), "和 HitTest 的 -1 一个意思");
+            Assert.That(note, Is.EqualTo(new NoteRef(-1, NoteId.None)));
             Assert.That(note, Is.Not.EqualTo(default(NoteRef)),
-                "default 正好是 (0, 0) —— 一个完全合法的音，谁忘了判就会默默选中第一个音");
+                "default 正好是 (0, 0 号) —— 一个可能很合法的音");
             Assert.That(controller.IsSelected(note), Is.False);
         });
     }
@@ -1046,24 +1077,21 @@ public class PianoRollControllerTests
     public void 音叠在一起时命中的是数组里靠前的那个()
     {
         // 同一条轨里两个同音高的音叠着（后一个在前一个结束前就起）。
-        // 这条不是「对」，是**钉住现状**：带 ref 的那份必须和原版给同一个音，
-        // 否则界面高亮的那个和命令动的那个会是两个音。
-        // 要改成「取视觉上压在最上面的那个」，得两处一起改。
+        // 这条不是「对」，是**钉住现状**：命中判定一直取的是数组里靠前的那个。
+        // 要改成「取视觉上压在最上面的那个」，得连命令那头一起改 ——
+        // 不然界面高亮的那个和命令动的那个会是两个音。
         var controller = new PianoRollController(SongOf(Melody(
             new Note(60, 0, 960, 100), new Note(60, 480, 960, 100))));
         var viewport = controller.ViewportOf(0, 800, 200);
         double x = PianoRollGeometry.XAtTick(viewport, 600);
         double y = PianoRollGeometry.YAtPitch(viewport, 60) + viewport.RowHeight / 2;
 
-        var hit = controller.HitTest(0, viewport, x, y, out int index);
-        var refHit = controller.HitTestRef(0, viewport, x, y, out var note);
+        var hit = controller.HitTestRef(0, viewport, x, y, out var note);
 
         Assert.Multiple(() =>
         {
             Assert.That(hit, Is.EqualTo(PianoRollGeometry.RollHit.Body), "这个点两个音都盖得住");
-            Assert.That(index, Is.EqualTo(0), "给的是数组里靠前的那个（也就是起点更早的）");
-            Assert.That(refHit, Is.EqualTo(hit));
-            Assert.That(note, Is.EqualTo(new NoteRef(0, 0)), "带 ref 的那份必须给同一个音");
+            Assert.That(note, Is.EqualTo(Ref(0, 0)), "给的是数组里靠前的那个（也就是起点更早的）");
         });
     }
 
@@ -1082,7 +1110,7 @@ public class PianoRollControllerTests
             SongOf(Melody(new Note(60, 1000, 480, 100), new Note(64, 1500, 480, 100))));
 
         var clamped = controller.ClampMoveDelta(
-            new[] { new NoteRef(0, 0), new NoteRef(0, 1) }, -120, 3);
+            new[] { Ref(0, 0), Ref(0, 1) }, -120, 3);
 
         Assert.Multiple(() =>
         {
@@ -1099,7 +1127,7 @@ public class PianoRollControllerTests
             SongOf(Melody(new Note(60, 100, 480, 100), new Note(64, 500, 480, 100))));
 
         var clamped = controller.ClampMoveDelta(
-            new[] { new NoteRef(0, 0), new NoteRef(0, 1) }, -480, 0);
+            new[] { Ref(0, 0), Ref(0, 1) }, -480, 0);
 
         Assert.That(clamped.DeltaTicks, Is.EqualTo(-100), "整组一起挪的量由最靠前的那个决定");
     }
@@ -1112,7 +1140,7 @@ public class PianoRollControllerTests
             SongOf(Melody(new Note(60, 100, 480, 100), new Note(64, 500, 480, 100))));
 
         var clamped = controller.ClampMoveDelta(
-            new[] { new NoteRef(0, 0), new NoteRef(0, 1) }, -99999, 0);
+            new[] { Ref(0, 0), Ref(0, 1) }, -99999, 0);
 
         var notes = controller.Song.Tracks[0].Notes;
         Assert.Multiple(() =>
@@ -1129,8 +1157,8 @@ public class PianoRollControllerTests
         var controller = new PianoRollController(
             SongOf(Melody(new Note(2, 0, 480, 100), new Note(126, 480, 480, 100))));
 
-        var low = controller.ClampMoveDelta(new[] { new NoteRef(0, 0) }, 0, -12);
-        var high = controller.ClampMoveDelta(new[] { new NoteRef(0, 1) }, 0, 12);
+        var low = controller.ClampMoveDelta(new[] { Ref(0, 0) }, 0, -12);
+        var high = controller.ClampMoveDelta(new[] { Ref(0, 1) }, 0, 12);
 
         Assert.Multiple(() =>
         {
@@ -1146,13 +1174,13 @@ public class PianoRollControllerTests
             SongOf(Melody(new Note(120, 0, 480, 100), new Note(127, 480, 480, 100))));
 
         var clamped = controller.ClampMoveDelta(
-            new[] { new NoteRef(0, 0), new NoteRef(0, 1) }, 0, 12);
+            new[] { Ref(0, 0), Ref(0, 1) }, 0, 12);
 
         Assert.That(clamped.DeltaPitch, Is.EqualTo(0), "最高的那个已经贴着 127，整组就升不动");
     }
 
     [Test]
-    public void 空集和过期的ref都当不存在()
+    public void 空集和认不出的坐标都当不存在()
     {
         var controller = new PianoRollController(SongOf(Melody(new Note(60, 1000, 480, 100))));
 
@@ -1162,11 +1190,11 @@ public class PianoRollControllerTests
             var empty = controller.ClampMoveDelta(Array.Empty<NoteRef>(), -500, 9);
             Assert.That(empty, Is.EqualTo((-500L, 9)));
 
-            // 过期（下标越界、轨越界）：这一份曲子里没有这个音，当它不在组里 ——
+            // 认不出来的（这条轨上没这个号、轨越界）：这一份曲子里没有这个音，当它不在组里 ——
             // 于是剩下的那个音说了算，而不是整组一起被一个不存在的音夹住
             var stale = controller.ClampMoveDelta(
-                new[] { new NoteRef(0, 99), new NoteRef(5, 0), new NoteRef(0, 0) }, -500, 0);
-            Assert.That(stale.DeltaTicks, Is.EqualTo(-500), "1000 够让 500，越界的那些不参与");
+                new[] { new NoteRef(0, new NoteId(99)), Ref(5, 0), Ref(0, 0) }, -500, 0);
+            Assert.That(stale.DeltaTicks, Is.EqualTo(-500), "1000 够让 500，认不出的那些不参与");
         });
     }
 
@@ -1175,7 +1203,8 @@ public class PianoRollControllerTests
     {
         var controller = new PianoRollController(SongOf(Melody(new Note(60, 1000, 480, 100))));
 
-        var clamped = controller.ClampMoveDelta(new[] { new NoteRef(3, 7) }, -500, 9);
+        // 轨 3 没有、8 号音也没有：这个坐标在这份曲子上什么都不指
+        var clamped = controller.ClampMoveDelta(new[] { new NoteRef(3, new NoteId(8)) }, -500, 9);
 
         Assert.That(clamped, Is.EqualTo((-500L, 9)));
     }
@@ -1204,27 +1233,23 @@ public class PianoRollControllerTests
 
             Assert.That(controller.InRangeFlagsOf(0), Is.Empty);
             Assert.That(controller.NotesInRange(0, 0, Bar), Is.Empty);
-            Assert.That(controller.HitTest(0, viewport, 10, 10, out int index),
-                Is.EqualTo(PianoRollGeometry.RollHit.None));
-            Assert.That(index, Is.EqualTo(-1));
             Assert.That(controller.HitTestRef(0, viewport, 10, 10, out var miss),
                 Is.EqualTo(PianoRollGeometry.RollHit.None));
-            Assert.That(miss, Is.EqualTo(new NoteRef(-1, -1)));
-            Assert.That(controller.Describe(0, 0), Is.Null);
+            Assert.That(miss, Is.EqualTo(new NoteRef(-1, NoteId.None)));
+            Assert.That(controller.Describe(0, new NoteId(1)), Is.Null, "这条轨上一个音都没有，1 号也没有");
             Assert.That(controller.DescribeSelection(), Is.Null);
             Assert.That(controller.MoveSelection(1), Is.Null);
             Assert.That(controller.MoveSelection(-1), Is.Null);
-            Assert.That(controller.IsSelected(new NoteRef(0, 0)), Is.False);
+            Assert.That(controller.IsSelected(Ref(0, 0)), Is.False);
             Assert.That(controller.Selection, Is.Null);
             Assert.That(controller.SelectedNotes, Is.Empty);
         });
 
         // 这几个没有返回值，点一遍就是为了「不抛」
-        controller.SelectOnly(new NoteRef(0, 0));
+        controller.SelectOnly(Ref(0, 0));
         controller.SetSelection(controller.NotesInRange(0, 0, Bar));
-        controller.ExtendSelection(new NoteRef(0, 0));
+        controller.ExtendSelection(Ref(0, 0));
         controller.ClearSelection();
-        controller.RestoreSelection(0, 0);
         controller.SetViewStart(Bar * 3);
         controller.SeekBar(2);
         controller.CenterOnBar(1);

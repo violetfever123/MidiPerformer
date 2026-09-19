@@ -151,7 +151,7 @@ public class PianoRollGeometryTests
     public void 命中音符的头尾和身体()
     {
         var view = View(width: 800);
-        var box = PianoRollGeometry.BoxOf(view, index: 0, startTick: 0, lengthTicks: 480, pitch: 60, inRange: true);
+        var box = PianoRollGeometry.BoxOf(view, id: new NoteId(1), startTick: 0, lengthTicks: 480, pitch: 60, inRange: true);
         double middle = box.Y + box.Height / 2;
 
         Assert.Multiple(() =>
@@ -168,7 +168,7 @@ public class PianoRollGeometryTests
     public void 命中判定的四条边都是半开区间()
     {
         var view = View(width: 800);
-        var box = PianoRollGeometry.BoxOf(view, 0, 0, 480, 60, true);
+        var box = PianoRollGeometry.BoxOf(view, new NoteId(1), 0, 480, 60, true);
         double middle = box.Y + box.Height / 2;
 
         Assert.Multiple(() =>
@@ -190,7 +190,7 @@ public class PianoRollGeometryTests
         // 头尾各占 4px 的话，一个 6px 宽的短音上「身体」永远够不着 ——
         // 将来 09 的拖动会变成只能拉时值、拖不动位置。所以窄带上限是宽度的三分之一。
         var view = View(width: 200);
-        var box = PianoRollGeometry.BoxOf(view, 0, 0, 12, 60, true);
+        var box = PianoRollGeometry.BoxOf(view, new NoteId(1), 0, 12, 60, true);
         double middle = box.Y + box.Height / 2;
 
         Assert.Multiple(() =>
@@ -205,7 +205,7 @@ public class PianoRollGeometryTests
     public void 空白处什么都不命中()
     {
         var view = View(width: 800);
-        var box = PianoRollGeometry.BoxOf(view, 0, 0, 480, 60, true);
+        var box = PianoRollGeometry.BoxOf(view, new NoteId(1), 0, 480, 60, true);
 
         Assert.Multiple(() =>
         {
@@ -222,7 +222,7 @@ public class PianoRollGeometryTests
     public void 音符块照模子留出缝()
     {
         var view = View(width: 800);
-        var box = PianoRollGeometry.BoxOf(view, 0, 0, 480, 60, true);
+        var box = PianoRollGeometry.BoxOf(view, new NoteId(1), 0, 480, 60, true);
 
         Assert.Multiple(() =>
         {
@@ -235,8 +235,23 @@ public class PianoRollGeometryTests
         });
     }
 
-    // ==================== 边界 ====================
+    /// <summary>
+    /// 块上带着**身份**（<see cref="NoteId"/>），不是下标。
+    ///
+    /// 这是块和模型之间唯一的桥：界面靠它认出「这个块是选中集里的那个音」，
+    /// 也靠它把点中的那个块说回给命令。换成下标的话，一次重排就能让高亮落在别的音上。
+    /// </summary>
+    [Test]
+    public void 音符块带着身份()
+    {
+        var view = View(width: 800);
 
+        var box = PianoRollGeometry.BoxOf(view, new NoteId(7), 0, 480, 60, true);
+
+        Assert.That(box.Id, Is.EqualTo(new NoteId(7)));
+    }
+
+    // ==================== 边界 ====================
     [Test]
     public void 卷帘左边以左夹到曲子开头()
     {

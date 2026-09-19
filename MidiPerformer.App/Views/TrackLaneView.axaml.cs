@@ -74,13 +74,13 @@ public partial class TrackLaneView : UserControl
     private bool _lastPlayheadVisible;
 
     /// <summary>
-    /// 本轨上此刻选中的音符下标。
+    /// 本轨上此刻选中的音符**身份**（<see cref="NoteId"/>）。
     ///
     /// **复用同一个列表**：每帧都要填一次，每帧新建一个就是白扔的分配。
     /// 交给 Presenter 是安全的 —— 它在 <c>BuildLane</c> 里拷一份（见那边的 <c>CopyOf</c>），
     /// 场景不会留着这个缓冲区的引用。
     /// </summary>
-    private readonly List<int> _selectedHere = new();
+    private readonly List<NoteId> _selectedHere = new();
 
     /// <summary>给可视化设计器用的空构造。真跑起来走下面那个。</summary>
     public TrackLaneView()
@@ -211,7 +211,9 @@ public partial class TrackLaneView : UserControl
         // 在新谱子上多半还「读得通」（越界会被夹），于是会静悄悄地抽错一段
         SetSplitting(false);
 
-        // 拖动中的预览一并作废：幽灵和框选说的都是旧下标，在新曲子上一个都对不上
+        // 拖动中的预览一并作废：幽灵、框选说的都是按**上一份谱面**算出来的那一帧，
+        // 而重挂之后位移的基准（按下时的 tick 与锚音长度）没有跟着重算，
+        // 接着拖下去会结算出一条尺寸对不上的命令。理由完整地写在 Roll.CancelDrag 上
         Roll.CancelDrag();
 
         _controller = controller;
@@ -219,8 +221,8 @@ public partial class TrackLaneView : UserControl
         Refresh(_lastPlayheadTick, _lastPlayheadVisible);
     }
 
-    /// <summary>悬停到的音符变了（-1 = 没命中）。</summary>
-    public event EventHandler<int>? HoverChanged;
+    /// <summary>悬停到的音符变了（<see cref="NoteId.None"/> = 没命中）。</summary>
+    public event EventHandler<NoteId>? HoverChanged;
 
     /// <summary>
     /// 移调步进器被按了一下，参数是**新的绝对半音数**（不是增量）。
@@ -466,7 +468,7 @@ public partial class TrackLaneView : UserControl
         // 选中的音只有落在这一条轨上才画这圈边框 —— 「选中」跨轨，别条轨的选中在这条轨上没有落笔的地方
         _selectedHere.Clear();
         foreach (var note in _controller.SelectedNotes)
-            if (note.Track == _trackIndex) _selectedHere.Add(note.Index);
+            if (note.Track == _trackIndex) _selectedHere.Add(note.Id);
 
         // 拖动预览 / 框选那根虚线框**每次现取**（不是按下时留一份）：
         // 它们住在卷帘的字段里，按当前指针位置一路更新的。于是「拖到一半窗口重画一屏」
@@ -612,7 +614,8 @@ public partial class TrackLaneView : UserControl
     ///
     /// 状态存在控件字段里、不放在 Refresh 里重置：窗口每帧都会调一次 Refresh，
     /// 放那儿的话这一问会立刻消失。代价是**任何一次编辑**（窗口重建所有轨道头）
-    /// 都会把这一问收掉 —— 那正好，选中集、视图位置在编辑之后本来就作废了。
+    /// 都会把这一问收掉 —— 那正好：这一问说的是「这一条轨的这一个下标」，
+    /// 而编辑之后轨的条数可能已经变了（见 <c>ISongEditor.DeleteTrack</c> 的说明）。
     /// </summary>
     private void SetConfirmingDelete(bool confirming)
     {

@@ -780,7 +780,9 @@ public partial class MainWindow : Window
     ///
     /// 三件事必须一起做，少一件用户就会看见「改一下就被弹走了」：
     /// <list type="number">
-    /// <item>视口与选中按原样放回去 —— 改的是速度或移调，不该把人弹回第 1 小节、也不该丢掉选中。</item>
+    /// <item>视口与选中按原样放回去 —— 改的是速度或移调，不该把人弹回第 1 小节、也不该丢掉选中。
+    /// 选中集**抄的是坐标本身**：坐标按身份寻址（见 <see cref="NoteRef"/>），
+    /// 编辑换的是内容不是身份，于是同一串坐标在新控制器上照样指着同一批音。</item>
     /// <item>播放头用**新的**速度表把原来那个 tick 换算成秒再 Seek 回去。tick 是同一处，
     /// 秒数变了（这正是改速度的意思）；用旧秒数的话改完播放头会跳。</item>
     /// <item>试听换谱 —— <c>Load</c> 会先把正在响的音全松掉，所以编辑顺手停掉播放，
@@ -788,28 +790,30 @@ public partial class MainWindow : Window
     /// </list>
     ///
     /// <b>「改没改」比引用</b>：跟装饰器同一条判据。一次「改成和现在一样」不该把上面这些全部重置一遍。
+    ///
+    /// <b>从前这里还有第二张嘴</b>：一条 <c>selectionAfter</c> 参数，收的是「编辑之后该选中哪几个音」
+    /// 的**值**（轨 + 音符内容），由 <c>CaptureSelection</c> / <c>SelectionAfter*</c> 那一套算出来，
+    /// 再由 <c>RestoreSelection</c> 拿值去新曲子里重新找下标 —— 因为 <see cref="NoteRef"/> 从前是
+    /// 下标，而挪音符 / 改时值都会重排数组（见 <c>Track.WithNotes</c>）。31 号工单把那套按值的镜像
+    /// 整个删了（坐标改成按身份寻址之后就没有「重新认一遍」这件事了），只剩下面这一种情形：
+    /// <b>命令自己改了「选中谁」</b>（删音符要落到邻居上），那时当然得把新的那一组交回来。
     /// </summary>
     /// <param name="selectionAfter">
-    /// 编辑**之后**该选中的那组音，按**值**给。null（默认）表示「这次的编辑没动音符的值」——
-    /// 改速度、改移调、撤销、重做都是这种，照当前的选中集原样留一份下来就行。
+    /// 编辑**之后**该选中的那组音。不传（null）= 手上这一串原样留着 —— 那是绝大多数命令
+    /// （挪、拉、改速度、改移调、撤销、重做…），它们的坐标在新曲子上仍然成立。
     ///
-    /// 为什么要按值：<see cref="NoteRef"/> 是下标，而挪音符和改时值都会把音符数组重排
-    /// （见它自己的注释），编辑之前算的下标编辑之后可能指着另一个音。
-    /// 值在一份曲子里是对得上的；两个一模一样的音对不上号，那是已知的短处，仍然比指错音强。
-    ///
-    /// **注意增量那一侧要是夹过的**：按值算新位置等于假设「新值 = 旧值 + 增量」，
-    /// 命令在边界上会把这个增量缩一截，增量没夹过就对不上了。
-    /// （拖动那一路在 <c>PianoRollLane</c> 里夹过，方向键那一路在 <see cref="NudgeNotes"/> 里夹，
-    /// 共用 <see cref="PianoRollController.ClampMoveDelta"/>。）
+    /// 传了就是「换掉」：只有删音符（落点换成邻居）和删轨 / 剪一段（坐标的轨那一半当场作废）
+    /// 这几种会传。**传进来的坐标必须是照着新曲子算的**（删音符那一路在编辑之后才拿邻居）。
     /// </param>
-    private void ApplySong(Song edited, IReadOnlyList<SelectedNote>? selectionAfter = null)
+    private void ApplySong(Song edited, IReadOnlyList<NoteRef>? selectionAfter = null)
     {
         if (ReferenceEquals(edited, _song)) return;
 
         long playheadTick = _playback.PlayheadTick;
         long viewStartTick = _controller?.ViewStartTick ?? 0;
-        // 必须在 SyncLanes 之前取：下面换掉控制器，旧下标当场作废
-        var selection = selectionAfter ?? CaptureSelectionValues();
+        // 必须在 SyncLanes 之前抄：下面换控制器，旧的那个当场作废。
+        // 抄下来的**不是它指向的音，是坐标本身** —— 这才是不必重新认音的原因
+        var selection = selectionAfter ?? _controller?.SelectedNotes.ToArray() ?? Array.Empty<NoteRef>();
 
         _song = edited;
         // 粘性标记：动过就是动过。撤销回原样也不清它（见 _edited 的说明），存盘也不清
@@ -819,7 +823,9 @@ public partial class MainWindow : Window
         // 视口照旧有效：小节刻度不受任何一条编辑命令影响（改速度只动速度表，其余只动音符），
         // 控制器自己的 SetViewStart 还会夹一次，曲子变短也不会越界
         _controller?.SetViewStart(viewStartTick);
-        RestoreSelection(selection);
+        // 选中集放回**新**控制器上：坐标是身份，原样交回去就行。
+        // 认不出的（音被删了、轨被删了）由 SetSelection 丢掉 —— 它不抛，那不是错误，是「它不在了」
+        _controller?.SetSelection(selection);
 
         // 收起来的轨照旧不出声 —— 重摊这张表的名单从控件现问（见 MutedTracks）
         _playback.Load(edited, MutedTracks());
@@ -830,9 +836,10 @@ public partial class MainWindow : Window
         // 改速度这一路（也走这里）就把 ■ 弄灰了，而屏幕上没有任何东西解释为什么。
         RefreshTransport();
 
-        // 悬停那个音说的是**上一份**曲子里的下标，编辑之后一概作废
-        //（鼠标这会儿也多半正压在刚点的那个按钮上，本来就不在卷帘里）。
-        // 清掉之后读数回落到选中 —— 编辑走的多半是「动着选中那个音」的路，
+        // 悬停那个音，说的可能是**刚被这条命令改掉（或者删掉）的那个音**，
+        // 而读数条只跟着鼠标动才更新 —— 鼠标这会儿多半正压在那个按钮上，
+        // 指针不动的话它会一直挂着一条已经作废的读数。清掉，比留一个错的强。
+        // 清掉之后读数**回落到选中**：编辑走的多半是「动着选中那个音」的路，
         // 于是这一格正好接着显示它，而不是变空
         ShowHover(null);
         RefreshEditState();
@@ -898,25 +905,27 @@ public partial class MainWindow : Window
     /// 卷帘上拖完一组音符（方向键微调也走这一条）。
     ///
     /// 位移是**已经夹过**的：<c>PianoRollLane</c> 在发事件之前夹一次（预览不能画到命令去不了的地方），
-    /// <see cref="NudgeNotes"/> 在调命令之前夹一次。所以下面按「旧值 + 位移」算新选中集是精确的。
+    /// <see cref="NudgeNotes"/> 在调命令之前夹一次。夹取这一步照旧要（预览和微调算出来的位置得真能落下去），
+    /// 但从前那个「不夹就会把选中集弄丢」的理由没有了 —— 那是按值认音那套镜像的毛病（31 号工单）。
+    ///
+    /// <b>选中集不用管</b>：命令换的是内容，坐标指着的那批音一个都没换号，原样留着就是对的。
     /// </summary>
     private void OnNotesMoved(object? sender, NoteMoveRequest request)
     {
         if (_song is not { } song) return;
-
-        ApplySong(
-            _editor.MoveNotes(song, request.Notes, request.DeltaTicks, request.DeltaPitch),
-            SelectionAfterMove(request.Notes, request.DeltaTicks, request.DeltaPitch));
+        ApplySong(_editor.MoveNotes(song, request.Notes, request.DeltaTicks, request.DeltaPitch));
     }
 
-    /// <summary>卷帘上拖完某条边。请求里是**绝对**的起点与时值，不是增量。</summary>
+    /// <summary>
+    /// 卷帘上拖完某条边。请求里是**绝对**的起点与时值，不是增量。
+    ///
+    /// 被拉的那个音**身份不变**（<c>SetNoteSpan</c> 只 <c>with</c> 起点和时值），
+    /// 所以选中集照旧不用管：哪怕它被拉得越过了邻居、在数组里换了位置，坐标还是指着它。
+    /// </summary>
     private void OnNoteResized(object? sender, NoteResizeRequest request)
     {
         if (_song is not { } song) return;
-
-        ApplySong(
-            _editor.SetNoteSpan(song, request.Note, request.StartTick, request.LengthTicks),
-            SelectionAfterResize(request.Note, request.StartTick, request.LengthTicks));
+        ApplySong(_editor.SetNoteSpan(song, request.Note, request.StartTick, request.LengthTicks));
     }
 
     /// <summary>
@@ -935,9 +944,9 @@ public partial class MainWindow : Window
     /// 选中集可以横跨两条轨（Shift + 点），而「刚删掉的东西在哪儿」比「焦点在哪儿」
     /// 更贴近用户此刻在看的地方。多轨同时删时只管一条 —— 落点只有一个。
     ///
-    /// <b>删完按值重新认音</b>（<see cref="ApplySong"/> 那套）：<see cref="NoteRef"/> 是下标寻址，
-    /// 删一批之后后面所有音的下标整体前移，存下来的下标当场指向别人。
-    /// 这条不在这儿优化 —— 31 号工单会把那套按值镜像整个删掉，在这里投资是白干。
+    /// <b>只有这条路要显式交一份新的选中集</b>：被删的那几个音连身份一起没了，
+    /// 「原样留着」留住的是几个指向空处的坐标（<c>SetSelection</c> 会把它们丢掉，
+    /// 于是选中集空掉）。落点是**编辑之后**才算出来的——在新曲子上找邻居。
     /// </summary>
     private void DeleteSelection()
     {
@@ -955,7 +964,7 @@ public partial class MainWindow : Window
             if (NoteAt(song, reference) is not { } note) continue;
             if (note.StartTick >= edge) { edge = note.StartTick; track = reference.Track; }
         }
-        if (edge == long.MinValue) return;   // 一个都认不出来（ref 全过期），那就不删
+        if (edge == long.MinValue) return;   // 一个都认不出来（坐标全过期），那就不删
 
         var edited = _editor.DeleteNotes(song, doomed);
         ApplySong(edited, NeighbourAfterDelete(edited, track, edge));
@@ -966,22 +975,46 @@ public partial class MainWindow : Window
     /// 的第一个音；没有就退回起点**小于等于**它的最后一个（也就是它左边最近的那个）。
     /// 那条轨空了就给空表。
     ///
-    /// 返回的是**值**（<see cref="SelectedNote"/>），不是下标：下标刚被这一删整体挪过。
+    /// 返回的是**坐标**（身份，<see cref="NoteRef"/>）：调用方要把它交给
+    /// <see cref="ApplySong"/> 当「编辑之后该选中什么」，而在那份**新**曲子上，
+    /// 邻居的位置是现算的（音符按起点升序，<c>Track.WithNotes</c> 保证），身份是现取的。
+    ///
     /// 起点**严格大于**而不是大于等于：删掉的那一段里可能还有没被选中的音留在原地，
     /// 用「大于等于」会把其中一个当成右邻居 —— 那是往后删的时候手突然不动了。
     /// </summary>
-    private static List<SelectedNote> NeighbourAfterDelete(Song song, int track, long edge)
+    private static List<NoteRef> NeighbourAfterDelete(Song song, int track, long edge)
     {
-        if (track < 0 || track >= song.Tracks.Count) return new List<SelectedNote>();
+        if (track < 0 || track >= song.Tracks.Count) return new List<NoteRef>();
 
         var notes = song.Tracks[track].Notes;
         for (int i = 0; i < notes.Count; i++)
-            if (notes[i].StartTick > edge) return new List<SelectedNote> { new(track, notes[i]) };
+            if (notes[i].StartTick > edge) return new List<NoteRef> { new(track, notes[i].Id) };
 
         // 右边没有了：退回左边最近的一个。音符按起点升序（Track.WithNotes 保证），所以是最后一个
         return notes.Count > 0
-            ? new List<SelectedNote> { new(track, notes[^1]) }
-            : new List<SelectedNote>();
+            ? new List<NoteRef> { new(track, notes[^1].Id) }
+            : new List<NoteRef>();
+    }
+
+    /// <summary>
+    /// 那份曲子里的这个音；按**身份**找（见 <see cref="NoteRef"/>），
+    /// 认不出来（轨下标越界、这条轨上没有这个号）时给 null。
+    ///
+    /// 只剩删音符那一条路用它（要拿被删那组里最靠右那个的起点当落点基准）。
+    /// 从前它是整套按值镜像的一个零件 —— <c>CaptureSelection</c>、<c>SelectionAfterMove</c>、
+    /// <c>SelectionAfterResize</c>、<c>RestoreSelection</c> 和那个 <c>SelectedNote</c> 记录
+    /// 都跟着那套一起删了（31 号工单）。删掉的是「拿内容去重新认音」这件事；
+    /// 「按一个坐标去取那个音」还得留着，而且现在是**精确**的：内容一模一样的两个音也分得开。
+    /// 扫一遍而不是建索引表：一次删除手势里只走几十遍，建表更贵（而且表会过期）。
+    /// </summary>
+    private static Note? NoteAt(Song song, NoteRef reference)
+    {
+        if (reference.Track < 0 || reference.Track >= song.Tracks.Count) return null;
+
+        foreach (var note in song.Tracks[reference.Track].Notes)
+            if (note.Id == reference.Id) return note;
+
+        return null;
     }
 
     private void OnTrackRenameRequested(object? sender, string name)
@@ -993,13 +1026,17 @@ public partial class MainWindow : Window
     /// <summary>
     /// 删掉一整条轨（轨头上那个二次确认已经按过了）。
     ///
-    /// 删完**明确清空选中**：<see cref="Song.Tracks"/> 的下标整体前移，
-    /// 存下来的选中集（里面带着轨下标）当场作废，按值找也会整片错位。
+    /// 删完**明确清空选中**，而且这一次清空是**必须的**，不是随手：<see cref="NoteRef"/> 里
+    /// 轨那一半是**下标**，<see cref="Song.Tracks"/> 删掉一条之后剩下的整体前移 ——
+    /// 手上那串坐标会被解读成「挪了一条轨之后的那个位置」。更坏的是它**不会**认不出来：
+    /// 身份是从 1 开始按轨连号发的（见 <see cref="NoteIdentity"/>），换一条轨照样能撞上一个号，
+    /// 于是 <c>SetSelection</c> 那道「认不出就丢掉」根本拦不住 —— 用户会看到选中莫名其妙
+    /// 落在别条轨的某个音上。（这一条是身份寻址剩下的代价，写在 <see cref="NoteRef"/> 上。）
     /// </summary>
     private void OnTrackDeleteRequested(object? sender, EventArgs e)
     {
         if (_song is not { } song || sender is not TrackLaneView lane) return;
-        ApplySong(_editor.DeleteTrack(song, lane.TrackIndex), Array.Empty<SelectedNote>());
+        ApplySong(_editor.DeleteTrack(song, lane.TrackIndex), Array.Empty<NoteRef>());
     }
 
     /// <summary>
@@ -1008,16 +1045,18 @@ public partial class MainWindow : Window
     /// 传进来的已经是 tick：小节 → tick 的换算在控件里做完了，
     /// 靠的是控制器手里那份速度表算出来的小节宽（命令层没有「小节」这个概念）。
     ///
-    /// 抽完**明确清空选中**，和删轨同一个理由：音符数组被删了一批、后面那批还被整体挪了位置，
-    /// 存下来的下标当场作废；而按值去找会把「挪到选中位置上的另一个音」捡回来选上 ——
-    /// 那比没有选中更坏（用户以为选中的还是刚才那个）。
+    /// 抽完**明确清空选中**，理由和删轨不一样，说清楚：被剪断的音会拿到**新身份**
+    /// （见 <c>ISongEditor.CutRange</c>：剪出来的两截是新音），被前移的音则**保留身份**——
+    /// 于是「原样留着选中集」的结果是**一半对一半错**：被前移的那个还选着，
+    /// 被剪掉的那一截已经认不出来了（会被丢掉）。选中集忽然缩水一半比清空更难解释，
+    /// 而且这一刀本来就是把这一段整个拿走，清掉是更干脆的答复。
     /// </summary>
     private void OnTrackCutRequested(object? sender, CutRangeRequest request)
     {
         if (_song is not { } song || sender is not TrackLaneView lane) return;
         ApplySong(
             _editor.CutRange(song, lane.TrackIndex, request.StartTick, request.EndTick),
-            Array.Empty<SelectedNote>());
+            Array.Empty<NoteRef>());
     }
 
     /// <summary>
@@ -1043,105 +1082,6 @@ public partial class MainWindow : Window
     /// 尤其这一按往往还接着一次拖动。
     /// </summary>
     private void OnLaneFocusChanged(object? sender, EventArgs e) => RefreshView();
-
-    // ==================== 编辑之后的选中集 ====================
-
-    /// <summary>「编辑之后该选中哪个音」记的是**值**：哪条轨 + 音符本身（见 <see cref="ApplySong"/>）。</summary>
-    private readonly record struct SelectedNote(int Track, Note Note);
-
-    /// <summary>
-    /// 此刻选中的那组音，连**下标带值**一起抄下来。
-    ///
-    /// 必须在换曲子（<see cref="SyncLanes"/>）之前调 —— 下标只对它算出来的那份曲子有效。
-    /// 顺手丢掉越界的：ref 过期不是错误，轨刚被删掉那一下就会碰上。
-    /// </summary>
-    private List<(NoteRef Ref, Note Note)> CaptureSelection()
-    {
-        var captured = new List<(NoteRef, Note)>();
-        if (_song is not { } song || _controller is null) return captured;
-
-        foreach (var reference in _controller.SelectedNotes)
-        {
-            if (NoteAt(song, reference) is { } note) captured.Add((reference, note));
-        }
-        return captured;
-    }
-
-    /// <summary>同上，只要值那一半 —— 「这次编辑没动音符」时直接扔给 <see cref="ApplySong"/>。</summary>
-    private List<SelectedNote> CaptureSelectionValues()
-    {
-        var values = new List<SelectedNote>();
-        foreach (var (reference, note) in CaptureSelection()) values.Add(new SelectedNote(reference.Track, note));
-        return values;
-    }
-
-    /// <summary>选中集挪过 (deltaTicks, deltaPitch) 之后的样子 —— 挪完拿它放回选中。</summary>
-    private List<SelectedNote> SelectionAfterMove(IReadOnlyList<NoteRef> moved, long deltaTicks, int deltaPitch)
-    {
-        var movedSet = new HashSet<NoteRef>(moved);
-        var wanted = new List<SelectedNote>();
-
-        foreach (var (reference, note) in CaptureSelection())
-        {
-            // 没被挪的那些原样留着：一组音挪的是同一个量，但「选中的」未必就是「被挪的那几个」
-            wanted.Add(movedSet.Contains(reference)
-                ? new SelectedNote(reference.Track,
-                    note with { Pitch = note.Pitch + deltaPitch, StartTick = note.StartTick + deltaTicks })
-                : new SelectedNote(reference.Track, note));
-        }
-        return wanted;
-    }
-
-    /// <summary>改完时值之后的样子：只把那一个音换成新值，选中集里其余的原样。</summary>
-    private List<SelectedNote> SelectionAfterResize(NoteRef target, long startTick, long lengthTicks)
-    {
-        var wanted = new List<SelectedNote>();
-        foreach (var (reference, note) in CaptureSelection())
-        {
-            wanted.Add(reference == target
-                ? new SelectedNote(reference.Track, note with { StartTick = startTick, LengthTicks = lengthTicks })
-                : new SelectedNote(reference.Track, note));
-        }
-        return wanted;
-    }
-
-    /// <summary>
-    /// 把「编辑后该选中的那组音」放回选中集：拿**值**在新曲子里找下标。
-    ///
-    /// 按值找，是因为下标会被重排打乱（<see cref="ApplySong"/> 的说明里讲了为什么）。
-    /// 找不到的（音被删了、撤销把它挪回原位了）跳过就行 —— 选中集缩水好过指错音。
-    /// 扫一遍而不是建一张索引表：一屏之内音就那么多，而且**顺序得留着**
-    /// （主选中 = 最后加进去的那个），哈希表正好把顺序丢了。
-    /// </summary>
-    private void RestoreSelection(IReadOnlyList<SelectedNote> wanted)
-    {
-        if (_controller is not { } controller || _song is not { } song) return;
-
-        var references = new List<NoteRef>(wanted.Count);
-        foreach (var target in wanted)
-        {
-            if (target.Track < 0 || target.Track >= song.Tracks.Count) continue;
-
-            var notes = song.Tracks[target.Track].Notes;
-            for (int i = 0; i < notes.Count; i++)
-            {
-                if (notes[i] != target.Note) continue;
-                references.Add(new NoteRef(target.Track, i));
-                break;
-            }
-        }
-
-        controller.SetSelection(references);
-    }
-
-    /// <summary>那份曲子里的这个音；ref 过期（下标越界、曲子已经换过）时给 null。</summary>
-    private static Note? NoteAt(Song song, NoteRef reference)
-    {
-        if (reference.Track < 0 || reference.Track >= song.Tracks.Count) return null;
-
-        var notes = song.Tracks[reference.Track].Notes;
-        return reference.Index >= 0 && reference.Index < notes.Count ? notes[reference.Index] : null;
-    }
 
     // ==================== 改速度 ====================
 
@@ -1608,9 +1548,13 @@ public partial class MainWindow : Window
     /// <summary>
     /// 方向键微调：把选中的一组音整体挪一格（时间）或一个半音（音高）。
     ///
-    /// 夹在这儿做一次，夹完的增量才是真正会生效的那个 —— 下面按「旧值 + 增量」算新选中集，
-    /// 拿没夹过的增量算出来的位置在边界上根本不存在，选中集那一下就丢了。
-    /// 命令那边还会再夹一次，夹的是已经合法的值，等于没夹。
+    /// 夹在这儿做一次，夹完的增量才是真正会生效的那个 —— 预览与命令两边都得拿它算
+    /// （命令那边还会再夹一次，夹的是已经合法的值，等于没夹）。
+    ///
+    /// 从前这里跟着一句「拿没夹过的增量算出来的位置在边界上根本不存在，选中集那一下就丢了」——
+    /// 那是按值认音那套镜像的毛病（31 号工单删了那套，坐标按身份寻址之后没有「算新位置」这件事）。
+    /// 夹取本身照旧要：不夹的话按一下方向键会发一条被命令缩掉一截的位移，
+    /// 屏幕上动的地方和用户按的那一下对不上。
     /// </summary>
     private void NudgeNotes(long deltaTicks, int deltaPitch)
     {
@@ -1622,9 +1566,7 @@ public partial class MainWindow : Window
         (deltaTicks, deltaPitch) = controller.ClampMoveDelta(selected, deltaTicks, deltaPitch);
         if (deltaTicks == 0 && deltaPitch == 0) return;
 
-        ApplySong(
-            _editor.MoveNotes(song, selected, deltaTicks, deltaPitch),
-            SelectionAfterMove(selected, deltaTicks, deltaPitch));
+        ApplySong(_editor.MoveNotes(song, selected, deltaTicks, deltaPitch));
     }
 
     /// <summary>
@@ -1633,6 +1575,9 @@ public partial class MainWindow : Window
     /// 只动**主选中**那一个。一组音一起改时值本来该是一条命令，而 <c>SetNoteSpan</c> 只收一个音：
     /// 选中一组按一下就会记 N 格撤销，得按 N 次才回到原样，那是坑不是功能。
     /// 主选中就是用户最后点的那个（读数条报的也是它），按一下只改它一个说得通。
+    ///
+    /// 选中集不用管：改时值的那个音**身份不变**（只是变长变短，见 <c>SetNoteSpan</c>），
+    /// 哪怕它越过邻居在数组里换了位置，坐标还是指着它。
     /// </summary>
     private void NudgeLength(long deltaLength)
     {
@@ -1645,17 +1590,22 @@ public partial class MainWindow : Window
         long length = Math.Max(1, note.LengthTicks + deltaLength);
         if (length == note.LengthTicks) return;
 
-        ApplySong(
-            _editor.SetNoteSpan(song, target, note.StartTick, length),
-            SelectionAfterResize(target, note.StartTick, length));
+        ApplySong(_editor.SetNoteSpan(song, target, note.StartTick, length));
     }
 
     // ==================== 读数条 ====================
 
-    private void OnLaneHover(object? sender, int noteIndex)
+    /// <summary>
+    /// 悬停到某个音上。参数是那个音的**身份**，<see cref="NoteId.None"/> = 没命中（空白处）。
+    ///
+    /// 没命中时不用特判：<c>NoteId.None</c> 是 0，而真曲子里的号是从 1 开始连号发的
+    /// （见 <see cref="NoteIdentity"/>），所以它在这条轨上一个音都对不上，Describe 给 null，
+    /// 读数条照旧是占位符 —— 「认不出来就是没这个音」这一条两边是同一个判断。
+    /// </summary>
+    private void OnLaneHover(object? sender, NoteId note)
     {
         if (_controller is null || sender is not TrackLaneView lane) return;
-        ShowHover(_controller.Describe(lane.TrackIndex, noteIndex));
+        ShowHover(_controller.Describe(lane.TrackIndex, note));
     }
 
     /// <summary>
