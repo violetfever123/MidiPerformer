@@ -36,8 +36,14 @@ namespace MidiPerformer.App.Views;
 /// </summary>
 public sealed class PianoRollLane : Control
 {
-    /// <summary>刻度数字的字号，照 wireframe 的 <c>10px</c>。</summary>
-    private const double RulerFontSize = 10;
+    /// <summary>
+    /// 刻度数字的字号。wireframe 是 <c>10px</c>，配上它的浅灰和细体，做出来几乎看不见。
+    ///
+    /// 抬到 12px 是三样一起改里的一样（另两样是颜色和字重，见 <see cref="DrawRulerLabels"/>）：
+    /// 只放大不改颜色，还是浅灰；只改颜色不放大，还是细。这三样少一样都还是「看不清」。
+    /// 代价是标尺得跟着长高，见 <see cref="PianoRollGeometry.RulerHeight"/>。
+    /// </summary>
+    private const double RulerFontSize = 12;
 
     /// <summary>播放头红线多宽，照 wireframe 的 <c>fillRect(px-1, 0, 2, h)</c>。</summary>
     private const double PlayheadWidth = 2;
@@ -306,9 +312,15 @@ public sealed class PianoRollLane : Control
 
         DrawMarquee(context, palette, scene.Marquee);
 
-        // 标尺下沿那条横线：刻度区到此为止，照 wireframe 的 `moveTo(0, RULER_H + .5)`
+        // 标尺下沿那条横线：刻度区到此为止，照 wireframe 的 `moveTo(0, RULER_H + .5)`。
+        //
+        // 颜色从 Line 提到 InkFaint —— 令牌阶梯上的**下一档**（LineSoft → Line → InkFaint → …），
+        // 不是新写一个颜色值。线宽仍然是 1px：要的是「刻度区到此为止」这条边界更明确，
+        // 不是要一条粗杠把标尺和谱面隔开（那会抢走音符的注意力）。
+        // 字号放大之后它也得跟着硬一点，否则 12px 的字下面拖着一条几乎看不见的线，
+        // 标尺看着像飘在谱面上。
         context.DrawLine(
-            new Pen(new ImmutableSolidColorBrush(palette.Line), 1),
+            new Pen(new ImmutableSolidColorBrush(palette.InkFaint), 1),
             new Point(0, Math.Round(PianoRollGeometry.RulerHeight) + 0.5),
             new Point(viewport.Width, Math.Round(PianoRollGeometry.RulerHeight) + 0.5));
 
@@ -857,10 +869,16 @@ public sealed class PianoRollLane : Control
     private static void DrawRulerLabels(
         DrawingContext context, TokenPalette palette, PianoRollPresenter.LaneScene scene)
     {
-        var brush = new ImmutableSolidColorBrush(palette.InkFaint);
+        // 颜色从 InkFaint（最浅的那档灰）提到 Ink：标尺上的数字是**读数**，不是背景装饰，
+        // 它没必要跟网格线、灰掉的音去抢那几档浅色。深浅两套主题下 Ink 都是正文那一档，跟着主题走。
+        var brush = new ImmutableSolidColorBrush(palette.Ink);
         // 刻度数字不追字体令牌：自绘这层的取色桥只送颜色，字体归 XAML 那一层。
         // 一两位数字的等宽与否，看不出差别。
-        var typeface = Typeface.Default;
+        //
+        // 字重**加粗**：小字号下细体的笔画在低分屏上会糊掉半个像素，
+        // 这是「看不清」三样里最不起眼、但少它就不够的一样。
+        // 只加粗、不换字族 —— 字族一换，数字的宽度和对齐都跟着变，而标尺的落点是按字符宽估的。
+        var typeface = new Typeface(Typeface.Default.FontFamily, FontStyle.Normal, FontWeight.Bold);
 
         foreach (var label in scene.BarLabels)
         {

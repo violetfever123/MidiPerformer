@@ -24,8 +24,17 @@ public static class PianoRollGeometry
     /// <summary>一屏恒定显示多少小节。**没有缩放级别**，见 spec 的「Out of Scope」。</summary>
     public const int BarsVisible = 4;
 
-    /// <summary>标尺（画小节号那一条）的高度，照 wireframe 的 <c>RULER_H</c>。</summary>
-    public const double RulerHeight = 18;
+    /// <summary>
+    /// 标尺（画小节号那一条）的高度。wireframe 的 <c>RULER_H</c> 是 18，那是配 10px 的字定的；
+    /// 字号提到 12px 之后 18px 里上下只剩 3px，字的上下缘会顶到格线上，所以抬到 22
+    /// （上下各留 <c>(22-12)/2 = 5px</c>）。
+    ///
+    /// **这是几何常量，不是画法**：<see cref="Viewport.PlotHeight"/>、<see cref="YAtPitch"/>、
+    /// <see cref="PitchAtY"/>、框选带子的矩形、拍线的起点，以及每条轨的卷帘高度全从它算出来。
+    /// 改这一个数，就是全局每条轨高 4px、谱面整体下移 4px —— 机械，但确实是全局的，
+    /// 不是「改个字号」而已。所以它才必须只有一个出处。
+    /// </summary>
+    public const double RulerHeight = 22;
 
     /// <summary>音符块之间让出的横向缝隙（像素），照 <c>RollPreviewStrip</c> 的 <c>dur * w - 1</c>。</summary>
     public const double NoteGap = 1;
