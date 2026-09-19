@@ -58,17 +58,12 @@ public static class Format
     public static string Length(double beats) =>
         beats.ToString("F2", CultureInfo.InvariantCulture) + " 拍";
 
-    /// <summary>读数条的「选中」格。</summary>
-    public static string Selection(int trackNumber, int pitch, double lengthBeats) =>
-        $"轨 {TrackNumber(trackNumber)} · {Music.NoteName(pitch)} · {Length(lengthBeats)}";
-
-    /// <summary>走带条上的「位置」：当前小节 / 总小节。</summary>
+    /// <summary>
+    /// 「位置」读数：当前小节 / 总小节。**显示的是播放头那一小节**，不是视口起始 ——
+    /// 它和「跳到某小节」的输入框挨着，两个数摆在一起才是「我在哪 / 我要去哪」的对照。
+    /// </summary>
     public static string Position(int bar, int barCount) =>
         $"{BarNumber(bar)} / {barCount} 小节";
-
-    /// <summary>导航条右边的「第 a–b 小节 / 共 n 小节」。用短破折号，别用连字符 —— 那是两回事。</summary>
-    public static string BarRange(int firstBar, int lastBar, int barCount) =>
-        $"第 {BarNumber(firstBar)}–{BarNumber(lastBar)} 小节 / 共 {barCount}";
 
     /// <summary>时长 m:ss。曲子长度以秒给，超过一小时也只进位到分 —— 单人练习用的谱子到不了那个量级。</summary>
     public static string Clock(double seconds)

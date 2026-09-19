@@ -210,8 +210,17 @@
                    FontWeight="Bold" VerticalAlignment="Center" Margin="0,0,12,0" />
         <!-- 整曲密度缩略图。按小节吸附、拖动时喊 DragStarted / DragCompleted 给卷帘藏播放头 -->
         <views:RollNavStrip Grid.Column="1" x:Name="NavStrip" Height="30" />
-        <TextBlock Grid.Column="2" x:Name="NavRangeText" Classes="label mono"
-                   Margin="12,0,0,0" Text="—" />
+        <!--
+          位置读数**从走带条搬到了这儿**，占的正是视图范围文字原先那一格。
+          视图范围（`第 1–4 小节 / 共 96`）那套文字**彻底不要了** ——
+          左边缩略图上那个视口框已经在视觉上说明「我在看哪一段」，文字是同一件事说第二遍。
+          位置读数留的是**播放头所在小节**（不是视口起始），因为右边紧挨着就是「跳到某小节」——
+          「我在哪 / 我要去哪」摆在一起才成对照。
+        -->
+        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="5" Margin="12,0,0,0">
+          <TextBlock Classes="label" Text="位置" />
+          <TextBlock x:Name="PositionText" Classes="readout-value mono" Text="—" />
+        </StackPanel>
         <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="5" Margin="12,0,0,0">
           <TextBlock Classes="label" Text="跳到" />
           <TextBox x:Name="JumpBox" Classes="numeric" Width="46"
@@ -224,35 +233,47 @@
 
     <!-- ==================== 读数条 ==================== -->
     <Border Grid.Row="3" Classes="readoutbar">
-      <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,*">
-        <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6">
-          <TextBlock Classes="readout-key" Text="悬停" />
-          <TextBlock x:Name="HoverPitchText" Classes="readout-value mono" Text="—" />
+      <Grid ColumnDefinitions="Auto,*">
+        <!--
+          **一套读数，不是两套。** 从前这里左边是「悬停」那一套、右边是「选中」那一套，
+          同一个音在两处各显示一半，鼠标一移开左边变空、右边还留着 —— 看着像两台机器。
+          现在合成一套：**悬浮的音优先，没悬浮就用主选中的音**（见 RefreshReadout）。
+          两个都没有时整块连标签一起藏起来，但外头那一条的 MinHeight 不动
+          （Border.readoutbar 上的 31），否则鼠标一移开整窗会跳一下。
+        -->
+        <!-- 初始就是藏的：还没载曲子的时候「没悬停也没选中」，和载入之后的那种状态是同一件事，
+             不该一个显示一排破折号、另一个整块消失 -->
+        <StackPanel Grid.Column="0" x:Name="ReadoutDetail" Orientation="Horizontal" Spacing="16"
+                    IsVisible="False">
+          <StackPanel Orientation="Horizontal" Spacing="6">
+            <TextBlock Classes="readout-key" Text="轨" />
+            <TextBlock x:Name="ReadoutTrackText" Classes="readout-value mono" Text="—" />
+          </StackPanel>
+          <StackPanel Orientation="Horizontal" Spacing="6">
+            <TextBlock Classes="readout-key" Text="音高" />
+            <TextBlock x:Name="ReadoutPitchText" Classes="readout-value mono" Text="—" />
+          </StackPanel>
+          <StackPanel Orientation="Horizontal" Spacing="6">
+            <TextBlock Classes="readout-key" Text="小节" />
+            <TextBlock x:Name="ReadoutBarText" Classes="readout-value mono" Text="—" />
+          </StackPanel>
+          <StackPanel Orientation="Horizontal" Spacing="6">
+            <TextBlock Classes="readout-key" Text="拍位" />
+            <TextBlock x:Name="ReadoutBeatText" Classes="readout-value mono" Text="—" />
+          </StackPanel>
+          <StackPanel Orientation="Horizontal" Spacing="6">
+            <TextBlock Classes="readout-key" Text="时值" />
+            <TextBlock x:Name="ReadoutLengthText" Classes="readout-value mono" Text="—" />
+          </StackPanel>
         </StackPanel>
-        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" Margin="16,0,0,0">
-          <TextBlock Classes="readout-key" Text="小节" />
-          <TextBlock x:Name="HoverBarText" Classes="readout-value mono" Text="—" />
-        </StackPanel>
-        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" Margin="16,0,0,0">
-          <TextBlock Classes="readout-key" Text="拍位" />
-          <TextBlock x:Name="HoverBeatText" Classes="readout-value mono" Text="—" />
-        </StackPanel>
-        <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="6" Margin="16,0,0,0">
-          <TextBlock Classes="readout-key" Text="时值" />
-          <TextBlock x:Name="HoverLengthText" Classes="readout-value mono" Text="—" />
-        </StackPanel>
-        <StackPanel Grid.Column="4" Orientation="Horizontal" Spacing="6" Margin="16,0,0,0">
-          <TextBlock Classes="readout-key" Text="选中" />
-          <TextBlock x:Name="SelectionText" Classes="readout-value mono" Text="—" />
-        </StackPanel>
-        <TextBlock Grid.Column="5" x:Name="HintText" Classes="faint"
+        <TextBlock Grid.Column="1" x:Name="HintText" Classes="faint"
                    TextAlignment="Right" TextWrapping="Wrap" Margin="16,0,0,0" />
       </Grid>
     </Border>
 
     <!-- ==================== 走带条 ==================== -->
     <Border Grid.Row="4" Classes="transportbar">
-      <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,*">
+      <Grid ColumnDefinitions="Auto,Auto,Auto,*">
         <!--
           这两颗**不进 Tab 序**（IsTabStop="False"）：空格整块被窗口级快捷键收了
           （见 MainWindow.OnWindowKeyDown），而按钮的标准激活键正是空格 ——
@@ -286,26 +307,15 @@
           <TextBlock Classes="faint" Text="拍/分" />
         </StackPanel>
 
-        <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="5" Margin="12,0,0,0">
-          <TextBlock Classes="label" Text="位置" />
-          <TextBlock x:Name="PositionText" Classes="readout-value mono" Text="—" />
-        </StackPanel>
-
         <!--
-          时长：**改 BPM 唯一看得见的地方。**
-          卷帘是 tick 轴（一屏固定 4 小节），改速度不会让音符在谱面上挪动一个像素 ——
-          音符相对小节的位置本来就不该变（那也正是「音符数组一个字节都不动」的意思）。
-          跟着缩放的是总时长、播放快慢，以及一切 tick → 秒 的换算。
+          这里从前还有「位置」和「时长」两栏，都搬走了：
+          「位置」上移到导航条（挨着「跳到」，见那儿）；「时长」整条删了。
+          时长原本是**改 BPM 唯一看得见的地方**（卷帘是 tick 轴，改速度不会让音符挪一个像素），
+          删掉之后「这一改动了什么」在界面上就只剩播放变快变慢 —— 这是知道代价的选择。
         -->
-        <StackPanel Grid.Column="4" Orientation="Horizontal" Spacing="5" Margin="12,0,0,0">
-          <TextBlock Classes="label" Text="时长" />
-          <TextBlock x:Name="DurationText" Classes="readout-value mono" Text="—" />
-        </StackPanel>
-
-        <TextBlock Grid.Column="5" Classes="faint" TextAlignment="Right"
+        <TextBlock Grid.Column="3" Classes="faint" TextAlignment="Right"
                    HorizontalAlignment="Right" VerticalAlignment="Center">
-          <Run Text="没有循环" FontWeight="SemiBold" Foreground="{DynamicResource TokenInkMuted}" />
-          <Run Text=" · 放完自动停止并松开所有按键" />
+          <Run Text="放完自动停止并松开所有按键" />
         </TextBlock>
       </Grid>
     </Border>

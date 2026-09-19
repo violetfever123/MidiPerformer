@@ -58,7 +58,6 @@ public class FormatTests
         {
             Assert.That(Format.BarNumber(1), Is.EqualTo("1"));
             Assert.That(Format.Position(3, 12), Is.EqualTo("3 / 12 小节"));
-            Assert.That(Format.BarRange(2, 5, 12), Is.EqualTo("第 2–5 小节 / 共 12"));
         });
     }
 
@@ -112,12 +111,6 @@ public class FormatTests
             Assert.That(Format.Transpose(int.MinValue), Is.EqualTo("-2147483648 半音"));
             Assert.That(Format.Transpose(int.MaxValue), Is.EqualTo("+2147483647 半音"));
         });
-    }
-
-    [Test]
-    public void 读数条的选中格()
-    {
-        Assert.That(Format.Selection(1, 60, 1.0), Is.EqualTo("轨 01 · C4 · 1.00 拍"));
     }
 
     [Test]

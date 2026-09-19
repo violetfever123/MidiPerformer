@@ -329,8 +329,8 @@ public partial class MainWindow : Window
         // 所以这条的判据是「装上了曲子」，不是「有轨」
         ExportButton.IsEnabled = true;
 
+        // 换曲子了：悬停那个音说的是上一份谱面，清掉。清完读数自己回落到选中（多半也是空的）
         ShowHover(null);
-        ShowSelection();
         RefreshEditState();
         RefreshLibrary(null);
 
@@ -831,14 +831,15 @@ public partial class MainWindow : Window
         RefreshTransport();
 
         // 悬停那个音说的是**上一份**曲子里的下标，编辑之后一概作废
-        //（鼠标这会儿也多半正压在刚点的那个按钮上，本来就不在卷帘里）
+        //（鼠标这会儿也多半正压在刚点的那个按钮上，本来就不在卷帘里）。
+        // 清掉之后读数回落到选中 —— 编辑走的多半是「动着选中那个音」的路，
+        // 于是这一格正好接着显示它，而不是变空
         ShowHover(null);
-        ShowSelection();
         RefreshEditState();
         RefreshView();
     }
 
-    /// <summary>撤销 / 重做、保存 / 另存为、速度框、曲名框、时长这一组读数。换曲子和每次编辑之后调它。</summary>
+    /// <summary>撤销 / 重做、保存 / 另存为、速度框、曲名框这一组。换曲子和每次编辑之后调它。</summary>
     private void RefreshEditState()
     {
         UndoButton.IsEnabled = _editor.CanUndo;
@@ -848,7 +849,6 @@ public partial class MainWindow : Window
         // 没有曲库就存不了（组装点没给），灰着比按了没反应诚实
         SaveButton.IsEnabled = _song is not null && _library is not null;
         SaveAsButton.IsEnabled = SaveButton.IsEnabled;
-        DurationText.Text = _song is { } song ? Format.Clock(song.TotalSeconds) : Format.Placeholder;
     }
 
     private void OnUndoClick(object? sender, RoutedEventArgs e) => Undo();
@@ -1027,7 +1027,7 @@ public partial class MainWindow : Window
     /// </summary>
     private void OnLaneSelectionChanged(object? sender, IReadOnlyList<NoteRef> selected)
     {
-        ShowSelection();
+        RefreshReadout();
         RefreshView();
     }
 
@@ -1388,7 +1388,7 @@ public partial class MainWindow : Window
         _controller.CenterOnBar(barZeroBased);
         _playback.SeekSeconds(_controller.Song.TempoMap.SecondsAt(tick));
 
-        ShowSelection();
+        RefreshReadout();
         RefreshView();
     }
 
@@ -1410,7 +1410,7 @@ public partial class MainWindow : Window
         _playback.SeekSeconds(_controller.Song.TempoMap.SecondsAt(tick));
         JumpBox.Text = Format.BarNumber(_controller.BarOfTick(tick));
 
-        ShowSelection();
+        RefreshReadout();
         RefreshView();
     }
 
@@ -1572,7 +1572,7 @@ public partial class MainWindow : Window
         var info = _controller.MoveSelection(delta);
         if (info is not { } note) return;
 
-        ShowSelection();
+        RefreshReadout();
         // 横向已经由控制器对齐到那一小节，纵向（哪条轨）在这儿滚进视野。
         // 走 Reveal 而不是 BringIntoView：那条轨要是收着的，「滚到它那儿」在屏幕上
         // 一个像素的变化都没有 —— 跳过去的是那个音，所以顺手把它展开
@@ -1658,29 +1658,52 @@ public partial class MainWindow : Window
         ShowHover(_controller.Describe(lane.TrackIndex, noteIndex));
     }
 
+    /// <summary>
+    /// 鼠标此刻悬在哪个音上。**null 有两种意思**：「没悬在任何音上」和「鼠标刚离开卷帘」——
+    /// 两种都落到「回落到主选中」，所以不用分开。
+    ///
+    /// 为什么存下来、而不是悬停时直接把读数改写掉：悬停是**一过性**的，鼠标一移开就得把
+    /// 选中那个音的读数重新摆回去，于是必须回答「刚才被顶掉的是什么」—— 那正是从前那两套
+    /// 读数的病根（悬停那套变空、选中那套还留着，同一个音在两处各显示一半）。
+    /// 存下「悬停」这件事本身，每次现算「悬停优先、选中兜底」，就没有「要还原什么」这回事了。
+    ///
+    /// **它是个下标，编辑之后一律作废** —— 所以换曲子和每次编辑都要清（见 ApplySong / LoadSong）。
+    /// </summary>
+    private PianoRollController.NoteInfo? _hovered;
+
+    /// <summary>鼠标进/出一个音。传 null 是「离开了」——这时读数不是变空，是回落到主选中。</summary>
     private void ShowHover(PianoRollController.NoteInfo? info)
     {
-        if (info is not { } note)
+        _hovered = info;
+        RefreshReadout();
+    }
+
+    /// <summary>
+    /// 读数条上那一套（轨 / 音高 / 小节 / 拍位 / 时值）**唯一的出处**。
+    ///
+    /// 值从哪来：**悬停优先，没悬停就用主选中的音**。这就是「合并成一套」的兑现 ——
+    /// 鼠标从音上移开时读数回落到选中的音（而不是变空），是这条规矩的直接结果，不是副作用。
+    ///
+    /// 两个都没有时，**标签和值一起藏**：只藏里面那块（ReadoutDetail），外面
+    /// `Border.readoutbar` 上的 MinHeight 一个像素不动 —— 不然鼠标一移开这一条会塌下去，
+    /// 整窗跟着跳一下，比留着几个占位符还难受。
+    ///
+    /// 轨号留着：合起来之后它是「这个音在哪条轨」的唯一线索（从前那句「选中」里也有它）。
+    /// </summary>
+    private void RefreshReadout()
+    {
+        if ((_hovered ?? _controller?.DescribeSelection()) is not { } note)
         {
-            HoverPitchText.Text = Format.Placeholder;
-            HoverBarText.Text = Format.Placeholder;
-            HoverBeatText.Text = Format.Placeholder;
-            HoverLengthText.Text = Format.Placeholder;
+            ReadoutDetail.IsVisible = false;
             return;
         }
 
-        HoverPitchText.Text = Format.Pitch(note.Pitch);
-        HoverBarText.Text = Format.BarNumber(note.Bar);
-        HoverBeatText.Text = Format.Beat(note.BeatInBar);
-        HoverLengthText.Text = Format.Length(note.LengthBeats);
-    }
-
-    private void ShowSelection()
-    {
-        var info = _controller?.DescribeSelection();
-        SelectionText.Text = info is { } note
-            ? Format.Selection(note.Track + 1, note.Pitch, note.LengthBeats)
-            : Format.Placeholder;
+        ReadoutDetail.IsVisible = true;
+        ReadoutTrackText.Text = Format.TrackNumber(note.Track + 1);
+        ReadoutPitchText.Text = Format.Pitch(note.Pitch);
+        ReadoutBarText.Text = Format.BarNumber(note.Bar);
+        ReadoutBeatText.Text = Format.Beat(note.BeatInBar);
+        ReadoutLengthText.Text = Format.Length(note.LengthBeats);
     }
 
     // ==================== 重画 ====================
@@ -1707,10 +1730,10 @@ public partial class MainWindow : Window
                 controller.TotalTicks, controller.ViewStartTick, controller.TicksVisible));
         }
 
-        int firstBar = controller.ViewStartBar + 1;
-        int lastBar = Math.Min(firstBar + PianoRollGeometry.BarsVisible - 1, controller.BarCount);
-        NavRangeText.Text = Format.BarRange(firstBar, lastBar, controller.BarCount);
-
+        // 视图范围从前在这儿写成「第 1–4 小节 / 共 96」—— 那句话没了：
+        // 上面缩略图上那个视口框已经在视觉上说明「我在看哪一段」，文字是同一件事说第二遍。
+        // 位置读数留的是**播放头**所在小节（不是视口起始）：它右边紧挨着「跳到某小节」的输入框，
+        // 「我在哪 / 我要去哪」摆在一起才成对照。
         PositionText.Text = Format.Position(controller.BarOfTick(playhead), controller.BarCount);
 
         // 速度框报的是 **tick 0 的基准速度** —— 也就是回车之后真正生效的那个数
