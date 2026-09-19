@@ -43,6 +43,23 @@ public sealed class PianoRollLane : Control
     private const double PlayheadWidth = 2;
 
     /// <summary>
+    /// 选中那一圈的线宽，照 <c>prototype-编辑痕迹.html</c> 的 A
+    /// （<c>.note[data-sel]{box-shadow:0 0 0 2px var(--accent)}</c>）。
+    ///
+    /// 原来是 1px，密的地方（一整排音挨着、时值又短）看不出被选中了。
+    ///
+    /// **骑在音符块的边上画**（<see cref="DrawingContext.DrawRectangle"/> 的描边以路径为中心、
+    /// 里外各一半），没有照原型那样整圈往外长：音符块上下只留了 1.6px 的缝
+    /// （<c>NotePad</c> 0.8 × 2），往外长要吃掉 4px，上下两行挨着的音直接连成一整片；
+    /// 骑边只吃 2px，最坏也就压过缝 0.4px —— 压过去的还是同一个 accent 色，
+    /// 看着就是两条边贴在一起。
+    ///
+    /// 代价是音符自己的芯窄了 2px（一条五六像素高的音，芯还剩三四像素）。
+    /// 这条在原型里就写明了（「音符本身只剩 2px 的芯」），选 A 就是认了它。
+    /// </summary>
+    private const double SelectionStrokeWidth = 2;
+
+    /// <summary>
     /// 幽灵的虚线节奏（画 3px、空 2px）。
     ///
     /// 虚线是**这一层唯一能用的「还不作数」记号**：实心块 = 谱面上真有的音，
@@ -737,7 +754,8 @@ public sealed class PianoRollLane : Control
         if (selected)
         {
             context.DrawRectangle(
-                null, new Pen(new ImmutableSolidColorBrush(palette.Accent), 1), rect);
+                null, new Pen(new ImmutableSolidColorBrush(palette.Accent), SelectionStrokeWidth),
+                rect);
         }
     }
 
