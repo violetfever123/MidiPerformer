@@ -68,6 +68,10 @@ public sealed record Track(
     /// 起点相同的音保持原来的先后。这不是花边 —— 它让「一个音都没越过邻居」这种最常见的改动
     /// 一个下标都不动，界面那套「改完重新算选中集」（<see cref="NoteRef"/> 里说的那件事）
     /// 就不必面对无谓的洗牌。
+    ///
+    /// 重排只换**位置**，不换**身份**：进来的音符带着 <see cref="Note.Id"/> 原样出去
+    /// （这里从头到尾只动顺序）。身份的意义正在这儿 —— 一个音挪到数组别处去了，
+    /// 指着它的那个号还是指着它。
     /// </summary>
     public Track WithNotes(IReadOnlyList<Note> notes)
         => this with { Notes = notes.OrderBy(n => n.StartTick).ToArray() };

@@ -166,14 +166,19 @@ public static class MidiReader
             {
                 // 稳定排序：同一 tick 上的音保持 DryWetMidi 给出的相对顺序，
                 // 原版的合并逻辑依赖这个顺序，换了顺序对拍就红。
-                var notes = group
+                //
+                // 排好之后**就地发身份**（一轨一数、第几个音就是几号，见 NoteIdentity）：
+                // 身份只由这份文件的音符顺序决定，不掺随机数、不掺跨文件累加的计数器 ——
+                // 「同一次导入必须可重现」是全链对拍的前提，而身份要是每次读都不一样，
+                // 对拍红出来的样子会像是读取逻辑坏了。
+                var notes = NoteIdentity.AssignInOrder(group
                     .OrderBy(n => n.Time)
                     .Select(n => new ModelNote(
                         (int)n.NoteNumber,
                         n.Time,
                         n.Length,
                         (int)n.Velocity))
-                    .ToArray();
+                    .ToArray());
 
                 if (notes.Length == 0) continue;
 

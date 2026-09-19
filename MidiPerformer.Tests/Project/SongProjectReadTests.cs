@@ -211,6 +211,96 @@ public class SongProjectReadTests
         Assert.That(formats, Is.SupersetOf(new[] { 0, 1, 2 }), "语料没有覆盖全三种 SMF 格式");
     }
 
+    // ==================== 身份 ====================
+
+    /// <summary>
+    /// 导入时按顺序发身份：一轨一数，第几个音就是几号（见 <c>NoteIdentity</c>）。
+    ///
+    /// 文件里刻意放了**两个一模一样的音**（同 tick、同音高、同力度）：身份是**发**的，
+    /// 不是拿内容算的 —— 拿内容算的话这两个会拿到同一个身份，而「选中了哪一个」这句话
+    /// 就变得没有意义。它俩在别的测试里也出现不了（内容相等，比什么都相等），
+    /// 只有身份分得开。
+    /// </summary>
+    [Test]
+    public void 导入时按顺序发身份_一轨一数()
+    {
+        var bytes = SmfWriter.Build(1, 480,
+            SmfTrack.Named("主旋律")
+                .Note(0, 480, 0, 60).Note(0, 480, 0, 60).Note(960, 480, 0, 64),
+            SmfTrack.Named("伴奏").Note(0, 960, 1, 40));
+
+        var song = MidiReader.ReadBytes(bytes);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(song.Tracks[0].Notes.Select(n => n.Id.Value), Is.EqualTo(new[] { 1, 2, 3 }),
+                "第几个音就是几号：0 号留给「没有身份」");
+            Assert.That(song.Tracks[1].Notes.Select(n => n.Id.Value), Is.EqualTo(new[] { 1 }),
+                "一轨一数：另一条轨从 1 号重新开始，不是接着上一条往下数");
+            Assert.That(song.Tracks[0].Notes[0], Is.EqualTo(song.Tracks[0].Notes[1]),
+                "同 tick 同音高同力度的两个音，值相等");
+            Assert.That(song.Tracks[0].Notes[0].Id, Is.Not.EqualTo(song.Tracks[0].Notes[1].Id),
+                "值相等但身份不同 —— 分开这两者靠的正是身份");
+        });
+    }
+
+    /// <summary>
+    /// **同一次导入必须可重现**：同一份字节读两遍，身份要一模一样。
+    ///
+    /// 身份要是掺了随机数、或者来自一个跨文件累加的全局计数器，这条会红 ——
+    /// 而且是它专门红给发号看的。没有这一条的话，那种坏法会先从全链对拍那几条测试上冒出来，
+    /// 红出来的样子像是「读进来的谱面不对」，查半天才查到发号上。
+    /// </summary>
+    [Test]
+    public void 同一次导入读两遍身份一模一样()
+    {
+        var bytes = SmfWriter.Build(1, 480,
+            SmfTrack.Named("主旋律")
+                .Note(0, 480, 0, 64).Note(480, 480, 0, 62).Note(960, 480, 0, 60),
+            SmfTrack.Named("伴奏").Note(0, 960, 1, 40).Note(960, 960, 1, 43));
+
+        var first = MidiReader.ReadBytes(bytes);
+        var second = MidiReader.ReadBytes(bytes);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(first.Tracks, Has.Count.EqualTo(second.Tracks.Count));
+            for (int t = 0; t < first.Tracks.Count; t++)
+            {
+                Assert.That(second.Tracks[t].Notes.Select(n => n.Id.Value),
+                    Is.EqualTo(first.Tracks[t].Notes.Select(n => n.Id.Value)),
+                    $"第 {t} 条轨第二遍读出来的身份和第一遍不一样");
+            }
+        });
+    }
+
+    /// <summary>
+    /// 语料全量：每条轨上的身份正好是 1..N，不重不漏。
+    ///
+    /// 手工造的那条测试只盯得住两个音、两条轨；而「重号」这种坏法（比如哪天有人把发号挪到
+    /// 分组之外、或者按 (轨块, 声道) 分组时算错了）要跑遍 700 多条真实轨才容易暴露，
+    /// 而那些轨上的音符数、声道分布都不是造得出来的。
+    /// </summary>
+    [Test]
+    public void 语料里每条轨的身份都是1到N()
+    {
+        MidiCorpus.AssertCorpusPresent();
+
+        int tracksSeen = 0;
+        foreach (var path in MidiCorpus.Files)
+        {
+            foreach (var track in MidiReader.Read(path).Tracks)
+            {
+                tracksSeen++;
+                var expected = Enumerable.Range(1, track.NoteCount);
+                Assert.That(track.Notes.Select(n => n.Id.Value), Is.EqualTo(expected),
+                    $"{Path.GetFileName(path)}：{track.Name}（轨{track.TrackIndex} 声道{track.Channel}）的身份不是 1..N");
+            }
+        }
+
+        Assert.That(tracksSeen, Is.GreaterThan(100), "一条轨都没查到，这条测试在空转");
+    }
+
     // ==================== 手工构造的文件：格式 / 坏文件 ====================
 
     [Test]
@@ -507,7 +597,16 @@ public class SongProjectReadTests
 
     // ==================== 帮手 ====================
 
+    /// <summary>
+    /// 「算整数的一类」= 允许出现在 <see cref="ModelNote"/> 上的成员类型。
+    ///
+    /// <see cref="NoteId"/> 也在这一列：它里面就是一个 <c>int</c>（身份号），
+    /// 既不表示时间也不表示秒，进不了「第二个时间真相源」那个筐。
+    /// 把它算进来不是给谁开绿灯 —— 不放行的话这条测试从加上身份那天起就一直是红的，
+    /// 而一条常年红着的测试，等于把「有人往 Note 上加 double」这件事也一起放过。
+    /// </summary>
     private static bool IsIntegral(Type t) =>
+        t == typeof(NoteId) ||
         t == typeof(byte) || t == typeof(sbyte) ||
         t == typeof(short) || t == typeof(ushort) ||
         t == typeof(int) || t == typeof(uint) ||

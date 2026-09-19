@@ -2,6 +2,7 @@ using Melanchall.DryWetMidi.Common;       // SevenBitNumber —— 只在断言�
 using Melanchall.DryWetMidi.Core;
 using Melanchall.DryWetMidi.Interaction;   // 这里用它来**检查**写出去的文件，不是拿来写
 using MidiPerformer.Core.Model;
+using MidiPerformer.Core.UseCases.Editing;
 using MidiPerformer.Core.UseCases.Project;
 using MidiPerformer.Tests.Corpus;
 using NUnit.Framework;
@@ -470,6 +471,44 @@ public class SongProjectWriteTests
 
         var ex = Assert.Throws<InvalidDataException>(() => MidiWriter.WriteBytes(song));
         Assert.That(ex!.Message, Does.Contain("轨块序号"), "错误消息得是给人看的中文");
+    }
+
+    // ==================== 身份 ====================
+
+    /// <summary>
+    /// **导出不带身份，重新导入时按位置重发** —— 标准 MIDI 里没有地方放它，也没必要放。
+    ///
+    /// 造一份「身份和位置对不上」的曲子来看这件事：剪一刀之后新发的号是 4（3 号是那个被剪的音占着的），
+    /// 导出再导入回来，号是按位置重发的 1、2 —— 那个 4 没有跟着文件走。
+    /// 这不算丢东西：身份只在一份 <see cref="Song"/> 里有意义，而导出导入出来的是**另一份**曲子。
+    /// 跨存盘的那条路是 .mproj，那边身份是存下来的（见 <c>SongProjectFileTests.存盘再打开身份不变</c>）。
+    /// </summary>
+    [Test]
+    public void 导出不带身份再导入时按位置重发()
+    {
+        var song = new Song(
+            new[]
+            {
+                new Track(0, 0, "主旋律", 0, new[]
+                {
+                    new ModelNote(60, 0, 480, 100, new NoteId(1)),
+                    new ModelNote(62, 3360, 720, 100, new NoteId(3))   // 伸出右切口 → 剪完发新号
+                })
+            },
+            new ModelTempoMap(ModelTimeDivision.PulsesPerQuarter(480)));
+
+        var cut = new SongEditor().CutRange(song, 0, 1920, 3840);
+        Assert.That(cut.Tracks[0].Notes.Select(n => n.Id.Value), Is.EqualTo(new[] { 1, 4 }),
+            "前提：剪出来的那一截拿的是新发的 4 号（3 号跟着被剪掉的那个音一起没了）");
+
+        var again = MidiReader.ReadBytes(MidiWriter.WriteBytes(cut));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(again.Tracks[0].Notes.Select(n => n.Id.Value), Is.EqualTo(new[] { 1, 2 }),
+                "导出再导入：号按位置重发，文件里没有一个地方记着身份");
+            SongAssert.Same(cut, again, "剪过的曲子导出再导入");
+        });
     }
 
     // ==================== 帮手 ====================

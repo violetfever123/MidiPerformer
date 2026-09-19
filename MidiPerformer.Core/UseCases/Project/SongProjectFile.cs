@@ -14,7 +14,8 @@ namespace MidiPerformer.Core.UseCases.Project;
 ///
 /// **S1 缝的另一半**（见 spec「Testing Decisions」）：<see cref="Song"/> ⇄ .mproj。要的也是逐字段精确：
 /// SaveProject → LoadProject 之后，轨数、每轨的轨块序号/声道/名字/音色/移调、
-/// 每个音的四个字段、速度表的分辨率与两张事件表，一个都不能变。
+/// 每个音的五个字段（身份 <see cref="Note.Id"/> 也在里面，见 <see cref="Converters.NoteConverter"/>）、
+/// 速度表的分辨率与两张事件表，一个都不能变。
 /// （MIDI 那半在 <see cref="MidiReader"/> / <see cref="MidiWriter"/>。）
 ///
 /// **文件格式**：JSON，平铺成一个对象 —— 文件头那几个字段就是文件最上面那几行：
@@ -255,8 +256,12 @@ public static class SongProjectFile
 
         try
         {
-            return element.Deserialize<Song>(ProjectJson)
+            Song song = element.Deserialize<Song>(ProjectJson)
                 ?? throw new InvalidDataException("工程文件里的 Song 字段是空的。");
+
+            // 身份是盘上的数据，进来之前得盘一遍（见下面那个方法：老工程没有这个字段、
+            // 手改过的文件可能两个音一个号，两种都不能往下传）
+            return NormalizeIdentities(song);
         }
         catch (JsonException ex)
         {
@@ -266,6 +271,40 @@ public static class SongProjectFile
         {
             throw new InvalidDataException($"工程文件里的谱面读不出来：{ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// 把读进来的身份盘一遍：合规（互不相同、都不是 0 号）的原样留着，不合规的整轨重发
+    /// （判据与理由都在 <see cref="NoteIdentity.Normalized"/> 上）。
+    ///
+    /// 谁不合规：版本 1 的老工程（存的时候还没有这个字段，读出来全是 0 号）和被人手改过的文件
+    /// （两个音抄成同一个号）。这两种都得在进内存之前修掉 —— 修不掉的坏值一路走下去
+    /// 只会变成「按身份认音认到两个音上」，而且不报错。
+    ///
+    /// <b>身份进了文件，但格式版本号不动</b>（<see cref="ProjectVersion"/> 仍然是 1）：
+    /// <see cref="Converters.NoteConverter"/> 把这个字段**当可选的读**，缺了就整轨重发，
+    /// 所以老文件照样读得进来；老程序读新文件也只是多看见一个不认识的字段，当没看见。
+    /// 两边都没有「得先知道对方是哪个版本」的地方，版本号就没有理由动 ——
+    /// 它是「读到更大的就不猜着读」的那道闸，白抬一下只会把老程序关在门外。
+    ///
+    /// <b>走的是 <see cref="Track"/> 的复制构造，不是 <see cref="Track.WithNotes"/>：</b>
+    /// 那一扇门会顺手按起点排一遍，而这里是在**读文件** —— 文件里写的什么顺序就还是什么顺序，
+    /// 和这个文件一直以来的行为一致（它从头到尾没有替文件重排过）。身份也跟着文件的顺序发，
+    /// 而正常存出来的文件本来就是有序的（按起点升序是模型的承诺），
+    /// 于是「读一份没有身份的老工程」和「重新导入那个 MIDI」发出的号是同一套。
+    ///
+    /// 轨对象**无条件重建**（不合规才换号，但换不换都走同一个循环）：这里比的是
+    /// 「哪个身份该换」这种细节，多一层「没变就别建」的判断，读的人得先把两层条件都想清楚
+    /// 才知道一个音的身份是从哪来的 —— 一份曲子里这些轨各有一个对象，省不下什么。
+    /// 重建出来的轨与原来值相等（<see cref="Track.Equals(Track?)"/> 不比引用）。
+    /// </summary>
+    private static Song NormalizeIdentities(Song song)
+    {
+        var tracks = new Track[song.Tracks.Count];
+        for (int i = 0; i < tracks.Length; i++)
+            tracks[i] = song.Tracks[i] with { Notes = NoteIdentity.Normalized(song.Tracks[i].Notes) };
+
+        return new Song(tracks, song.TempoMap);
     }
 
     /// <summary>

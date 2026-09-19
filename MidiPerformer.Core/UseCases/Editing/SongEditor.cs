@@ -178,6 +178,8 @@ public sealed class SongEditor : ISongEditor
             if (!touched.TryGetValue(reference.Track, out var edited))
                 touched[reference.Track] = edited = song.Tracks[reference.Track].Notes.ToArray();
 
+            // with 只点这两个字段：身份（Id）原样带过去 —— 挪一个音不换身份，它是同一个音换了个位置
+            //（和 CutRange 里剪断留下的碎片正相反，那条命令的判据写在它的方法注释上）。
             edited[reference.Index] = original with
             {
                 Pitch = AddPitch(original.Pitch, pitch),
@@ -228,6 +230,7 @@ public sealed class SongEditor : ISongEditor
 
         var track = song.Tracks[note.Track];
         var notes = track.Notes.ToArray();
+        // 同样只点这两个字段：身份跟着这个音走（改时值不换身份，见 Note.Id）
         notes[note.Index] = original with { StartTick = startTick, LengthTicks = lengthTicks };
 
         var tracks = song.Tracks.ToArray();
@@ -289,6 +292,18 @@ public sealed class SongEditor : ISongEditor
     ///
     /// <b><see cref="Track.NoteCount"/> 变成 0 的轨保留</b>，和 <see cref="DeleteNotes"/> 一个道理：
     /// 剪空了是「这条声部这段没东西」，不是「这条声部不要了」。
+    ///
+    /// <b>剪断留下的碎片是新音，发新身份；只是前移的那些音身份不变。</b>
+    /// 判据是「这个音还是不是原来那个音」：前移的音一个字节没缺，只是换了个位置，
+    /// 它当然还是它（和 <see cref="MoveNotes"/>、<see cref="SetNoteSpan"/> 一个道理，那两条命令
+    /// 改完的音身份都不换）；而被剪断的音**已经不在了** —— 留下的是它的碎片，
+    /// 左边那截和右边那截都不是原来的那个音（右边那截甚至被挪到了别处接上）。
+    /// 碎片沿用原音的身份是错的：那个身份代表的是「原来那个音」，
+    /// 界面手里可能还攥着它（选中集、拖动的锚点），继续用就等于告诉界面「那个音还在，只是变短了」。
+    ///
+    /// 新号从 <see cref="NoteIdentity.FirstFree"/> 来（这一轨现有身份的最大值 + 1，不是「数一数有几个音」），
+    /// 而且是**拿原来那一轨算的**，不是拿剪完的那一轨：被整个剪掉的音也占着号，
+    /// 从剪完的那一轨往上发就有可能发出一个「这一趟刚被剪掉、界面上还看得见旧曲子里的它」的号。
     /// </summary>
     public Song CutRange(Song song, int trackIndex, long startTick, long endTick)
     {
@@ -310,6 +325,9 @@ public sealed class SongEditor : ISongEditor
         var kept = new List<Note>(track.Notes.Count);
         bool changed = false;
 
+        // 剪断留下的碎片从这儿取号。为什么取号的范围是**剪之前**那一轨：见方法注释最后一节。
+        NoteId nextId = NoteIdentity.FirstFree(track.Notes);
+
         foreach (var note in track.Notes)
         {
             long start = note.StartTick;
@@ -329,13 +347,15 @@ public sealed class SongEditor : ISongEditor
                 // 跨过左切口（含「整个区间都被它盖住」那种）：在左切口剪断，留下左边那截。
                 // 盖住整个区间的那种，右边那截就此丢掉 —— 挪回来的话它紧贴着左截，
                 // 一个音变成两个，「剪」就成了「分裂」（见接口上的说明）。
-                kept.Add(note with { LengthTicks = startTick - start });
+                kept.Add(note with { LengthTicks = startTick - start, Id = nextId });
+                nextId = nextId.Next;
                 changed = true;
             }
             else if (end > endTick)
             {
                 // 从区间里伸出右切口：剪下外面那截，挪到左切口接上。
-                kept.Add(note with { StartTick = startTick, LengthTicks = end - endTick });
+                kept.Add(note with { StartTick = startTick, LengthTicks = end - endTick, Id = nextId });
+                nextId = nextId.Next;
                 changed = true;
             }
             else

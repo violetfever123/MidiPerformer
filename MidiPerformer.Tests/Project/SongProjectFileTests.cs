@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using MidiPerformer.Core.Model;
 using MidiPerformer.Core.UseCases.Project;
 using MidiPerformer.Tests.Corpus;
@@ -265,7 +266,11 @@ public class SongProjectFileTests
         var song = MidiReader.Read(path);
         var (_, again) = SongProjectFile.ReadProject(SongProjectFile.WriteProject(song, Header()));
 
-        SongAssert.Same(song, again, Path.GetFileName(path));
+        Assert.Multiple(() =>
+        {
+            SongAssert.Same(song, again, Path.GetFileName(path));
+            AssertSameIds(song, again, Path.GetFileName(path));
+        });
     }
 
     /// <summary>存在盘上再读回来也一样（<see cref="SongProjectFile.SaveProject"/> / <see cref="SongProjectFile.LoadProject"/> 那条路）。</summary>
@@ -283,6 +288,7 @@ public class SongProjectFileTests
             Assert.Multiple(() =>
             {
                 SongAssert.Same(song, again, Path.GetFileName(path));
+                AssertSameIds(song, again, Path.GetFileName(path));
                 Assert.That(header.Version, Is.EqualTo(SongProjectFile.ProjectVersion));
                 Assert.That(header.Name, Is.EqualTo(Path.GetFileNameWithoutExtension(path)));
             });
@@ -444,7 +450,12 @@ public class SongProjectFileTests
         SongAssert.Same(SingleNoteSong(), song, "多写了派生字段的工程");
     }
 
-    /// <summary>写的是不是模型本身：模型上多一个公开字段就该跟着进文件（不靠名单，靠构造器）。</summary>
+    /// <summary>
+    /// 写的是不是模型本身：模型上多一个公开字段就该跟着进文件（不靠名单，靠构造器）。
+    ///
+    /// 音符那一串里现在多了 <c>Id</c>（身份，见这条工单的说明）—— 它也是构造器参数，
+    /// 所以按这条规矩它就该在文件里，而这个断言跟着加一个名字，不是给它开例外。
+    /// </summary>
     [Test]
     public void 文件里的字段就是构造器的参数()
     {
@@ -462,7 +473,7 @@ public class SongProjectFileTests
             Assert.That(trackFields, Is.EquivalentTo(
                 new[] { "TrackIndex", "Channel", "Name", "Program", "Notes", "Transpose" }));
             Assert.That(noteFields, Is.EquivalentTo(
-                new[] { "Pitch", "StartTick", "LengthTicks", "Velocity" }));
+                new[] { "Pitch", "StartTick", "LengthTicks", "Velocity", "Id" }));
             // 速度表只留「分辨率 + 两张表」三样，没有第四样
             Assert.That(mapFields, Is.EquivalentTo(
                 new[] { "Division", "TempoChanges", "TimeSignatureChanges" }));
@@ -479,6 +490,81 @@ public class SongProjectFileTests
 
         Assert.That(document.RootElement.EnumerateObject().Select(p => p.Name), Is.EquivalentTo(
             new[] { "Version", "Name", "Edited", "ImportedFrom", "Song" }));
+    }
+
+    // ==================== 身份 ====================
+
+    /// <summary>
+    /// 存盘再打开，身份一个都不换。
+    ///
+    /// 号刻意不是 1..N（7、9、11）：这条测试因此同时证明「读取端不会顺手把身份重发一遍」——
+    /// 合规的身份（互不相同、都不是 0）原样留着，只有坏的那些才重发。
+    /// 比身份得单独比：它不算内容，<see cref="SongAssert"/> 那条路比不到它（见下面那个帮手的说明）。
+    /// </summary>
+    [Test]
+    public void 存盘再打开身份不变()
+    {
+        var song = SongOf(
+            new ModelNote(60, 0, 480, 100, new NoteId(7)),
+            new ModelNote(62, 480, 480, 100, new NoteId(9)),
+            new ModelNote(64, 960, 480, 100, new NoteId(11)));
+
+        var (_, again) = SongProjectFile.ReadProject(SongProjectFile.WriteProject(song, Header()));
+
+        Assert.That(again.Tracks[0].Notes.Select(n => n.Id.Value), Is.EqualTo(new[] { 7, 9, 11 }),
+            "身份写出去、读回来还是原来那三个号");
+    }
+
+    /// <summary>
+    /// 版本 1 的老工程（那时候还没有身份这个字段）读回来照样是一份有身份的谱面：
+    /// 缺了就按文件里的顺序整轨重发。
+    ///
+    /// 「身份可选」那一半的兑现就在这儿 —— 老文件读得进来，而且进来的不是一轨 0 号
+    /// （0 号在模型里是「没有身份」，一路传到界面上就成了个认不出来的音）。
+    /// 手工拼的曲子（<see cref="SingleNoteSong"/> 那种，Id 是默认的 0）走的是同一条路：
+    /// 文件里写着 <c>"Id": 0</c>，读出来同样是 0 号，同样整轨重发。
+    /// </summary>
+    [Test]
+    public void 老工程里没有身份时按位置重发()
+    {
+        string json = SongProjectFile.WriteProject(SongOf(
+            new ModelNote(60, 0, 480, 100, new NoteId(7)),
+            new ModelNote(62, 480, 480, 100, new NoteId(9)),
+            new ModelNote(64, 960, 480, 100, new NoteId(11))), Header());
+
+        // 模拟版本 1 写出来的文件：把身份字段整行删掉。前面那个逗号要一起删 ——
+        // 留着的话 JSON 里就有个悬空逗号，文件连解析都过不去，那测的就不是这条了。
+        json = Regex.Replace(json, @",\s*""Id"": \d+", "");
+
+        var (_, song) = SongProjectFile.ReadProject(json);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(json, Does.Not.Contain("\"Id\""), "前提：文件里真的没有 Id 字段");
+            Assert.That(song.Tracks[0].Notes.Select(n => n.Id.Value), Is.EqualTo(new[] { 1, 2, 3 }),
+                "缺身份：按文件里的顺序整轨重发，号从 1 开始");
+        });
+    }
+
+    /// <summary>
+    /// 文件里的身份重号了（人手动改过、或者哪天写坏了）：整轨重发，而不是硬着头皮往下传。
+    ///
+    /// 为什么不容忍：身份在轨内唯一是这份数据唯一要保证的事。重号之后「按身份认音」会认到两个音上，
+    /// 而且不报错 —— 正是这条工单要消灭的那种坏。为什么是整轨重发、不是给重复的那个补个号，
+    /// 理由写在 <c>NoteIdentity.Normalized</c> 上。
+    /// </summary>
+    [Test]
+    public void 文件里的身份重号时整轨重发()
+    {
+        string json = SongProjectFile.WriteProject(SongOf(
+            new ModelNote(60, 0, 480, 100, new NoteId(7)),
+            new ModelNote(62, 480, 480, 100, new NoteId(7)),
+            new ModelNote(64, 960, 480, 100, new NoteId(11))), Header());
+
+        var (_, song) = SongProjectFile.ReadProject(json);
+
+        Assert.That(song.Tracks[0].Notes.Select(n => n.Id.Value), Is.EqualTo(new[] { 1, 2, 3 }),
+            "重号的文件：整轨重发，号从 1 开始");
     }
 
     // ==================== 坏文件：读不回来时报中文错，不崩 ====================
@@ -631,6 +717,10 @@ public class SongProjectFileTests
     ///
     /// 为什么这类也要拦：STJ 对**缺字段**是悄悄补 0 的（所以 <c>Note</c> 有自己的转换器），
     /// 而 0 力度 / 0 时值 / 负数 tick 都是「读出来了一个错的谱面还告诉用户没问题」。
+    ///
+    /// 身份也在这个筐里：负数身份不是「没有身份」而是个坏值，放过去会一路混进按身份认音的地方
+    /// （那条路认错了不报错，只是认到别的音上）；写成字符串同理 —— 它连数都不是。
+    /// 但身份**缺失**不算坏值：老工程就是那样，缺了整轨重发（见上面那条测试）。
     /// </summary>
     [TestCase("\"Pitch\": 60", "\"Pitch\": 128", "音高")]
     [TestCase("\"Pitch\": 60", "\"Pitch\": -1", "音高")]
@@ -638,6 +728,8 @@ public class SongProjectFileTests
     [TestCase("\"Velocity\": 100", "\"Velocity\": -5", "力度")]
     [TestCase("\"StartTick\": 0", "\"StartTick\": -1", "起始")]
     [TestCase("\"LengthTicks\": 480", "\"LengthTicks\": -480", "时值")]
+    [TestCase("\"Id\": 0", "\"Id\": -1", "身份")]
+    [TestCase("\"Id\": 0", "\"Id\": \"一\"", "身份")]
     public void 音符的值不合法时报清楚的错不崩(string from, string to, string because)
     {
         string json = SongProjectFile.WriteProject(SingleNoteSong(), Header()).Replace(from, to);
@@ -824,4 +916,26 @@ public class SongProjectFileTests
     private static Song SingleNoteSong() => new(
         new[] { new Track(0, 0, "主旋律", 0, new[] { new ModelNote(60, 0, 480, 100) }) },
         new ModelTempoMap(ModelTimeDivision.PulsesPerQuarter(480)));
+
+    /// <summary>一轨多音的小曲子，音符（含身份）由调用方给 —— 身份那几条测试要的是「号不是 1..N」的形状。</summary>
+    private static Song SongOf(params ModelNote[] notes) => new(
+        new[] { new Track(0, 0, "主旋律", 0, notes) },
+        new ModelTempoMap(ModelTimeDivision.PulsesPerQuarter(480)));
+
+    /// <summary>
+    /// 逐条比身份。
+    ///
+    /// 为什么不并进 <see cref="SongAssert.Same"/>：那个帮手比的是**内容**，而 <c>Note</c> 的值相等
+    /// 刻意不比身份（见 <c>Note.Equals</c> 的说明）。两件事分开写，谁要哪一件一目了然 ——
+    /// 缝上那几条测试要比的是「同一份谱面」，而存盘往返这条路径还得额外保证「同一套身份」。
+    /// </summary>
+    private static void AssertSameIds(Song expected, Song actual, string because)
+    {
+        Assert.That(actual.Tracks, Has.Count.EqualTo(expected.Tracks.Count), $"{because}：轨数");
+
+        for (int t = 0; t < expected.Tracks.Count; t++)
+            Assert.That(actual.Tracks[t].Notes.Select(n => n.Id.Value),
+                Is.EqualTo(expected.Tracks[t].Notes.Select(n => n.Id.Value)),
+                $"{because}：第 {t} 条轨的身份");
+    }
 }

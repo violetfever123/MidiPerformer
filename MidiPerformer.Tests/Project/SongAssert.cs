@@ -21,8 +21,10 @@ internal static class SongAssert
 
         for (int i = 0; i < expected.Tracks.Count; i++)
         {
-            // Track 的值相等会把轨块序号 / 声道 / 轨名 / 音色 / 移调 / 每个音的四个字段全部比掉，
+            // Track 的值相等会把轨块序号 / 声道 / 轨名 / 音色 / 移调 / 每个音的那四个内容字段全部比掉，
             // 而 tick 是整数，比的就是精确值，没有容差。
+            // **身份（Note.Id）不在里面**，那是故意的：它不是内容（见 Note.Equals 的说明）。
+            // 要比身份的地方自己比（SongProjectFileTests.AssertSameIds）—— 这里比的始终是「同一份谱面」。
             Assert.That(actual.Tracks[i], Is.EqualTo(expected.Tracks[i]),
                 $"{because}：第 {i} 条轨（{expected.Tracks[i].Name}）");
         }

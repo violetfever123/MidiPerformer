@@ -97,6 +97,21 @@ internal static class Converters
     ///
     /// 顺带把值的范围也拦下：音高与力度是七位整数（0..127，模型和 MIDI 都是这个约定），
     /// tick 不能是负数。这些都是「文件里写着但物理上不可能」的值。
+    ///
+    /// <b>身份（<see cref="ModelNote.Id"/>）写进文件，但读的时候可以缺。</b>
+    /// 这条工单里那个「要不要持久化身份」的决定就是「要」，理由三条：
+    /// <list type="number">
+    /// <item>模型的公开字段就是文件里的字段 —— 这是这个仓库的规矩，而且有测试盯着
+    /// （<c>SongProjectFileTests.文件里的字段就是构造器的参数</c>）。不写的话就得在那条测试上开一个例外，
+    /// 而例外是给人看漏的。</item>
+    /// <item>兼容不用付代价：这个字段**可选**。版本 1 的老工程没有它，读出来是 0 号「没有身份」，
+    /// 读完由 <c>SongProjectFile</c> 按位置整轨重发一遍（和重新导入同一个 MIDI 是同一个函数发的号）。
+    /// 老程序读新文件也不受影响：它不认识这个字段，当没看见。</item>
+    /// <item>这样「存盘再打开」拿到的还是同一套身份。今天没人靠它活着（选中集本来就不跨重载存活），
+    /// 但界面一旦按身份记选中，这一格就是现成的 —— 而写它只花一个字段。</item>
+    /// </list>
+    /// 反过来，MIDI 导出那边**不带身份**：标准 MIDI 里没有地方放它，也没必要放 ——
+    /// 重新导入时按位置重发一遍，而选中集本来就不跨文件重载存活。
     /// </summary>
     internal sealed class NoteConverter : JsonConverter<ModelNote>
     {
@@ -112,6 +127,7 @@ internal static class Converters
             long startTick = Long(root, "StartTick");
             long lengthTicks = Long(root, "LengthTicks");
             int velocity = Int(root, "Velocity");
+            NoteId id = ReadId(root);
 
             if (pitch is < 0 or > 127)
                 throw new JsonException($"音符的音高是 {pitch}，不在 0..127 里。");
@@ -122,7 +138,7 @@ internal static class Converters
             if (lengthTicks < 0)
                 throw new JsonException($"音符的时值是负数（{lengthTicks}）。");
 
-            return new ModelNote(pitch, startTick, lengthTicks, velocity);
+            return new ModelNote(pitch, startTick, lengthTicks, velocity, id);
         }
 
         public override void Write(Utf8JsonWriter writer, ModelNote value, JsonSerializerOptions options)
@@ -132,7 +148,30 @@ internal static class Converters
             writer.WriteNumber(nameof(ModelNote.StartTick), value.StartTick);
             writer.WriteNumber(nameof(ModelNote.LengthTicks), value.LengthTicks);
             writer.WriteNumber(nameof(ModelNote.Velocity), value.Velocity);
+            writer.WriteNumber(nameof(ModelNote.Id), value.Id.Value);
             writer.WriteEndObject();
+        }
+
+        /// <summary>
+        /// 读身份。**可以缺**（版本 1 的老工程里没有这个字段，手改过的文件也可能漏掉它）：
+        /// 缺了就是 0 号「没有身份」，整轨的身份由读取端重发一遍。
+        ///
+        /// 但**有就得是个像样的号**：类型不对或者是个负数，当场报中文错 —— 和上面那几个字段一条规矩。
+        /// 负数身份不是「没有身份」，是个坏值，放过去它会一路混进按身份认音的地方，
+        /// 而那种坏法不会报错，只会认错音。
+        /// </summary>
+        private static NoteId ReadId(JsonElement root)
+        {
+            if (!root.TryGetProperty(nameof(ModelNote.Id), out var element)) return NoteId.None;
+            if (element.ValueKind == JsonValueKind.Null) return NoteId.None;
+            if (element.ValueKind != JsonValueKind.Number)
+                throw new JsonException($"音符的身份（{nameof(ModelNote.Id)}）不是一个数字。");
+            if (!element.TryGetInt32(out int value))
+                throw new JsonException($"音符的身份（{nameof(ModelNote.Id)}）不是一个整数。");
+            if (value < 0)
+                throw new JsonException($"音符的身份是负数（{value}）：要么 0（没有身份），要么正数。");
+
+            return new NoteId(value);
         }
 
         private static int Int(JsonElement root, string name)

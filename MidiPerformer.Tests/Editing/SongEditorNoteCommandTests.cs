@@ -821,6 +821,181 @@ public class SongEditorNoteCommandTests
         Assert.That(ex!.Message, Does.Contain("越界"));
     }
 
+    // ==================== 身份（编辑不换身份，剪断换） ====================
+
+    /// <summary>
+    /// 挪动（含改音高）不换身份：**它是同一个音换了个位置**。
+    ///
+    /// 身份要是不跟着音走，界面按身份记的选中集拖一下就全掉 —— 那正是这条工单要消灭的事。
+    /// 号刻意不是 1..N 的顺序号（1、2、3 是按内容排的，这里正好一样，所以下面还单有一条
+    /// 「越过邻居重排」把「身份 ≠ 下标」这件事显出来）。
+    /// </summary>
+    [Test]
+    public void 挪动之后身份不换()
+    {
+        var song = SongOf(Map(), Melody(
+            new Note(60, 0, 240, 100, new NoteId(1)),
+            new Note(64, 480, 240, 100, new NoteId(2)),
+            new Note(67, 960, 240, 100, new NoteId(3))));
+
+        var edited = _editor.MoveNotes(song, new[] { new NoteRef(0, 0), new NoteRef(0, 2) }, 240, 2);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(Pitches(edited, 0), Is.EqualTo(new[] { 62, 64, 69 }), "前提：动的真是第 1、3 个音");
+            Assert.That(Ids(edited, 0), Is.EqualTo(new[] { 1, 2, 3 }), "挪位置、改音高都不换身份");
+        });
+    }
+
+    /// <summary>
+    /// **越过邻居、数组重排之后身份还跟着音走** —— 这条是身份存在的理由本身。
+    ///
+    /// 按下标认音的话，重排之后「第 0 个」已经换成了另一个音：界面攥着刚才算出来的下标，
+    /// 拖完再筛一遍选中集就会选中错的那个（而且不报错）。身份不受重排影响：
+    /// 该挪的那个音还是 1 号，只是它现在排在数组的第二个。
+    /// </summary>
+    [Test]
+    public void 越过邻居重排之后身份还跟着音走()
+    {
+        var song = SongOf(Map(), Melody(
+            new Note(60, 0, 240, 100, new NoteId(1)),
+            new Note(64, 480, 240, 100, new NoteId(2))));
+
+        var edited = _editor.MoveNotes(song, new[] { new NoteRef(0, 0) }, 960, 0);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(Starts(edited, 0), Is.EqualTo(new long[] { 480, 960 }), "前提：数组重排了");
+            Assert.That(Ids(edited, 0), Is.EqualTo(new[] { 2, 1 }),
+                "身份跟音走：被挪过去的那个音现在是第二个，但它还是 1 号");
+            Assert.That(edited.Tracks[0].Notes[1].Pitch, Is.EqualTo(60), "1 号就是被挪的那个音");
+        });
+    }
+
+    /// <summary>改时值 / 改起点不换身份 —— 那个音还在，只是长了一点、或者挪了个地方。</summary>
+    [Test]
+    public void 改时值之后身份不换()
+    {
+        var song = SongOf(Map(), Melody(
+            new Note(60, 0, 240, 100, new NoteId(1)),
+            new Note(64, 480, 240, 100, new NoteId(2))));
+
+        var edited = _editor.SetNoteSpan(song, new NoteRef(0, 1), 240, 960);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(Starts(edited, 0), Is.EqualTo(new long[] { 0, 240 }), "前提：起点真的被改了");
+            Assert.That(Ids(edited, 0), Is.EqualTo(new[] { 1, 2 }), "改时值不换身份");
+        });
+    }
+
+    /// <summary>
+    /// 删掉一个音，别人的身份一个都不动 —— 删音符**不重编号**。
+    ///
+    /// 重编号（比如「删完把剩下的按顺序重发一遍」）看着整齐，但它会让一次删除把整条轨的身份全换掉，
+    /// 界面手里那些没被删掉的音的坐标当场全作废。号是**身份**不是**排名**，缺几个号无所谓。
+    /// </summary>
+    [Test]
+    public void 删掉一个音别人的身份不受影响()
+    {
+        var song = SongOf(Map(), Melody(
+            new Note(60, 0, 240, 100, new NoteId(3)),
+            new Note(64, 480, 240, 100, new NoteId(7))));
+
+        var edited = _editor.DeleteNotes(song, new[] { new NoteRef(0, 0) });
+
+        Assert.That(Ids(edited, 0), Is.EqualTo(new[] { 7 }),
+            "删掉的是 3 号那个音，7 号原样留着");
+    }
+
+    /// <summary>
+    /// 跨过左切口剪出来的那一截是**新音**，发新身份（判据写在 <see cref="SongEditor.CutRange"/> 的注释上）：
+    /// 被剪的那个音已经不在谱面上了，碎片沿用它的号，等于告诉界面「原来那个音还在，只是变短了」。
+    ///
+    /// 新号从**剪之前**那一轨的最大号往上发：4 号是刚被剪掉的那个音占着的号，
+    /// 所以这里发出来的是 5。
+    /// </summary>
+    [Test]
+    public void 跨过左切口的左截是新身份()
+    {
+        var song = SongOf(Map(), Melody(new Note(60, 1440, 720, 100, new NoteId(4))));
+
+        var edited = _editor.CutRange(song, 0, 1920, 3840);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(Starts(edited, 0), Is.EqualTo(new long[] { 1440 }), "前提：确实剪出了一截");
+            Assert.That(Ids(edited, 0), Is.EqualTo(new[] { 5 }), "碎片是新音，发新号");
+        });
+    }
+
+    /// <summary>伸出右切口、挪到左切口接上的那一截同样是新音 —— 它连位置都换了，更不是原来那个音。</summary>
+    [Test]
+    public void 伸出右切口挪回来的那截是新身份()
+    {
+        var song = SongOf(Map(), Melody(new Note(60, 3360, 720, 100, new NoteId(4))));
+
+        var edited = _editor.CutRange(song, 0, 1920, 3840);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(Starts(edited, 0), Is.EqualTo(new long[] { 1920 }), "前提：确实挪回来了一截");
+            Assert.That(Ids(edited, 0), Is.EqualTo(new[] { 5 }), "碎片是新音，发新号");
+        });
+    }
+
+    /// <summary>
+    /// 一条混着各种形状的轨剪一刀，跑完盯着三件事：
+    /// <b>前移的音身份一个都没换</b>（它们只是挪了位置）、
+    /// <b>剪出来的碎片身份是新发的</b>（原来那些音已经不在谱面上了）、
+    /// <b>整轨之内身份不重号</b>（这是身份唯一要保证的事）。
+    ///
+    /// 顺序和号都写死在这儿：这一刀同时剪出两截（8、9 号）和一截挪回来的（10 号），
+    /// 号按分派顺序往上发，而 1 / 6 / 7 号那几个前移的音一个都没被碰。
+    /// </summary>
+    [Test]
+    public void 剪一刀之后前移的不换身份碎片换新身份()
+    {
+        var song = SongOf(Map(), Melody(
+            new Note(60, 0, 240, 100, new NoteId(1)),        // 整个在切口之前
+            new Note(62, 480, 1920, 100, new NoteId(2)),     // 跨过左切口 → 剪断，左截是新音
+            new Note(64, 1440, 3840, 100, new NoteId(3)),    // 整个切口被它盖住 → 剪断，左截是新音
+            new Note(65, 1920, 240, 100, new NoteId(4)),     // 整个在切口里 → 没了
+            new Note(67, 3360, 720, 100, new NoteId(5)),     // 伸出右切口 → 挪回来，那截是新音
+            new Note(69, 3840, 240, 100, new NoteId(6)),     // 正好从右切口起步 → 前移，身份不变
+            new Note(72, 4320, 240, 100, new NoteId(7))));   // 整个在切口之后 → 前移，身份不变
+
+        var edited = _editor.CutRange(song, 0, 1920, 3840);
+        var ids = Ids(edited, 0);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(Starts(edited, 0), Is.EqualTo(new long[] { 0, 480, 1440, 1920, 1920, 2400 }),
+                "前提：这一刀的形状和上面那条「只减不增」的测试一致");
+            Assert.That(ids, Is.EqualTo(new[] { 1, 8, 9, 10, 6, 7 }),
+                "1/6/7 是前移的音（身份不变），8/9/10 是这一刀剪出来的碎片（新发的）");
+            Assert.That(ids.Distinct().Count(), Is.EqualTo(ids.Length), "一轨之内身份不重号");
+        });
+    }
+
+    /// <summary>
+    /// 新号是「现有最大号 + 1」而不是「这一轨有几个音」：上面那条轨里最大的号是 7，
+    /// 剪出来的是 8/9/10 —— 音只有 6 个，按数量发就会撞上那些刚被剪掉的音占着的号。
+    /// </summary>
+    [Test]
+    public void 剪出来的新身份从现有最大号往上发()
+    {
+        var song = SongOf(Map(), Melody(
+            new Note(60, 0, 240, 100, new NoteId(2)),
+            new Note(62, 120, 240, 100, new NoteId(9)),      // 号不连续：中间那个早就删掉了 ——「往上发」的代价
+            new Note(64, 3360, 720, 100, new NoteId(3))));   // 伸出右切口 → 新号
+
+        var edited = _editor.CutRange(song, 0, 1920, 3840);
+
+        Assert.That(Ids(edited, 0), Is.EqualTo(new[] { 2, 9, 10 }),
+            "新号接着最大的 9 往上发（按「有几个音」发会发成 4，撞上早就没了的那几个号）");
+    }
+
     // ==================== 改轨名 ====================
 
     [Test]
@@ -1059,6 +1234,16 @@ public class SongEditorNoteCommandTests
 
     private static int[] Pitches(Song song, int track)
         => song.Tracks[track].Notes.Select(n => n.Pitch).ToArray();
+
+    /// <summary>
+    /// 第 <paramref name="track"/> 条轨的身份，按数组顺序 —— 身份那个号码本身。
+    ///
+    /// 比的是 <c>Id.Value</c> 而不是 <c>Id</c>：断言里写成 <c>new[] { 1, 2, 3 }</c> 读起来就是
+    /// 「第几个音是几号」，一眼看得出号与音对不对得上；拿 <see cref="NoteId"/> 直接比的话，
+    /// 断言消息里每个号都裹着一层类型名的壳，扫起来费劲。
+    /// </summary>
+    private static int[] Ids(Song song, int track)
+        => song.Tracks[track].Notes.Select(n => n.Id.Value).ToArray();
 
     /// <summary>相邻音起点之间的间距 —— 「整组挪的是同一个量」看得见的那一面。</summary>
     private static long[] Gaps(Song song, int track)
