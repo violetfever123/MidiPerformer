@@ -657,15 +657,23 @@ public partial class MainWindow : Window
         ShowNotice($"「{name}」已存进曲库：{library.Directory}");
     }
 
-    /// <summary>曲库那条上要改名（点「改名」或按 F2）：问一个新名字，落到盘上。</summary>
-    private async void OnRenameRequested(object? sender, string oldName)
+    /// <summary>
+    /// 曲库那条上要改名（在名字上点一下，或按 F2 之后回车）：名字已经到手，落到盘上。
+    ///
+    /// 25 号之前这条路要先弹一个框问名字（<c>Dialogs.AskNameAsync</c>），问完才有个名字；
+    /// 现在名字是行内那个输入框打的，跟着请求一起过来，这儿就只剩「落盘」这一件事 ——
+    /// 于是它也不必是 <c>async</c> 的了。
+    ///
+    /// 消毒和「这名字能不能用」都留在了面板那边（见 <c>SongLibraryPanel.CommitRename</c>）：
+    /// 名字是从那儿打出来的，判据和框里那行字在同一处，才不会出现「框里显示一个、
+    /// 盘上躺着另一个」。不能用的名字也照原样递过来，就是为了让下面 <see cref="RenameTo"/>
+    /// 里那句 <c>ShowError</c> 有机会把它念给用户听。
+    /// </summary>
+    private void OnRenameRequested(object? sender, RenameRequest request)
     {
         if (_library is not { } library) return;
 
-        string? name = await Dialogs.AskNameAsync(this, "改曲名", oldName);
-        if (name is null) return;
-
-        RenameTo(library, oldName, name);
+        RenameTo(library, request.OldName, request.NewName);
     }
 
     /// <summary>
@@ -673,6 +681,10 @@ public partial class MainWindow : Window
     ///
     /// 改的要是**当前正开着的那一首**，曲名框得跟着换：它显示的就是这个名字，
     /// 不改的话界面上会同时存在两个名字（列表里新的、框里旧的），按保存还会存回一个已经不存在的名字。
+    ///
+    /// 没改成的那一路（撞名、名字不能用）**曲库那条行不用管**：曲库是在动手之前抛的，
+    /// 盘上什么都没变，而那一行显示的一直是旧名字 —— 行的名字**只在刷新时**从盘上读，
+    /// 用户打在输入框里的那半截字从来没有进过那一行。喊一句错就够了。
     /// </summary>
     private void RenameTo(SongLibrary library, string oldName, string newName)
     {

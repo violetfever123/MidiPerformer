@@ -261,7 +261,7 @@
                      TextAlignment="Center" TextWrapping="Wrap"
                      FontSize="12.5"
                      Foreground="{DynamicResource TokenInkFaint}"
-                     Text="还没有曲子 —— 点左上角「导入 MIDI…」选一个 .mid 文件，或者把文件直接拖进这个窗口。" />
+                     Text="还没有曲子 —— 把 .mid 拖进这个窗口，或从「文件」菜单导入。" />
         </Panel>
       </ScrollViewer>
     </Grid>

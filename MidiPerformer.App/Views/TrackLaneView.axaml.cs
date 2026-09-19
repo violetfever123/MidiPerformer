@@ -54,7 +54,16 @@ public partial class TrackLaneView : UserControl
     /// </summary>
     private bool _collapsed;
 
-    /// <summary>改名输入框正开着。</summary>
+    /// <summary>
+    /// 名字框里正开着一次改名（焦点进来了、还没收摊）。
+    ///
+    /// 25 号之后名字框**常驻**，没有「开 / 关」这回事了 —— 这面旗说的是
+    /// 「这一格现在归用户在打字」，两件事靠它：
+    ///   · <see cref="CommitRename"/> / <see cref="CancelRename"/> 判「这一下算不算在改这条轨」
+    ///     （<see cref="Rebind"/> 和抽掉一段那两处会无条件来收一收半截改名，没有它的话，
+    ///     每一次编辑都会顺手把焦点从名字框上抢走）；
+    ///   · 提交 / 取消之后那次 <c>LostFocus</c> 不再回头再提交一遍。
+    /// </summary>
     private bool _renaming;
 
     /// <summary>「删掉这条轨？」那一问正摆着。</summary>
@@ -160,6 +169,9 @@ public partial class TrackLaneView : UserControl
 
         NumberText.Text = Format.TrackNumber(trackIndex + 1);
         NameText.Text = DisplayName(track.Name, trackIndex);
+        // 名字框常驻，它显示的**就是**这个名字：重挂之后（换了曲子、撤销过、名字在别处改过）
+        // 不一齐刷的话，这一格会停在上一份曲子 / 改名之前的那行字上
+        NameBox.Text = NameText.Text;
 
         // 音色那一格两样二选一（见 axaml）：旋律轨给下拉，鼓轨给一句说明。
         // 鼓轨不给下拉不是省事：9 号声道在 MIDI 里整条都是鼓组，音色号在它上面没有意义，
@@ -496,10 +508,17 @@ public partial class TrackLaneView : UserControl
     private static string DisplayName(string? name, int trackIndex)
         => string.IsNullOrWhiteSpace(name) ? $"轨 {Format.TrackNumber(trackIndex + 1)}" : name;
 
-    private void OnRenameClick(object? sender, RoutedEventArgs e) => BeginRename();
-
-    /// <summary>就地改成输入框：同一个位置换上去，整行不跳。</summary>
-    private void BeginRename()
+    /// <summary>
+    /// 焦点进了名字框：这一次改名算开始。
+    ///
+    /// 「进编辑」这个信号从**点了「改名」按钮**换成了**焦点进来了** —— 25 号工单把改名做成
+    /// 常驻可编辑（名字框一直在那儿，和工具栏那颗 SongNameBox 同一个样子），按钮没了，
+    /// 剩下的「开始」只有焦点这一件事。
+    ///
+    /// 全选是给鼠标用户的：改名十有八九是整条换掉、不是改中间一个字
+    /// （想改中间就再点一下，那之后就是普通的编辑了）。
+    /// </summary>
+    private void OnNameBoxGotFocus(object? sender, GotFocusEventArgs e)
     {
         if (_renaming) return;
 
@@ -508,12 +527,12 @@ public partial class TrackLaneView : UserControl
         SetSplitting(false);
 
         _renaming = true;
+        // 起点是**已经落地的那个名字**，不是框里剩下的一行字：上一次没收摊的（不该有的）半截
+        // 名字不该留到这一次，而 Bind 一直把这两个控件刷成同一个，这里写一遍就是把话说死
         NameBox.Text = NameText.Text;
-        NameText.IsVisible = false;
-        NameBox.IsVisible = true;
-        // 改名按钮自己先藏起来：再点一下没有第二种意思，留着它只会让人以为「再点一次能取消」
-        RenameButton.IsVisible = false;
 
+        // 抽掉一段那一问要是正开着，上面那句 SetSplitting(false) 会把焦点清掉 ——
+        // 重新落回这个名字框（本来就开着的话 Focus 是个空操作）
         NameBox.Focus();
         NameBox.SelectAll();
     }
@@ -540,7 +559,12 @@ public partial class TrackLaneView : UserControl
         }
     }
 
-    /// <summary>焦点走了就是这一改算数（点别处、点了别的轨的改名…），和大多数软件的输入框一样。</summary>
+    /// <summary>
+    /// 焦点走了就是这一改算数（点别处、点卷帘、Tab 走开…），和大多数软件的输入框一样。
+    ///
+    /// 名字框常驻之后这一条比从前更要紧：没有「改名」按钮把这一次编辑圈起来了，
+    /// 用户在名字上点一下、改两个字、再去点卷帘，那一下就**是**这次改名的收尾。
+    /// </summary>
     private void OnNameBoxLostFocus(object? sender, RoutedEventArgs e) => CommitRename();
 
     private void CommitRename()
@@ -566,22 +590,29 @@ public partial class TrackLaneView : UserControl
     }
 
     /// <summary>
-    /// 收摊：输入框藏回去，那一行名字换回来。
+    /// 收摊：这一次改名结束了（提交了 / 取消了 / 别处把它收掉了）。
+    ///
+    /// 常驻的框没有「藏回去」这一步，收摊做的是**把框里的字退回已经落地的那个名字**。
+    /// 这一步同时兜住两件事：
+    ///   · Esc 取消 —— 半截名字不能留在框里当真的；
+    ///   · 提交之后 <c>ClearFocus</c> 引出的那一次 <c>LostFocus</c>（「焦点走了算数」那一路
+    ///     也是提交）—— 挡它的是上一句「先落旗」（<see cref="CommitRename"/> 见旗倒了就
+    ///     直接返回）；而退回名字这一下保证框里**始终是已经落地的那个名字**。
+    ///     两道合起来：提交 / 取消之后框里不会留着半截字，同一次改名也不会被提交第二遍。
     ///
     /// <b>顺手把焦点清掉。</b>窗口的方向键 / 撤销那一段在**隧道阶段**接管按键，
-    /// 它开头有一句「焦点在 TextBox 里就让开」—— 藏起来的输入框要是还攥着焦点，
-    /// 那一句会一直让下去：方向键、Ctrl+Z 在整个窗口里静悄悄地失灵，
-    /// 而且看不出是谁在挡（那个框已经不显示了）。曲名那一格没这个毛病：它从不藏。
+    /// 它开头有一句「焦点在 TextBox 里就让开」—— 名字框要是还攥着焦点，
+    /// 那一句会一直让下去：方向键、Ctrl+Z 在整个窗口里静悄悄地失灵。
+    /// （曲名那一格不主动放手，它一直都在，让人打完字接着改数是正常的；
+    /// 这一格收摊之后就没人在看它了。）
     /// </summary>
     private void EndRename()
     {
-        // 先落旗再藏：藏会引发 LostFocus，那一路也是「提交」——
+        // 先落旗再退回名字：退回会引发 LostFocus，那一路也是「提交」——
         // 倒过来的话，这一次改名会被自己回调进来提交两遍
         _renaming = false;
 
-        NameBox.IsVisible = false;
-        NameText.IsVisible = true;
-        RenameButton.IsVisible = true;
+        NameBox.Text = NameText.Text;
 
         TopLevel.GetTopLevel(this)?.FocusManager?.ClearFocus();
     }

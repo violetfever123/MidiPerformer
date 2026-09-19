@@ -6,7 +6,8 @@
     一条轨 = 轨道头 + 卷帘。
 
     轨道头上是活的：**音色**（128 个 GM 音色的下拉，鼓轨换成一句说明）、**移调**
-    （四个步进按钮夹着当前值）、**改名**、**删除**（两下：先问一句，再删）、**折叠**、
+    （四个步进按钮夹着当前值）、**改名**（名字本身就在那儿，点进去就能改）、
+    **删除**（两下：先问一句，再删）、**折叠**、
     **抽掉一段**（两下：填两个小节号，看明白那一行预览，再抽）。
     还没做、也还没有归属切片的只剩「只看这条」，所以右边那行灰字如实写着它 ——
     摆一排按了没反应的控件比不摆更坏，人会以为是自己没点对。
@@ -216,9 +217,14 @@
             BorderThickness="0,0,0,1"
             Padding="10,6">
       <!--
-        列从头到尾：轨号 / 名字 / 音色 / 移调 / 改名 / 删除 / 折叠 / 抽掉一段 / 音数 / 右边那行灰字。
-        名字那格叠着两个控件（TextBlock 与 TextBox），同一时刻只亮一个 —— 改名是**就地**换的，
-        不另开一格，否则一按改名整行会横向错位一下。
+        列从头到尾：轨号 / 名字 / 音色 / 移调 / **（空）** / 删除 / 折叠 / 抽掉一段 / 音数 / 右边那行灰字。
+
+        第 4 列空着：那儿从前是「改名」按钮，25 号工单把改名做成「名字本身可编辑」之后按钮就没了。
+        列号**没跟着往前挪**（挪一列要动九处 Grid.Column，而 Auto 的空列宽度是 0，不留痕迹），
+        所以后面那几列的号比它们的实际位置大一号。
+
+        名字那一格的两个控件占同一列（也占满那一列），同一时刻只亮一个 ——
+        改名是**就地**换的，不另开一格，否则一按改名整行会横向错位一下。
 
         第二行是「抽掉一段」那一问（见下面的 CutBar），平时整行是塌的（IsVisible=False 的
         子元素不占高度），所以这一格平时就是一行高。
@@ -230,17 +236,33 @@
                    FontSize="11" FontWeight="Bold"
                    Foreground="{DynamicResource TokenInkFaint}"
                    MinWidth="20" VerticalAlignment="Center" />
+        <!--
+          NameText 恒隐，但它不是废控件：它装着这条轨**此刻该显示的那个名字** ——
+          没名字的轨是兜底的「轨 01」（见 DisplayName）。CommitRename 拿它当基准比
+          （用户看不出区别的改动不该提交：框里写着「轨 01」时按回车，不该把这三个字
+          写成真名字），Bind 是算这个名字的唯一地方，两个控件一起刷。
+
+          为什么不删掉它、把那份名字挪进一个字段：那只是把「看不见」换个地方放，
+          还要多回答一次「这个字段谁来维护」；留成控件就和别的显示一起在 Bind 里刷完了。
+          它自己不显示：这一格常驻的那个输入框才是给人看的那个。
+        -->
         <TextBlock x:Name="NameText"
                    Grid.Column="1"
+                   IsVisible="False"
                    FontSize="12.5" FontWeight="SemiBold"
                    MinWidth="62" VerticalAlignment="Center" />
-        <!-- 改名用的输入框，平时藏着（见上面那一格为什么和 NameText 同列） -->
+        <!--
+          名字框**常驻**：轨名不再需要先点一下「改名」（25 号工单删掉了那颗按钮），
+          名字本身就在这儿、点进去就能改 —— 和工具栏那颗 SongNameBox 同一个样子
+          （它本来就是这套做法的样板）。回车确定、Esc 取消、焦点走了算数，三条都没变。
+        -->
         <TextBox x:Name="NameBox"
                  Grid.Column="1"
                  Classes="rename"
-                 IsVisible="False"
                  KeyDown="OnNameBoxKeyDown"
-                 LostFocus="OnNameBoxLostFocus" />
+                 GotFocus="OnNameBoxGotFocus"
+                 LostFocus="OnNameBoxLostFocus"
+                 ToolTip.Tip="改这条轨的名字（回车确定，Esc 取消）" />
         <!--
           音色那一格：旋律轨是一个 128 项的 GM 下拉，鼓轨是一句不能点的说明
           （9 号声道整条都是鼓组，音色号在它上面没有意义 —— 摆一个改了也不知道会怎样的
@@ -289,14 +311,6 @@
             </StackPanel>
           </Border>
         </StackPanel>
-
-        <Button x:Name="RenameButton"
-                Grid.Column="4"
-                Classes="head-action"
-                Margin="10,0,0,0"
-                Content="改名"
-                Click="OnRenameClick"
-                ToolTip.Tip="改这条轨的名字（回车确定，Esc 取消）" />
 
         <!-- 删除那一格：平时只有一个按钮；按下去换成一句「删掉这条轨？」+ 删除 / 取消 -->
         <StackPanel Grid.Column="5" Orientation="Horizontal" Spacing="6"
