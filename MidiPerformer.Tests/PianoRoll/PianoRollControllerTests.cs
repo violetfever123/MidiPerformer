@@ -670,6 +670,161 @@ public class PianoRollControllerTests
         });
     }
 
+    // ==================== 聚焦轨 ====================
+
+    /// <summary>三条轨，每条一个音，够上下走；音摆在靠后的小节上，视图也滚得动。</summary>
+    private static Song ThreeTracks() => SongOf(
+        Melody(new Note(60, Bar * 6, 480, 100)),
+        Bass(0, new Note(48, Bar * 6, 480, 100)),
+        new Track(2, 9, "鼓点", 0, new[] { new Note(36, Bar * 6, 480, 100) }));
+
+    [Test]
+    public void 初始聚焦在第一条()
+    {
+        Assert.That(new PianoRollController(BarsOf(4)).FocusedTrack, Is.EqualTo(0));
+    }
+
+    [Test]
+    public void 上下各走一条()
+    {
+        var controller = new PianoRollController(ThreeTracks());
+        var none = new bool[3];
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(controller.MoveFocusedTrack(1, none), Is.EqualTo(1));
+            Assert.That(controller.MoveFocusedTrack(1, none), Is.EqualTo(2));
+            Assert.That(controller.MoveFocusedTrack(-1, none), Is.EqualTo(1));
+            Assert.That(controller.FocusedTrack, Is.EqualTo(1), "属性跟得上");
+        });
+    }
+
+    /// <summary>收起来的那几条不落 —— 卷帘是藏着的，高亮挪过去等于挪到一个看不见的地方。</summary>
+    [Test]
+    public void 跳过收起来的轨()
+    {
+        var controller = new PianoRollController(ThreeTracks());
+
+        Assert.That(controller.MoveFocusedTrack(1, new[] { false, true, false }), Is.EqualTo(2),
+            "中间那条收着，直接落到第 3 条");
+    }
+
+    /// <summary>到头就停住，不绕回另一头（和 MoveSelection 同一条规矩）。</summary>
+    [Test]
+    public void 走到头不绕回去()
+    {
+        var controller = new PianoRollController(ThreeTracks());
+        var none = new bool[3];
+        controller.SetFocusedTrack(2);
+
+        Assert.That(controller.MoveFocusedTrack(1, none), Is.EqualTo(2), "已经在最后一条，再往下没有了");
+
+        controller.SetFocusedTrack(0);
+
+        Assert.That(controller.MoveFocusedTrack(-1, none), Is.EqualTo(0), "第一条再往上也没有");
+    }
+
+    [Test]
+    public void 这个方向上只剩收起来的轨就原地不动()
+    {
+        var controller = new PianoRollController(ThreeTracks());
+        controller.SetFocusedTrack(0);
+
+        Assert.That(controller.MoveFocusedTrack(1, new[] { false, true, true }), Is.EqualTo(0));
+    }
+
+    /// <summary>
+    /// 聚焦正好落在一条收起来的轨上时（用户先聚焦、再把它收起来）照样走得开：
+    /// 走的是「从当前位置往这个方向找第一条没收起来的」，所以不需要先把聚焦挪开。
+    /// </summary>
+    [Test]
+    public void 从一条收起来的轨上也能走开()
+    {
+        var controller = new PianoRollController(ThreeTracks());
+        var collapsed = new[] { false, true, false };
+
+        Assert.Multiple(() =>
+        {
+            controller.SetFocusedTrack(1);
+            Assert.That(controller.MoveFocusedTrack(1, collapsed), Is.EqualTo(2));
+            controller.SetFocusedTrack(1);
+            Assert.That(controller.MoveFocusedTrack(-1, collapsed), Is.EqualTo(0));
+        });
+    }
+
+    [Test]
+    public void 设聚焦时越界夹住不抛()
+    {
+        var controller = new PianoRollController(ThreeTracks());
+
+        controller.SetFocusedTrack(99);
+        int high = controller.FocusedTrack;
+        controller.SetFocusedTrack(-5);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(high, Is.EqualTo(2), "往上越界夹到最后一条");
+            Assert.That(controller.FocusedTrack, Is.EqualTo(0), "往下越界夹到第一条");
+        });
+    }
+
+    /// <summary>一条轨都没有时落在 0：没轨可指，但读数得有个值（删光所有轨那一下会碰上）。</summary>
+    [Test]
+    public void 零轨时聚焦落在零()
+    {
+        var controller = new PianoRollController(NoTracks());
+        controller.SetFocusedTrack(3);
+
+        Assert.That(controller.FocusedTrack, Is.EqualTo(0));
+    }
+
+    /// <summary>折叠表比轨数短时，缺的那些当没收起来 —— 表是控件给的，短了不该炸。</summary>
+    [Test]
+    public void 折叠表比轨数短时缺的当没收起来()
+    {
+        var controller = new PianoRollController(ThreeTracks());
+
+        Assert.That(controller.MoveFocusedTrack(1, new[] { false }), Is.EqualTo(1));
+    }
+
+    [Test]
+    public void 第一条没收起来的轨()
+    {
+        Assert.Multiple(() =>
+        {
+            Assert.That(PianoRollController.FirstExpanded(new[] { false, false }), Is.EqualTo(0));
+            Assert.That(PianoRollController.FirstExpanded(new[] { true, false, false }), Is.EqualTo(1),
+                "第一条收着，落到第二条");
+            Assert.That(PianoRollController.FirstExpanded(new[] { true, true }), Is.EqualTo(0),
+                "全收着也要有个落点，不然高亮一条都不落");
+            Assert.That(PianoRollController.FirstExpanded(Array.Empty<bool>()), Is.EqualTo(0),
+                "一条轨都没有");
+        });
+    }
+
+    /// <summary>
+    /// 换聚焦**只管「手搭在哪条轨上」**：选中集、视图、播放头一个都不动。
+    ///
+    /// 这条是刻意的（见 <see cref="PianoRollController.FocusedTrack"/>）：想改哪条和想听哪条
+    /// 是两个意思，绑在一起的话，为了改一条轨就得先把别的静音。
+    /// </summary>
+    [Test]
+    public void 换聚焦不动选中集也不动视图()
+    {
+        var controller = new PianoRollController(ThreeTracks());
+        controller.SelectOnly(new NoteRef(0, 0));
+        controller.SetViewStart(Bar * 2);
+        long view = controller.ViewStartTick;
+
+        controller.MoveFocusedTrack(1, new bool[3]);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(controller.SelectedNotes.ToArray(), Is.EqualTo(new[] { new NoteRef(0, 0) }));
+            Assert.That(controller.ViewStartTick, Is.EqualTo(view));
+        });
+    }
+
     // ==================== 区间查询 ====================
 
     /// <summary>

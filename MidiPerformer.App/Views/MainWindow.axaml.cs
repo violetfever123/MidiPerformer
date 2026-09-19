@@ -366,11 +366,20 @@ public partial class MainWindow : Window
     {
         if (_song is not { } song) return;
 
+        // 聚焦轨跟**那条轨**走，不跟下标走 —— 和折叠是同一条理由，而且是同一个坑：
+        // 删掉第 0 条之后下标整体前移，按下标带会把高亮挪到别人身上。
+        // 必须在换控制器之前抄下来：控制器一换，旧下标当场作废。
+        // 换一首曲子（rebuildAll）一律从头发 —— 控件上的状态说的是**这一首**里的那一条轨。
+        var focused = rebuildAll ? null : FocusedIdentity();
+
         _controller = new PianoRollController(song);
 
         if (!rebuildAll && _lanes.Count == song.Tracks.Count)
         {
             for (int i = 0; i < _lanes.Count; i++) _lanes[i].Rebind(_controller, i);
+            // 轨数一样就是那几条轨、同一个次序，身份换算回来还是同一个下标；
+            // 放回去这一步不能省 —— 新控制器自己的聚焦是 0
+            _controller.SetFocusedTrack(FocusIndex(focused));
             return;
         }
 
@@ -407,6 +416,48 @@ public partial class MainWindow : Window
             _lanes.Add(lane);
             LanesHost.Children.Add(lane);
         }
+
+        _controller.SetFocusedTrack(FocusIndex(focused));
+    }
+
+    /// <summary>
+    /// 此刻聚焦的那条轨的**身份**。还没建控制器、或者下标已经越界时给 null（= 从头发）。
+    ///
+    /// 必须在 <c>_controller</c> 换成新的之前调：它读的是**旧**控制器手里那份曲子
+    /// （所以删轨之后旧下标仍然读得通，读出来的是删之前那条轨的身份）。
+    /// </summary>
+    private (int Chunk, int Channel)? FocusedIdentity()
+    {
+        if (_controller is not { } controller) return null;
+
+        int index = controller.FocusedTrack;
+        return index >= 0 && index < _lanes.Count ? _lanes[index].Identity : null;
+    }
+
+    /// <summary>
+    /// 身份 → 它**现在**在第几号。找不到（那条轨被删了、撤销还没把它拿回来）就落到
+    /// 第一条没收起来的轨上 —— 高亮总得落在某一条上。
+    ///
+    /// 必须在轨控件重建**之后**调：它读的是新的 <c>_lanes</c>。
+    /// </summary>
+    private int FocusIndex((int Chunk, int Channel)? identity)
+    {
+        if (identity is { } wanted)
+            for (int i = 0; i < _lanes.Count; i++)
+                if (_lanes[i].Identity == wanted) return i;
+
+        return PianoRollController.FirstExpanded(CollapsedFlags());
+    }
+
+    /// <summary>
+    /// 每条轨收没收起，按**下标**排一张表（控制器要的正是这个形状）。
+    /// 和 <see cref="MutedTracks"/> 一样**每次现问一次控件**，不在窗口里另存一份折叠状态。
+    /// </summary>
+    private bool[] CollapsedFlags()
+    {
+        var flags = new bool[_lanes.Count];
+        for (int i = 0; i < _lanes.Count; i++) flags[i] = _lanes[i].IsCollapsed;
+        return flags;
     }
 
     /// <summary>
@@ -1225,10 +1276,12 @@ public partial class MainWindow : Window
     // ==================== 键盘 ====================
 
     /// <summary>
-    /// 窗口级快捷键：撤销 / 重做（Ctrl+Z、Ctrl+Y、Ctrl+Shift+Z）、方向键微调、Ctrl+←/→ 定位。
+    /// 窗口级快捷键：撤销 / 重做（Ctrl+Z、Ctrl+Y、Ctrl+Shift+Z）、方向键微调、Ctrl+←/→ 定位、
+    /// Ctrl+↑/↓ 换聚焦轨。
     ///
     /// 方向键按**方案 A**（工单 09）：<c>←/→</c> 移时间、<c>↑/↓</c> 移音高、
-    /// <c>Shift+←/→</c> 改时值、<c>Ctrl+←/→</c> 在所有轨的音符之间前后跳。
+    /// <c>Shift+←/→</c> 改时值、<c>Ctrl+←/→</c> 在所有轨的音符之间前后跳、
+    /// <c>Ctrl+↑/↓</c> 在轨之间上下走（聚焦，见 <see cref="MoveFocus"/>）。
     /// 07 原本把裸 <c>←/→</c> 绑成「前后跳」，09 把裸键让给了微调 ——
     /// <b>能力没砍，挪到 Ctrl 上了</b>：07 那两条测试测的是控制器上的 <c>MoveSelection</c>，
     /// 那条路一个字节都没动，所以不会红，变的只是这里把哪个键绑到它上面。
@@ -1269,6 +1322,16 @@ public partial class MainWindow : Window
         {
             e.Handled = true;
             JumpSelection(e.Key == Key.Left ? -1 : 1);
+            return;
+        }
+
+        // Ctrl + ↑/↓ ：换一条轨（聚焦）。和 Ctrl + ←/→ 换一个音是对称的两件事：
+        // 一个在时间上走，一个在轨之间走，都不动谱面。
+        // 裸 ↑/↓ 是微调音高（见下面那个 switch），所以这一对必须带 Ctrl 才分得开
+        if (ctrl && e.Key is Key.Up or Key.Down)
+        {
+            e.Handled = true;
+            MoveFocus(e.Key == Key.Up ? -1 : 1);
             return;
         }
 
@@ -1317,6 +1380,30 @@ public partial class MainWindow : Window
         // 一个像素的变化都没有 —— 跳过去的是那个音，所以顺手把它展开
         if (note.Track >= 0 && note.Track < _lanes.Count) _lanes[note.Track].Reveal();
 
+        RefreshView();
+    }
+
+    /// <summary>
+    /// Ctrl + ↑/↓ ：把聚焦挪到上一条 / 下一条轨，**跳过收起来的那些**。
+    ///
+    /// 上下和屏幕上的上下一致：↑ 是往上（下标小的那一条）。
+    /// 到头、或者这个方向上只剩收起来的轨，就原地不动（不绕回去）。
+    ///
+    /// 落点滚进视野，但**不展开**：展开是 Ctrl+←/→ 定位到一个音上时的做法
+    /// （那条路非展开不可，否则跳过去屏幕上什么变化都没有），
+    /// 而这里本来就绕开了收起来的轨，绕过去比掰开它合适。
+    ///
+    /// 也不动选中集、不动试听、不动播放头 —— 换聚焦是「手挪到哪条轨上」，
+    /// 不是「改哪条轨」。
+    /// </summary>
+    private void MoveFocus(int delta)
+    {
+        if (_controller is not { } controller) return;
+
+        int before = controller.FocusedTrack;
+        if (controller.MoveFocusedTrack(delta, CollapsedFlags()) == before) return;
+
+        if (controller.FocusedTrack < _lanes.Count) _lanes[controller.FocusedTrack].ScrollIntoView();
         RefreshView();
     }
 

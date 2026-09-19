@@ -318,6 +318,20 @@ public partial class TrackLaneView : UserControl
     public void Reveal()
     {
         SetCollapsed(false);
+        ScrollIntoView();
+    }
+
+    /// <summary>
+    /// 滚进视野，**不展开**。Ctrl+↑/↓ 换聚焦轨走这条 ——
+    /// 那条路本来就跳过收起来的轨（见 <c>MainWindow.MoveFocus</c>），
+    /// 所以不像 <see cref="Reveal"/> 那样需要先把一条看不见的轨掰开。
+    ///
+    /// 名字**不能**叫 BringIntoView：那是 <c>Control</c> 上的**扩展方法**，
+    /// 而实例方法盖得住扩展方法 —— 真叫了那个名字，里面再写 <c>this.BringIntoView()</c>
+    /// 调到的就是自己，一路递归到栈溢出。
+    /// </summary>
+    public void ScrollIntoView()
+    {
         // `this.` 不能省：BringIntoView 是 ControlExtensions 上的**扩展方法**，
         // 而扩展方法只在「表达式.名字」这个形状上找 —— 光写 BringIntoView() 编译器
         // 只去类自己和基类里找，找不到就是 CS0103

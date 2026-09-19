@@ -15,7 +15,7 @@ namespace MidiPerformer.Adapters.Controllers;
 /// 而「像素 → tick」与 Presenter 的「tick → 像素」都走同一个 <see cref="PianoRollGeometry"/>，
 /// 不会各算各的。
 ///
-/// 这一张是**只读**的：没有任何改谱面的方法，只有「看哪儿、选中谁」。
+/// 这一张是**只读**的：没有任何改谱面的方法，只有「看哪儿、选中谁、聚焦在哪条轨上」。
 /// 编辑命令从它旁边过去，控制器只出三样东西给它们：
 /// <list type="bullet">
 /// <item><b>选中集</b>（<see cref="SelectedNotes"/> / <see cref="SetSelection"/>）——
@@ -56,6 +56,10 @@ public sealed class PianoRollController
 
         _selectedView = _selected.AsReadOnly();
         GridTicks = PianoRollGeometry.GridTicks(song.TempoMap);
+
+        // 初始聚焦在第一条。窗口建完控制器之后会按折叠表现改一次（见 FirstExpanded），
+        // 单独用控制器的地方（测试）拿到的就是这个 0
+        FocusedTrack = 0;
 
         _inRange = new List<bool>[song.Tracks.Count];
         _pitchRanges = new (int, int)[song.Tracks.Count];
@@ -192,6 +196,77 @@ public sealed class PianoRollController
     private bool IsValidNote(NoteRef note) =>
         note.Track >= 0 && note.Track < _song.Tracks.Count
         && note.Index >= 0 && note.Index < _song.Tracks[note.Track].Notes.Count;
+
+    // ==================== 聚焦轨 ====================
+
+    /// <summary>
+    /// 聚焦轨：轨道头高亮的那一条，Ctrl+↑/↓ 走的也是它。**是个下标。**
+    ///
+    /// <b>它不改变听到什么。</b>出不出声由折叠决定（收起来的轨在试听里不响，见
+    /// <c>PreviewMixer</c> 的 mutedTracks），聚焦只管「手现在搭在哪条轨上」——
+    /// 高亮它、把它滚进视野，别的轨照常响、照常显示。这是刻意的：
+    /// 「我想改这条」和「我不想听这条」是两个意思，绑在一起的话，为了改一条轨就得先把它静音。
+    ///
+    /// 存的是下标，而**下标在一次删轨之后会整体前移** —— 所以窗口在换控制器之后
+    /// 不能照着旧下标放回来，得先换算成轨的身份再换回来（见 <c>MainWindow.SyncLanes</c>）。
+    /// 和折叠是同一条规矩，理由也一样：按下标带会把高亮挪到别人身上。
+    /// </summary>
+    public int FocusedTrack { get; private set; }
+
+    /// <summary>
+    /// 把聚焦挪到第 <paramref name="trackIndex"/> 条轨上。越界夹进范围，不抛。
+    ///
+    /// 窗口换完控制器拿它把聚焦放回原来那条轨上，而那条轨可能刚好被删掉了
+    /// （同 <see cref="RestoreSelection"/>：越界不是错误，是「它不在了」）。
+    /// 一条轨都没有时落在 0 —— 那时候没轨可指，但读数总得有个值。
+    /// </summary>
+    public void SetFocusedTrack(int trackIndex) =>
+        FocusedTrack = _song.Tracks.Count == 0
+            ? 0
+            : Math.Clamp(trackIndex, 0, _song.Tracks.Count - 1);
+
+    /// <summary>
+    /// 聚焦往上 / 往下走一条（<paramref name="delta"/> = ±1），<b>跳过收起来的那些</b>：
+    /// 收起来的轨卷帘是藏着的，把高亮挪过去等于挪到一个看不见的地方。
+    ///
+    /// 这个方向上一条能落的轨都没有就**原地不动**（返回当前这一条）—— 包括走到头
+    /// （和 <see cref="MoveSelection"/> 一样**不绕回去**：绕回去会让人以为自己按错了方向）。
+    ///
+    /// 折叠表由调用方给，控制器不存它：折叠是控件上的状态，只有控件那一处
+    /// （见 <c>MainWindow.MutedTracks</c> 里为什么不在窗口里另存一份）。
+    /// 表比轨数短时，缺的那些当没收起来。
+    /// </summary>
+    public int MoveFocusedTrack(int delta, IReadOnlyList<bool> collapsed)
+    {
+        if (delta == 0) return FocusedTrack;
+
+        int step = Math.Sign(delta);
+        for (int candidate = FocusedTrack + step;
+             candidate >= 0 && candidate < _song.Tracks.Count;
+             candidate += step)
+        {
+            if (candidate < collapsed.Count && collapsed[candidate]) continue;
+            return FocusedTrack = candidate;
+        }
+
+        return FocusedTrack;
+    }
+
+    /// <summary>
+    /// 第一条没收起来的轨，**全收起来时给 0**。
+    ///
+    /// 建控制器时的初始聚焦走它。换一首曲子时折叠本来就是空的，所以照常是 0；
+    /// 它管的是另外两种情形：「折叠状态被留到了新控制器上」（于是第一条恰好是收起来的），
+    /// 以及「一条轨都没展开」。后者给 0 是个明确的落点 —— 高亮总得落在某一条上，
+    /// 一条都不落的话，用户按 Ctrl+↑ 会以为快捷键坏了。
+    /// </summary>
+    public static int FirstExpanded(IReadOnlyList<bool> collapsed)
+    {
+        for (int i = 0; i < collapsed.Count; i++)
+            if (!collapsed[i]) return i;
+
+        return 0;
+    }
 
     // ==================== 区间查询 ====================
 
