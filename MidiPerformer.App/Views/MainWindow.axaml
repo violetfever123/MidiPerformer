@@ -253,10 +253,20 @@
     <!-- ==================== 走带条 ==================== -->
     <Border Grid.Row="4" Classes="transportbar">
       <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,*">
+        <!--
+          这两颗**不进 Tab 序**（IsTabStop="False"）：空格整块被窗口级快捷键收了
+          （见 MainWindow.OnWindowKeyDown），而按钮的标准激活键正是空格 ——
+          留着 Tab 位就等于摆一个「Tab 得过去、按空格却没反应」的落点，
+          比一开始就不给这个落点更坏。鼠标、回车都照旧能按。
+        -->
         <Button Grid.Column="0" x:Name="PlayButton" Classes="primary transport"
-                Content="▶ 从当前位置播放" IsEnabled="False" Click="OnPlayClick" />
+                Content="▶ 从当前位置播放" IsEnabled="False" IsTabStop="False"
+                ToolTip.Tip="从播放头当前位置开始试听（空格键同效）"
+                Click="OnPlayClick" />
         <Button Grid.Column="1" x:Name="StopButton" Classes="transport"
-                Content="■ 停止" IsEnabled="False" Margin="12,0,0,0" Click="OnStopClick" />
+                Content="■ 停止" IsEnabled="False" IsTabStop="False" Margin="12,0,0,0"
+                ToolTip.Tip="停下来（急停是 F6）"
+                Click="OnStopClick" />
 
         <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="7" Margin="12,0,0,0">
           <TextBlock Classes="label" Text="速度" />

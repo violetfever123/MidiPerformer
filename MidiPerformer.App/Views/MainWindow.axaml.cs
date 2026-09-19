@@ -1202,7 +1202,14 @@ public partial class MainWindow : Window
 
     // ==================== 播放 ====================
 
-    private void OnPlayClick(object? sender, RoutedEventArgs e)
+    private void OnPlayClick(object? sender, RoutedEventArgs e) => StartPlayback();
+
+    /// <summary>
+    /// 开始试听。鼠标按 ▶ 和空格键**走的是同一条**（见 <see cref="OnWindowKeyDown"/> 里的空格那一支）——
+    /// 两条各写一遍的话，置灰、对齐、刷新这些收尾迟早只有一条会被改到，
+    /// 于是「空格播放」和「点按钮播放」在某个角落上开始不一样。
+    /// </summary>
+    private void StartPlayback()
     {
         if (_controller is null) return;
         _playback.Play();
@@ -1276,8 +1283,8 @@ public partial class MainWindow : Window
     // ==================== 键盘 ====================
 
     /// <summary>
-    /// 窗口级快捷键：撤销 / 重做（Ctrl+Z、Ctrl+Y、Ctrl+Shift+Z）、方向键微调、Ctrl+←/→ 定位、
-    /// Ctrl+↑/↓ 换聚焦轨。
+    /// 窗口级快捷键：空格开始试听、撤销 / 重做（Ctrl+Z、Ctrl+Y、Ctrl+Shift+Z）、方向键微调、
+    /// Ctrl+←/→ 定位、Ctrl+↑/↓ 换聚焦轨。
     ///
     /// 方向键按**方案 A**（工单 09）：<c>←/→</c> 移时间、<c>↑/↓</c> 移音高、
     /// <c>Shift+←/→</c> 改时值、<c>Ctrl+←/→</c> 在所有轨的音符之间前后跳、
@@ -1336,6 +1343,35 @@ public partial class MainWindow : Window
         }
 
         if (ctrl) return;
+
+        // 空格 = 走带条上那颗「▶ 从当前位置播放」。**必须抢在控件前面**：
+        // 焦点停在轨道头上那些按钮、下拉上的时候，空格本来归它们
+        //（按钮是「按一下」，下拉是「展开」），不抢的话「空格播放」就是时灵时不灵 ——
+        // 而屏幕上没有任何东西说得清为什么，人只会以为自己按歪了。
+        // 输入框那一头在上面已经整块让开了（改名、速度、小节号、曲名），所以改名字时打空格还是打空格。
+        if (e.Key == Key.Space)
+        {
+            e.Handled = true;
+
+            // **光标记 Handled 是拦不住的。** 实测：焦点停在轨头那颗「折叠」上按空格，
+            // 那条轨收起来了**而且**开始播放了 —— 一个键干了两件事。
+            // 原因是 <c>Button</c>（下拉也一样）对空格走的是**类处理器**，
+            // 它不看你在这个隧道处理器里标没标 Handled，照按不误。
+            //
+            // 所以顺手把键盘焦点收回窗口：KeyUp 的路由是按**抬起那一刻**的焦点重新算的，
+            // 焦点已经不在那颗按钮上了，它「按下 → 抬起 → 触发」这条路就断在中间
+            //（Avalonia 的按钮是**抬起**才触发的，ClickMode.Release）。
+            // 收回来的副作用只有一样：那颗按钮不再带着焦点框 —— 而它本来也不该有，
+            // 空格是走带键，不是「按按钮」。
+            if (FocusManager?.GetFocusedElement() is InputElement { Focusable: true })
+                FocusManager.ClearFocus();
+
+            // 能不能按以**那颗按钮**为准，不是另算一套：它在放的时候置灰（StartPlayback 里设的），
+            // 于是空格只负责「开始」，停归 ■、以及 F6 那一下急停；一个键管两头的话，
+            // 连按两下手就不知道自己站在哪一头了。没曲子、没音轨时它也是灰的，空格一并跟着没反应
+            if (PlayButton.IsEnabled) StartPlayback();
+            return;
+        }
 
         // 一步一格 = 一个十六分音符，和拖动吸的是同一个格（控制器算好放在那儿）
         long grid = _controller.GridTicks;
