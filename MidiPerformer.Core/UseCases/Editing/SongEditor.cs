@@ -124,19 +124,18 @@ public sealed class SongEditor : ISongEditor
     /// 至少还保持着原来的形状（代价是拖到边上之后整组少挪一点，手感上是「拖不动了」）。
     /// 两头都要夹：时间不能挪到 0 之前，音高不能出 0..127。
     ///
-    /// <b>改完同样要重排这条轨的音符数组。</b>
-    ///
-    /// 「整组挪的是同一个量，先后顺序就不会变」这句话**只对选中的那几个音之间成立**。
-    /// 一个被选中的音照样能越过一个**没被选中**的音：轨上是 <c>A@0</c> 和 <c>B@100</c>，
-    /// 只选中 A 往右挪 200，数组就成了 <c>[A@200, B@100]</c> ——
+    /// <b>这条命令会破掉「按起点升序」。</b>「整组挪的是同一个量，先后顺序就不会变」这句话
+    /// **只对选中的那几个音之间成立**。一个被选中的音照样能越过一个**没被选中**的音：
+    /// 轨上是 <c>A@0</c> 和 <c>B@100</c>，只选中 A 往右挪 200，轨就成了 <c>[A@200, B@100]</c> ——
     /// <see cref="Track.Notes"/> 的升序承诺当场破掉，而且是**一声不吭**地破。
     ///
     /// 破了之后按下标认音的东西全部错位，导出那一侧更糟：它会写出「后一个音先响」的事件序列，
     /// 同一个音高上的 note-off / note-on 一乱，发出去就是漏音或卡音。
     /// 对一个演奏器来说这不是排版问题。
     ///
-    /// 排序用 <c>OrderBy</c>（稳定）：起点相同的音保持原来的先后，于是**没越过邻居的改动
-    /// 一个下标都不动**，界面那套「改完重新算选中集」不必面对无谓的洗牌。
+    /// 修它的是 <see cref="Track.WithNotes"/>：下面每个改过的音都从那一扇门写回去，
+    /// 于是「重排」就发生在写回去这一句里 —— 这条命令自己不排。
+    /// 为什么这件事收在 <see cref="Track"/> 里，理由写在那条方法上。
     /// </summary>
     public Song MoveNotes(Song song, IReadOnlyList<NoteRef> notes, long deltaTicks, int deltaPitch)
     {
@@ -187,10 +186,10 @@ public sealed class SongEditor : ISongEditor
         }
 
         // 没碰过的轨连引用都原样带走（数组是新的，元素是旧的）。
-        // 碰过的轨在写回去之前重排一次 —— 见方法注释：被选中的音会越过没被选中的音。
+        // 碰过的轨写回去 —— 重排由 WithNotes 做（见方法注释：被选中的音会越过没被选中的音）。
         var tracks = song.Tracks.ToArray();
         foreach (var (trackIndex, edited) in touched)
-            tracks[trackIndex] = song.Tracks[trackIndex].WithNotes(edited.OrderBy(n => n.StartTick).ToArray());
+            tracks[trackIndex] = song.Tracks[trackIndex].WithNotes(edited);
 
         return new Song(tracks, song.TempoMap);
     }
@@ -198,14 +197,13 @@ public sealed class SongEditor : ISongEditor
     /// <summary>
     /// 把一个音的起点和时值设成给定的值（绝对赋值，界面自己算好目标位置）。
     ///
-    /// <b>改完必须重排这条轨的音符数组。</b><see cref="Track.Notes"/> 承诺按起点升序，
-    /// 而把起点右移、或者把时值拉长，都可能让这个音越过邻居 —— 破了这个承诺，
+    /// <b>改时值可能让这个音越过邻居。</b><see cref="Track.Notes"/> 承诺按起点升序，
+    /// 而把起点右移、或者把时值拉长，都可能让这个音排到后面的音后面去 —— 破了这个承诺，
     /// 后面所有「按下标认音」的东西（<see cref="NoteRef"/>、卷帘的命中测试、导出）
     /// 就全都错位，而且错得一声不吭。
     ///
-    /// 用 <c>OrderBy</c> 而不是 <c>List.Sort</c>：LINQ 的 OrderBy 是**稳定**排序，
-    /// 起点相同的音保持原来的先后。于是一个音都没越过邻居的改动（绝大多数）之后，
-    /// 数组顺序一个下标都不变 —— 界面那套「改完重新算选中集」就不用面对无谓的洗牌。
+    /// 重排本身不在这里：改完的音符从 <see cref="Track.WithNotes"/> 写回去，那一扇门保证有序
+    /// （为什么收在 <see cref="Track"/> 里、为什么必须是稳定排序，理由都写在那条方法上）。
     /// </summary>
     public Song SetNoteSpan(Song song, NoteRef note, long startTick, long lengthTicks)
     {
@@ -233,7 +231,7 @@ public sealed class SongEditor : ISongEditor
         notes[note.Index] = original with { StartTick = startTick, LengthTicks = lengthTicks };
 
         var tracks = song.Tracks.ToArray();
-        tracks[note.Track] = track.WithNotes(notes.OrderBy(n => n.StartTick).ToArray());
+        tracks[note.Track] = track.WithNotes(notes);
         return new Song(tracks, song.TempoMap);
     }
 
@@ -281,11 +279,13 @@ public sealed class SongEditor : ISongEditor
     ///
     /// 一边扫一边分派，分派规则见接口上的那张表。这里只补两件实现上的事：
     ///
-    /// <b>末尾不重排。</b><see cref="MoveNotes"/> 和 <see cref="SetNoteSpan"/> 结尾都得来一句
-    /// <c>OrderBy</c>，因为那两条能把音挪到邻居前面去；这条不会 —— 新的起点是旧起点的
-    /// <b>单调不减</b>函数（<c>s</c> → <c>s</c> / <c>startTick</c> / <c>s - 长度</c>，三段首尾相接），
-    /// 有序数组过一遍单调函数出来还有序。多排一次不只是白干，还会把「这条命令从不重排」
-    /// 这个好推理的性质从代码里抹掉。
+    /// <b>顺序不是这条命令的事。</b>音符从下面那一句 <see cref="Track.WithNotes"/> 写回去，
+    /// 而「按起点升序」是那一扇门保证的 —— 这里一个字节都不用管它。
+    /// 从前这里挂着一整段论证（「新的起点是旧起点的单调不减函数，所以有序数组过一遍出来还有序，
+    /// 这条命令从不需要重排」）：那段话没错，但它要读的人**先信一个证明、再信这段代码**，
+    /// 而且任何一次分派顺序的改动都能把它悄悄推翻。现在这条性质由 <see cref="Track.WithNotes"/> 给 ——
+    /// 读的人不用再信任何证明，整条链上也没有第二处需要证明它。这正是这条命令
+    /// （以及 <see cref="MoveNotes"/>、<see cref="SetNoteSpan"/>）不再各自 <c>OrderBy</c> 的意义。
     ///
     /// <b><see cref="Track.NoteCount"/> 变成 0 的轨保留</b>，和 <see cref="DeleteNotes"/> 一个道理：
     /// 剪空了是「这条声部这段没东西」，不是「这条声部不要了」。

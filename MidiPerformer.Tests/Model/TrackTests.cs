@@ -86,4 +86,76 @@ public class TrackTests
             Assert.That(before.Name, Is.EqualTo(after.Name), "其余字段保持不变");
         });
     }
+
+    /// <summary>
+    /// <b>「按起点升序」这条不变量收在 <see cref="Track.WithNotes"/> 这里</b>：进来什么顺序都行，
+    /// 出去的一定有序 —— 而它是编辑命令写音符的**唯一**一扇门
+    /// （<c>MoveNotes</c> / <c>SetNoteSpan</c> / <c>DeleteNotes</c> / <c>CutRange</c> 四条全走它）。
+    ///
+    /// 从前这条不变量散在调用点那一侧：挪音符和改时值各写一遍 <c>OrderBy</c>，
+    /// 而剪一段靠一段「新的起点是旧起点的单调不减函数」的论证才敢不排。
+    /// 同一条不变量三处各管各的，漏掉一处的后果（按下标认音的地方全部错位、
+    /// 导出写成「后一个音先响」）又一声不吭 —— 所以这里把它钉死在新家里。
+    /// </summary>
+    [Test]
+    public void 换音符之后音符按起点升序()
+    {
+        var shuffled = new[]
+        {
+            new Note(60, 960, 240, 100),
+            new Note(64, 0, 240, 100),
+            new Note(67, 480, 240, 100),
+        };
+
+        var after = T().WithNotes(shuffled);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(after.Notes.Select(n => n.StartTick), Is.EqualTo(new long[] { 0, 480, 960 }));
+            Assert.That(after.Notes.Select(n => n.Pitch), Is.EqualTo(new[] { 64, 67, 60 }),
+                "只排了序：三个音还是那三个，内容一个都没变");
+            Assert.That(after.Notes, Has.Count.EqualTo(3), "一个音都没丢");
+            Assert.That(shuffled.Select(n => n.StartTick), Is.EqualTo(new long[] { 960, 0, 480 }),
+                "传进去的那个数组一个字节都不动（外面可能还拿着它）");
+        });
+    }
+
+    /// <summary>
+    /// 排序是**稳定**排序：起点相同的音保持传进来时的先后。
+    ///
+    /// 换成不稳定的排法这一条就红，而后果是界面那一侧的：同起点的音会被洗一遍，
+    /// 「一个音都没越过邻居」这种最常见的改动也跟着洗，于是按 <see cref="NoteRef"/> 下标
+    /// 重新算出来的选中集凭空丢掉几个。
+    ///
+    /// 同起点的音**给到 20 个**，不是随口凑的数：分不出先后的三两个音镇不住这件事 ——
+    /// 随手换成不稳定的排法（比如 <c>List.Sort</c>）在小数组上照样是对的，
+    /// 因为 .NET 的内省排序在 16 个以下走插入排序，而插入排序恰好是稳定的，
+    /// 那样这条测试就成了摆设。20 个正好越过那条线，而且**刻意按音高降序**给：
+    /// 稳定排序保的是「传进来的先后」，不是音高、也不是任何别的次序。
+    ///
+    /// 前后各塞一个起点不同的音（0 和 960），把「必须真的重排」这件事也钉住 ——
+    /// 不然一个干脆不排的实现也能让这 20 个原样通过。
+    /// </summary>
+    [Test]
+    public void 换音符是稳定排序同起点的音保持原来的先后()
+    {
+        var sameStart = new List<Note>();
+        for (int i = 0; i < 20; i++) sameStart.Add(new Note(50 - i, 480, 240, 100));   // 50, 49, ... 31
+
+        var notes = new List<Note> { sameStart[0], new Note(100, 0, 240, 100) };
+        notes.AddRange(sameStart.Skip(1));
+        notes.Add(new Note(110, 960, 240, 100));   // 起点最大的那个，重排之后必须落到最后
+
+        var after = T().WithNotes(notes);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(after.Notes.Select(n => n.StartTick),
+                Is.EqualTo(new long[] { 0 }.Concat(Enumerable.Repeat(480L, 20)).Append(960)),
+                "0 起点那个挪到了最前，960 那个落到了最后：真的排过");
+            Assert.That(after.Notes.Select(n => n.Pitch).Skip(1).Take(20),
+                Is.EqualTo(Enumerable.Range(31, 20).Reverse()),
+                "同起点的 20 个音保持传进来的先后（50, 49, ... 31）");
+        });
+    }
 }

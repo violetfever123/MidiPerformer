@@ -20,7 +20,8 @@ namespace MidiPerformer.Core.Model;
 /// <param name="Channel">MIDI 声道 0..15（9 = 打击乐）。</param>
 /// <param name="Name">轨名。文件里有就用文件里的，没有就用「声道 N」补齐。</param>
 /// <param name="Program">该声道的音色号 0..127。只影响编辑器里的试听，发给游戏时永远是口琴那套键位。</param>
-/// <param name="Notes">音符，按起始 tick 升序。</param>
+/// <param name="Notes">音符，按起始 tick 升序。构造器收的是**原始顺序**（MIDI 导入时排好的、工程文件里
+/// 写好的那一份），它自己不做这件事 —— 不变量真正的维护点是 <see cref="WithNotes"/>，改音符一律走那一扇门。</param>
 /// <param name="Transpose">整轨移调，单位半音。</param>
 public sealed record Track(
     int TrackIndex,
@@ -44,8 +45,32 @@ public sealed record Track(
         }
     }
 
-    /// <summary>换音符、保持其余字段不变。</summary>
-    public Track WithNotes(IReadOnlyList<Note> notes) => this with { Notes = notes };
+    /// <summary>
+    /// 换音符、保持其余字段不变。
+    /// <b>这条轨的不变量（音符按起点升序）在这里收口</b>：进来什么顺序都行，出去的一定有序。
+    ///
+    /// 为什么是这扇门自己管，而不是另开一个 <c>WithNotesSorted()</c> 让调用方挑：
+    /// 那样就有两扇门，挑错的那一扇**不会报错** —— 它只是静静地交出一条破序的轨，
+    /// 后面的错（按下标认音的地方全部错位、导出写成「后一个音先响」的事件序列）
+    /// 也一声不吭地跑到底。这个仓库已经为「同一条不变量散在几处各管各的」付过一次代价：
+    /// <c>SongEditor</c> 的 <c>MoveNotes</c> 和 <c>SetNoteSpan</c> 各写了一遍同样的
+    /// <c>OrderBy(n =&gt; n.StartTick)</c>，而 <c>CutRange</c> 得靠一段
+    /// 「新的起点是旧起点的单调不减函数」的论证才敢不排 —— 同一条不变量在三个地方各推理一次，
+    /// 两次是实现、一次是反证。只剩一扇门，就不存在「挑哪一扇」这件事，
+    /// 也没有哪一处再需要论证自己为什么不必排。
+    ///
+    /// 代价是本来就有序的调用点（删音符、剪一段）也要白排一次。这笔账划得来：
+    /// 那些都是用户敲一下才跑一次的编辑命令，不在这条链的热路上，而 <c>OrderBy</c>
+    /// 在已经有序的输入上本来就快；反过来，「这条命令从不重排」这种性质只写在注释里，
+    /// 下一个人调一下分派顺序就能把它破掉，而没有任何东西会响。
+    ///
+    /// 排序用 <c>OrderBy</c>（LINQ 的稳定排序），**不是** <c>List.Sort</c>：
+    /// 起点相同的音保持原来的先后。这不是花边 —— 它让「一个音都没越过邻居」这种最常见的改动
+    /// 一个下标都不动，界面那套「改完重新算选中集」（<see cref="NoteRef"/> 里说的那件事）
+    /// 就不必面对无谓的洗牌。
+    /// </summary>
+    public Track WithNotes(IReadOnlyList<Note> notes)
+        => this with { Notes = notes.OrderBy(n => n.StartTick).ToArray() };
 
     /// <summary>
     /// 值相等：音符**逐个**比，不是比列表引用。
