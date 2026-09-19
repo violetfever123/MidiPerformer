@@ -141,6 +141,53 @@ public class FormatTests
         Assert.That(Format.Beats(960, 0), Is.EqualTo(0));
     }
 
+    // ==================== 读数条右边那行快捷键提示 ====================
+
+    /// <summary>
+    /// 那行提示**逐字钉住**（26 号工单）。
+    ///
+    /// 为什么值得逐字：它坏了不会报错，只会让人以为功能坏了 —— 而且这事已经发生过两次：
+    /// 20 之前它写着「空格 播放」（那时空格真的只管开始），18 之前写着「Ctrl + ← → 前后跳」
+    /// （那时真的跨轨跳）。两次都是代码往前走了、这行字留在原地，屏幕上没有任何东西会红。
+    /// 所以改键位的人**必须**回来改这儿，而下一条测试（<c>ShortcutHintTests</c>）量的是反方向：
+    /// 有人改了这句话、按键那一段里却没这个键。
+    /// </summary>
+    [Test]
+    public void 快捷键提示逐字就是屏幕上那一行()
+    {
+        Assert.That(Format.ReadoutHint, Is.EqualTo(
+            "空格 播放/暂停 · ← → 移时间（一格 = 十六分）· ↑ ↓ 移音高 · Shift + ← → 改时值 · "
+            + "Ctrl + ← → 同轨前后跳 · Ctrl + ↑ ↓ 换轨 · Delete 删除 · Ctrl+Z 撤销 / Ctrl+Y 重做"),
+            "改这句话之前先去看 MainWindow.OnWindowKeyDown —— 那是它的真身");
+    }
+
+    /// <summary>
+    /// 提示里点名的每一样，那一行里都写着一个（不能多一个「空格 播放」管两件事的旧说法）。
+    ///
+    /// 和逐字那条分开写：逐字那条挡的是「有人改了这句」，这条挡的是「这句话里少了一条，
+    /// 而剩下的一整行照样过着逐字比对」—— 少一条比多一条难发现，因为少的那条不会打错字。
+    /// </summary>
+    [Test]
+    public void 提示里一条都不缺()
+    {
+        Assert.Multiple(() =>
+        {
+            // 20：空格是**切换**，只写「播放」就是退回被推翻的旧决定
+            Assert.That(Format.ReadoutHint, Does.Contain("空格 播放/暂停"));
+            // 18：「同轨」两个字是那张工单的全部内容
+            Assert.That(Format.ReadoutHint, Does.Contain("Ctrl + ← → 同轨前后跳"));
+            // 19：这一条是这次新加进提示里的（从前 Delete 根本没提）
+            Assert.That(Format.ReadoutHint, Does.Contain("Delete 删除"));
+            // 09 的方案 A 四条，一条都不能漏
+            Assert.That(Format.ReadoutHint, Does.Contain("← → 移时间"));
+            Assert.That(Format.ReadoutHint, Does.Contain("↑ ↓ 移音高"));
+            Assert.That(Format.ReadoutHint, Does.Contain("Shift + ← → 改时值"));
+            Assert.That(Format.ReadoutHint, Does.Contain("Ctrl + ↑ ↓ 换轨"));
+            Assert.That(Format.ReadoutHint, Does.Contain("Ctrl+Z 撤销"));
+            Assert.That(Format.ReadoutHint, Does.Contain("Ctrl+Y 重做"));
+        });
+    }
+
     // ==================== 抽掉一段的预览 ====================
 
     /// <summary>

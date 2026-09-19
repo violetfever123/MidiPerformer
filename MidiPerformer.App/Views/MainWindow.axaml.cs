@@ -146,8 +146,13 @@ public partial class MainWindow : Window
         _playback.Frame += (_, _) => RefreshView();
         _playback.Finished += OnPlaybackFinished;
 
-        // 提示语只写这一张真做得到的（定位、撤销），编辑那些归 09 —— 文案住在 Format 里，一处改处处改
+        // 提示语住在 Format 里，一处改处处改。**同一句喂两处**：显示的那一行窄了会被
+        // CharacterEllipsis 从右边截掉（见 axaml 上那处 TextTrimming），悬停看全的 ToolTip
+        // 就是同一个常量 —— 两边各抄一份的话，改一处漏一处，屏幕上会同时挂着新的半行和旧的全文，
+        // 那比只说一句更坏。（ToolTip 只在代码里设，XAML 那边一个字节都不写：
+        // 两处都能设，谁赢要看加载顺序，那种「哪份生效」的问题不该出现在文案上。）
         HintText.Text = Format.ReadoutHint;
+        ToolTip.SetTip(HintText, Format.ReadoutHint);
 
         // 窗口改宽 = 每小节变宽（固定 4 小节，没有缩放），所以要按新的宽度重算场景
         SizeChanged += (_, _) => RefreshView();
@@ -1387,8 +1392,13 @@ public partial class MainWindow : Window
     // ==================== 键盘 ====================
 
     /// <summary>
-    /// 窗口级快捷键：空格开始试听、撤销 / 重做（Ctrl+Z、Ctrl+Y、Ctrl+Shift+Z）、保存（Ctrl+S）、
+    /// 窗口级快捷键：空格**播放 / 暂停**（20 号工单改的，从前只管「开始」）、
+    /// 撤销 / 重做（Ctrl+Z、Ctrl+Y、Ctrl+Shift+Z）、保存（Ctrl+S）、
     /// 方向键微调、Ctrl+←/→ 定位、Ctrl+↑/↓ 换聚焦轨。
+    ///
+    /// **这一段就是屏幕上那行提示的真身**（<see cref="Format.ReadoutHint"/>）——
+    /// 这里动的每一个键，那边那行字都得跟着动：两处对不上的提示比没有提示更坏，
+    /// 它会让人以为功能坏了（26 号工单就是来收这一处的）。
     ///
     /// 方向键按**方案 A**（工单 09）：<c>←/→</c> 移时间、<c>↑/↓</c> 移音高、
     /// <c>Shift+←/→</c> 改时值、<c>Ctrl+←/→</c> 在**焦点轨内**前后跳、

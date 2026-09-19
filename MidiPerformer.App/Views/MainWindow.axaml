@@ -190,17 +190,21 @@
 
             <!--
               撤销 / 重做：栈空的时候置灰（没得撤就别让人点）。
-              键盘入口 Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z 是同一件事，见 OnWindowKeyDown。
-              ToolTip 里那两句留着不删：这一票只搬按钮，快捷键的说法归 26 号统一收口，
-              和上面显示的重复一句比漏说要好。
+
+              **ToolTip 一个都不留**（26 号工单）。它们原本写着 `Ctrl+Z` / `Ctrl+Y 或 Ctrl+Shift+Z`，
+              而 23 把这两条按钮收进菜单时，已经把键位印在同一行的**右侧**（InputGesture）——
+              菜单项的快捷键就该长在那儿，鼠标不用停下来等 ToolTip 就能看见；
+              再挂一个说同一句话的 ToolTip，等于把一件小事说两遍，还多一处会和 InputGesture 对不上的地方。
+              （`Ctrl+Shift+Z` 这个别名跟着一起删掉了：它的第二个落点在提示行里也没写，
+              两处都不说 —— 按了照样管用，见 OnWindowKeyDown。这是删 ToolTip 明码标价的代价。）
             -->
             <MenuItem Header="操作" Classes="toolbar" Margin="8,0,0,0">
               <MenuItem x:Name="UndoMenuItem" Header="撤销" IsEnabled="False"
                         InputGesture="Ctrl+Z"
-                        Click="OnUndoClick" ToolTip.Tip="Ctrl+Z" />
+                        Click="OnUndoClick" />
               <MenuItem x:Name="RedoMenuItem" Header="重做" IsEnabled="False"
                         InputGesture="Ctrl+Y"
-                        Click="OnRedoClick" ToolTip.Tip="Ctrl+Y 或 Ctrl+Shift+Z" />
+                        Click="OnRedoClick" />
             </MenuItem>
           </Menu>
 
@@ -329,8 +333,21 @@
             <TextBlock x:Name="ReadoutLengthText" Classes="readout-value mono" Text="—" />
           </StackPanel>
         </StackPanel>
+        <!--
+          提示行：**单行 + 省略号**，不是换行。这两样看着像同一件事，其实是互斥的 ——
+          换行之后横向就不溢出了，`CharacterEllipsis` 永远不出现，窄窗只会把这条读数栏
+          撑成两行高（左边那套读数被顶得上下不齐，整窗跟着跳），也就是「变形」。
+          所以 `TextWrapping="NoWrap"` 是**这句提示成立的前提**，不是漏写的默认值
+          （谁要把它改回 Wrap，等于把下面那个 TextTrimming 变成一句空话）。
+
+          窗口最小宽度 720px，左边还压着合并后的读数栏（21），全写出来的键位表摆不下 ——
+          截掉的那半行从 ToolTip 看全。**完整文本在代码里由 `Format.ReadoutHint` 一句喂两处**
+          （见 MainWindow.axaml.cs 构造函数），不在这儿另抄一份：抄一份就是两个会走散的真相源，
+          改动一处之后屏幕上会同时挂着新的半行和旧的全文。
+        -->
         <TextBlock Grid.Column="1" x:Name="HintText" Classes="faint"
-                   TextAlignment="Right" TextWrapping="Wrap" Margin="16,0,0,0" />
+                   TextAlignment="Right" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"
+                   Margin="16,0,0,0" />
       </Grid>
     </Border>
 
@@ -348,10 +365,22 @@
           右边一颗 ■ 停止。合成一颗是不行的 —— 「我就停在这，等下接着听」和「这段我听完了」
           是两件事，后者顺带把视野拉回小节线，前者一个像素都不动。
         -->
+        <!--
+          播放那颗的 ToolTip 说的是**它是一个切换键**（20 号工单）——
+          从前写「开始试听」，那时空格和它都只管开始；现在两头是「放」和「停在这」，
+          提示得跟着改口，否则用户以为再按一下等于重放。
+        -->
         <Button Grid.Column="0" x:Name="PlayButton" Classes="primary transport"
                 Content="▶ 播放" IsEnabled="False" IsTabStop="False"
-                ToolTip.Tip="从播放头当前位置开始试听（空格键同效）"
+                ToolTip.Tip="播放 / 暂停：从播放头当前位置开始，再按停在原地、再按从那儿接着放（空格键同效）"
                 Click="OnPlayClick" />
+        <!--
+          ■ 的 ToolTip **保留不动**（26 号工单点名）：它说的「急停是 F6」是另一件事 ——
+          那个 F6 是全局低层键盘钩子（见 GlobalHotkeys），装/摘都在演奏器窗口，
+          26 号这一票一个字节都没碰它，所以这句话此刻依然准确。
+          （生效范围有一点要知道：钩子只在演奏器窗口开着的时候装着，见
+          MainWindow.axaml.cs 里那句「本窗口不 new 那个窗」。）
+        -->
         <Button Grid.Column="1" x:Name="StopButton" Classes="transport"
                 Content="■ 停止" IsEnabled="False" IsTabStop="False" Margin="12,0,0,0"
                 ToolTip.Tip="停下来（急停是 F6）"
