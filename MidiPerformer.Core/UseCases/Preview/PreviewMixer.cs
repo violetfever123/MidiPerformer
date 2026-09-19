@@ -35,6 +35,14 @@ public static class PreviewMixer
     /// <summary>
     /// 整曲 → 试听事件表。轨按 <see cref="Song.Tracks"/> 的顺序分配声道，轨内保持音符顺序。
     ///
+    /// <b><paramref name="mutedTracks"/> 里的轨一个音都不进这张表。</b> 今天这份名单只有
+    /// 一个来源：**折叠起来的轨**（见 <c>TrackLaneView.SetCollapsed</c>）—— 收起来就是
+    /// 「这条我不听」。认轨用的是模型自己那对唯一键 <c>(TrackIndex, Channel)</c>，
+    /// **不是下标**：下标会随删轨整体前移，按下标静音会静到别人头上。
+    ///
+    /// 被静音的轨<b>连声道名额一起让出来</b>（下面的 <c>next++</c> 不为它走一格）：折叠的含义是
+    /// 「这条轨不在试听里」，它不该还占着一个声道的音色，把后面的轨往「共用声道」那一步推。
+    ///
     /// <b>旋律轨超过 15 条时会绕回第一个声道</b>，于是那两条轨共用一个声道、音色互相顶掉
     /// （先响的那条会被后来那条的换音色顺手改掉）。这是个**说得出来的代价，不是没想到**：
     /// 另一边是「第 16 条轨干脆不发声」，那更糟 —— 试听正是用来听有没有声音的。
@@ -44,13 +52,23 @@ public static class PreviewMixer
     /// 时间**不**在这里排序：那是实现方建事件表时的事（它本来就要排，
     /// 还要把同一时刻的抬键排在按键前面），这一层排序只会是白排一遍。
     /// </summary>
-    public static IReadOnlyList<PreviewNote> Mix(Song song)
+    /// <param name="mutedTracks">
+    /// 不发声的轨，按 <c>(轨块号, 声道)</c> 给（= <c>Track.TrackIndex</c> 与 <c>Track.Channel</c>）。
+    /// null 或不给 = 一条都不静音（导入、导出、以及任何「只是想要一张完整的表」的场合）。
+    /// </param>
+    public static IReadOnlyList<PreviewNote> Mix(
+        Song song,
+        IReadOnlySet<(int TrackIndex, int Channel)>? mutedTracks = null)
     {
         var result = new List<PreviewNote>();
         int next = 0;
 
         foreach (var track in song.Tracks)
         {
+            // 收起来的轨整个跳过：音不发，声道名额也不占。跳过放在换算之前 ——
+            // 静音轨的音符没有理由还走一遍移调与秒换算
+            if (mutedTracks?.Contains((track.TrackIndex, track.Channel)) == true) continue;
+
             // 打击乐轨仍然发到 9 号声道 —— 那里是鼓组，正是它该在的地方；
             // 它不占旋律声道的名额（鼓组不受「一条轨一个音色」这条约束，它只有一套）
             int channel = track.Channel == PercussionChannel

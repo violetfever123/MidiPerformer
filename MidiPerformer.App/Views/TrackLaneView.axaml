@@ -288,6 +288,9 @@
         <!--
           折叠 / 展开。**一个按钮两句话**，不是两个按钮：它说的是同一条轨的同一个开关，
           按内容的字面意思走（wireframe 里那句 `this.textContent = now ? "折叠" : "展开"`）。
+
+          提示里那句「试听时不出声」是**必须写的**：收起一条轨现在不只是看不见，还听不见，
+          而屏幕上除了那一行小字没有任何东西会说这件事。
         -->
         <Button x:Name="FoldButton"
                 Grid.Column="6"
@@ -295,7 +298,7 @@
                 Margin="6,0,0,0"
                 Content="折叠"
                 Click="OnFoldClick"
-                ToolTip.Tip="把这条轨收成一行（内容一个字节都不动）" />
+                ToolTip.Tip="把这条轨收成一行，试听时不再出声（谱面一个字节都不动）" />
 
         <TextBlock x:Name="CountText"
                    Grid.Column="7"
@@ -314,10 +317,15 @@
 
     <views:PianoRollLane x:Name="Roll" />
 
-    <!-- 收起来时顶替卷帘的那一行。谁在什么时候亮，见 TrackLaneView.SetCollapsed -->
+    <!--
+      收起来时顶替卷帘的那一行。谁在什么时候亮，见 TrackLaneView.SetCollapsed。
+
+      「不发声」三个字是齐着 wireframe 那一行加的（wireframe 里只写「已折叠」）：
+      折叠现在连试听一起关掉，而这一行是屏幕上唯一说得出这件事的地方。
+    -->
     <Border x:Name="Strip" Classes="strip" IsVisible="False">
       <Grid ColumnDefinitions="Auto,*">
-        <TextBlock Grid.Column="0" Text="已折叠" />
+        <TextBlock Grid.Column="0" Text="已折叠 · 不发声" />
         <Border Grid.Column="1" Classes="strip-mini" />
       </Grid>
     </Border>

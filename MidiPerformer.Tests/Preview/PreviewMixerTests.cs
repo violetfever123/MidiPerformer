@@ -151,7 +151,96 @@ public class PreviewMixerTests
         Assert.That(PreviewMixer.Mix(SongOf(Map())), Is.Empty);
     }
 
+    // ==================== 静音（折叠起来的轨） ====================
+
+    /// <summary>
+    /// 折叠起来的轨一个音都不发，其余照旧 —— 音高、时间、音色一样不少。
+    /// </summary>
+    [Test]
+    public void 静音的轨一个音都不发其余的照旧()
+    {
+        var song = SongOf(
+            Map(),
+            Trk(0, 0, "主旋律", 24, 0, new Note(60, 0, Quarter, 100)),
+            Trk(1, 1, "贝斯", 33, 0, new Note(40, 0, Quarter, 100)));
+
+        var mixed = PreviewMixer.Mix(song, Mute((1, 1)));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(mixed, Has.Count.EqualTo(1));
+            Assert.That(mixed[0].Note.Pitch, Is.EqualTo(60), "留下的是没被静音的那条");
+            Assert.That(mixed[0].Program, Is.EqualTo(24));
+        });
+    }
+
+    /// <summary>
+    /// 认轨用的是**模型那对唯一键**，不是它在 <c>Song.Tracks</c> 里的下标。
+    ///
+    /// 这一条就是按下标写会错的地方：第一条轨的轨块号是 5，静音 <c>(5, 2)</c> 得静到它头上；
+    /// 要是按「第 1 条」算，静音的会是贝斯 —— 屏幕上演的是同一件事，耳朵听到的是另一件。
+    /// </summary>
+    [Test]
+    public void 按轨块与声道认轨不是按列表下标()
+    {
+        var song = SongOf(
+            Map(),
+            Trk(5, 2, "主旋律", 24, 0, new Note(60, 0, Quarter, 100)),
+            Trk(0, 0, "贝斯", 33, 0, new Note(40, 0, Quarter, 100)));
+
+        var mixed = PreviewMixer.Mix(song, Mute((5, 2)));
+
+        Assert.That(mixed.Select(n => n.Note.Pitch), Is.EqualTo(new[] { 40 }), "静音的是 (5,2) 那条，不是列表里的第二条");
+    }
+
+    /// <summary>
+    /// 静音的轨**连声道名额一起让出来**：后面的轨照旧从 0 号声道排起，
+    /// 不会因为前面有一条听不见的轨而白占一格、把别人往「共用声道」那一步推。
+    /// </summary>
+    [Test]
+    public void 静音的轨不占声道名额()
+    {
+        var song = SongOf(
+            Map(),
+            Trk(0, 0, "主旋律", 24, 0, new Note(60, 0, Quarter, 100)),
+            Trk(1, 0, "副旋律", 40, 0, new Note(67, 0, Quarter, 100)));
+
+        var mixed = PreviewMixer.Mix(song, Mute((0, 0)));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(mixed, Has.Count.EqualTo(1));
+            Assert.That(mixed[0].Channel, Is.EqualTo(0), "剩下这条是第一个要声道的，拿 0 号");
+            Assert.That(mixed[0].Program, Is.EqualTo(40));
+        });
+    }
+
+    /// <summary>整首都收起来了：一张空表。出声那头收到空表就是不出声（见 <c>IAudioSink.Play</c>）。</summary>
+    [Test]
+    public void 全都静音就摊出空表()
+    {
+        var song = SongOf(
+            Map(),
+            Trk(0, 0, "主旋律", 24, 0, new Note(60, 0, Quarter, 100)),
+            Trk(1, 9, "鼓点", 0, 0, new Note(36, 0, Quarter, 100)));
+
+        Assert.That(PreviewMixer.Mix(song, Mute((0, 0), (1, 9))), Is.Empty);
+    }
+
+    /// <summary>名单里写了一条**根本不存在**的轨：什么都不该被静音掉（名单对不上就是没静音，不是全静音）。</summary>
+    [Test]
+    public void 名单里没有这条轨时它照响()
+    {
+        var song = SongOf(Map(), Trk(0, 0, "主旋律", 24, 0, new Note(60, 0, Quarter, 100)));
+
+        Assert.That(PreviewMixer.Mix(song, Mute((7, 3))), Has.Count.EqualTo(1));
+    }
+
     // ==================== 帮手 ====================
+
+    /// <summary>一份静音名单，按 <c>(轨块号, 声道)</c> 写 —— 界面上那对唯一键。</summary>
+    private static IReadOnlySet<(int TrackIndex, int Channel)> Mute(params (int, int)[] tracks)
+        => tracks.ToHashSet();
 
     private static Song SongOf(TempoMap map, params Track[] tracks) => new(tracks, map);
 

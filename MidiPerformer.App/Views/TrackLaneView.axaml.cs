@@ -40,13 +40,14 @@ public partial class TrackLaneView : UserControl
     private int _trackIndex;
 
     /// <summary>
-    /// 这条轨收起来了（只留轨道头 + 一行「已折叠」）。
+    /// 这条轨收起来了（只留轨道头 + 一行「已折叠 · 不发声」，试听里也不响）。
     ///
     /// **状态住在这儿，不在窗口里。** 它跟着控件走，于是编辑（就地重挂）不会把它抹掉 ——
     /// 这正是 14 把「每次编辑重建控件」改掉之后白捡的一样：从前的做法下，
     /// 收起来再挪一个音，这条轨会自己弹开。
     /// 代价是**轨数真的变了**时控件要重建，这一格跟着丢 —— 窗口按轨的身份把它带过去
     /// （见 <see cref="Identity"/>），所以那一路也保得住。
+    /// 换曲子（另一首）是**不带**的：那一格说的是这条轨，不是这个位置。
     /// </summary>
     private bool _collapsed;
 
@@ -247,6 +248,16 @@ public partial class TrackLaneView : UserControl
     /// <summary>卷帘上的选中集变了。窗口靠它刷新读数条和「选中」那一格。</summary>
     public event EventHandler<IReadOnlyList<NoteRef>>? SelectionChanged;
 
+    /// <summary>
+    /// 这条轨收起来 / 展开了。**窗口靠它把试听那张表重排一遍** ——
+    /// 收起来的轨不出声（见 <see cref="PreviewMixer.Mix"/> 的 mutedTracks）。
+    ///
+    /// 和别的「改谱面」事件不一样：这一声不落到任何命令上，谱面一个字节都不动，
+    /// 改的只是「这条轨响不响」。所以它不叫 Requested，也没有参数 —— 收没收到控件自己身上问
+    /// （<see cref="IsCollapsed"/>）。
+    /// </summary>
+    public event EventHandler? CollapseChanged;
+
     /// <summary>这条轨在 <c>Song.Tracks</c> 里的下标。</summary>
     public int TrackIndex => _trackIndex;
 
@@ -275,8 +286,9 @@ public partial class TrackLaneView : UserControl
     private void OnFoldClick(object? sender, RoutedEventArgs e) => SetCollapsed(!_collapsed);
 
     /// <summary>
-    /// 收起 / 展开这条轨。**只动看得见的那两样**（卷帘与那一行「已折叠」），
-    /// 谱面、选中集、播放一个字节都不碰 —— 折叠是「先不看它」，不是「不要它」。
+    /// 收起 / 展开这条轨。动的是三样：看得见的那两样（卷帘与那一行「已折叠」），
+    /// 以及**试听里响不响**（收起来的轨不出声，见 <see cref="CollapseChanged"/>）。
+    /// 谱面、选中集、导出一个字节都不碰 —— 折叠不是「不要它」。
     /// </summary>
     public void SetCollapsed(bool collapsed)
     {
@@ -293,6 +305,10 @@ public partial class TrackLaneView : UserControl
         // 而曲子可能已经在背后改过好几轮了（编辑、撤销都换过 Song）。
         // 收起那一头不用补 —— 卷帘藏了，画什么都没人看
         if (!collapsed) Refresh(_lastPlayheadTick, _lastPlayheadVisible);
+
+        // 喊一声让窗口重排试听那张表。**先改完看得见的再喊**：窗口收到这一声时
+        // 这个控件的状态已经是新的了，它回头来问 IsCollapsed 问得到对的值
+        CollapseChanged?.Invoke(this, EventArgs.Empty);
     }
 
     /// <summary>

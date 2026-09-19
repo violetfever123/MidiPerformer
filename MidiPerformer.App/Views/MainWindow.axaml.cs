@@ -313,7 +313,9 @@ public partial class MainWindow : Window
         // 接着用上一首的控件 —— 折叠、改名框这些控件上的状态会跨曲子漏过去。
         // 编辑那条路才是「同一首曲子的新一份」，两者不是一回事
         SyncLanes(rebuildAll: true);
-        _playback.Load(song);
+        // 换曲子这一路折叠一律是空的（SyncLanes 那条 rebuildAll 的分支刚说过为什么），
+        // 照旧现问一次：哪天那条规矩变了，这里不会悄悄漏掉
+        _playback.Load(song, MutedTracks());
 
         SongNameBox.Text = title;
         EmptyHint.IsVisible = false;
@@ -375,10 +377,16 @@ public partial class MainWindow : Window
         // 轨数变了只能重建控件，但**折叠是用户对某条轨的标记，不该被一次删轨顺手抹掉**
         // （撤销把那条轨拿回来时尤其明显：收起来的那几条自己全弹开了）。
         // 按轨的身份记，不按下标 —— 删掉第 0 条之后下标整体前移，按下标带会把折叠挪到别人身上。
-        // 必须在 Clear 之前抄下来：下面那一刻 _lanes 就空了
+        // 必须在 Clear 之前抄下来：下面那一刻 _lanes 就空了。
+        //
+        // **换一首曲子（rebuildAll）一律不带。** 折叠现在不只是「先不看它」，收起来的轨
+        // 在试听里是不出声的（见 MutedTracks）。两首曲子的轨撞上同一个 (轨块, 声道) 是常事，
+        // 带过去就成了「打开一首新曲子，某条轨莫名其妙是哑的」—— 这正是 rebuildAll 存在的理由：
+        // 控件上的状态说的是**这一首**里的那一条轨，换一首就该从头开始。
         var collapsed = new HashSet<(int, int)>();
-        foreach (var lane in _lanes)
-            if (lane.IsCollapsed) collapsed.Add(lane.Identity);
+        if (!rebuildAll)
+            foreach (var lane in _lanes)
+                if (lane.IsCollapsed) collapsed.Add(lane.Identity);
 
         LanesHost.Children.Clear();
         _lanes.Clear();
@@ -393,12 +401,39 @@ public partial class MainWindow : Window
             lane.NoteResized += OnNoteResized;
             lane.NotesDeleted += OnNotesDeleted;
             lane.SelectionChanged += OnLaneSelectionChanged;
+            lane.CollapseChanged += OnLaneCollapseChanged;
             lane.RenameRequested += OnTrackRenameRequested;
             lane.DeleteRequested += OnTrackDeleteRequested;
             _lanes.Add(lane);
             LanesHost.Children.Add(lane);
         }
     }
+
+    /// <summary>
+    /// 此刻哪几条轨在试听里不发声：**收起来的那几条**。
+    ///
+    /// 认轨用的是 <see cref="TrackLaneView.Identity"/> 那一对 <c>(轨块, 声道)</c>，不是下标 ——
+    /// 和重建时把折叠带过去取的是同一套：删掉第 0 条之后下标整体前移，按下标算会静音到别人头上。
+    ///
+    /// 每次**现问一次**控件（不在窗口里另存一份折叠状态）：状态只有控件那一处，
+    /// 抄一份出来就有两处要跟着一起改，而它们迟早会不一致。问一趟是十来条轨的循环，不心疼。
+    /// </summary>
+    private IReadOnlySet<(int TrackIndex, int Channel)> MutedTracks()
+    {
+        var muted = new HashSet<(int, int)>();
+        foreach (var lane in _lanes)
+            if (lane.IsCollapsed) muted.Add(lane.Identity);
+        return muted;
+    }
+
+    /// <summary>
+    /// 某条轨收 / 放了：试听那张表跟着重排一遍。
+    ///
+    /// 正在播的话是**接着放**，只有那一条不响（见 <see cref="PreviewPlayback.SetMutedTracks"/>）——
+    /// 折叠一条正在听的轨不该把整遍听下来打断。
+    /// </summary>
+    private void OnLaneCollapseChanged(object? sender, EventArgs e)
+        => _playback.SetMutedTracks(MutedTracks());
 
     // ==================== 曲库 ====================
 
@@ -733,7 +768,8 @@ public partial class MainWindow : Window
         _controller?.SetViewStart(viewStartTick);
         RestoreSelection(selection);
 
-        _playback.Load(edited);
+        // 收起来的轨照旧不出声 —— 重摊这张表的名单从控件现问（见 MutedTracks）
+        _playback.Load(edited, MutedTracks());
         _playback.SeekSeconds(edited.TempoMap.SecondsAt(playheadTick));
         // 试听被换谱顺手停了（Load 会先松开所有正在响的音），走带条的亮灭跟着回位
         PlayButton.IsEnabled = edited.Tracks.Count > 0;

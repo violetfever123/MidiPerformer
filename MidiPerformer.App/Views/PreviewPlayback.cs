@@ -30,6 +30,12 @@ public sealed class PreviewPlayback : IDisposable
     private SongWalker? _walker;
     private IReadOnlyList<PreviewNote> _notes = Array.Empty<PreviewNote>();
 
+    /// <summary>
+    /// 手上这份谱面。**只为了重摊那张表**（<see cref="SetMutedTracks"/>）：
+    /// 静音名单变了要按同一份曲子重摊一遍，而曲子是 <see cref="Load"/> 给的。
+    /// </summary>
+    private Song? _song;
+
     public PreviewPlayback(IAudioSink sink, IClock clock)
     {
         _sink = sink;
@@ -65,11 +71,42 @@ public sealed class PreviewPlayback : IDisposable
     /// 出声那张表（**每个音带哪个声道、哪个音色**）在用例层摊好，这儿只管拿 ——
     /// 摊法本身有它自己的测试（<c>PreviewMixer</c>），视图这一层不重算一遍。
     /// </summary>
-    public void Load(Song song)
+    /// <param name="mutedTracks">
+    /// 不发声的轨（收起来的那几条），按 <c>(轨块号, 声道)</c> 给。
+    /// **换曲子这一路是空的**：折叠是用户对某一条轨的标记，不该跨曲子漏过去（见 <c>MainWindow.SyncLanes</c>）。
+    /// </param>
+    public void Load(Song song, IReadOnlySet<(int TrackIndex, int Channel)> mutedTracks)
     {
         Stop();
+        _song = song;
         _walker = new SongWalker(song);
-        _notes = PreviewMixer.Mix(song);
+        _notes = PreviewMixer.Mix(song, mutedTracks);
+    }
+
+    /// <summary>
+    /// 只换那份**「哪几条轨不发声」**的名单，曲子不动。折叠 / 展开一条轨走这条。
+    ///
+    /// 正在播的话**接着放**：从此刻的音乐时间把新那张表重新排一遍。这一步不能省 ——
+    /// 光换掉 <c>_notes</c> 的话，出声那头手上还是上一批音，被静音的那条轨会一直响到它自己结束。
+    /// 先 <c>Stop</c>（松开所有正在响的音）再 <c>Seek</c> + <c>Play</c>，和起播那条路同一个次序。
+    ///
+    /// 为什么不像换谱面那样干脆停下来：折叠一条正在听的轨，用户要的是「这条别响了」，
+    /// 不是「整遍重放」。换谱面（<see cref="Load"/>）另一回事 —— 那儿连曲子都换了。
+    /// </summary>
+    public void SetMutedTracks(IReadOnlySet<(int TrackIndex, int Channel)> mutedTracks)
+    {
+        if (_song is not { } song || _walker is not { } walker) return;
+
+        _notes = PreviewMixer.Mix(song, mutedTracks);
+
+        if (!IsPlaying) return;
+
+        // 先把积分推到此刻：不推的话声音会从上一帧（最多 33ms 之前）接着排，
+        // 听感上是这一下之后的一小段又重了一遍
+        walker.AdvanceTo(_clock.NowSeconds());
+        _sink.Stop();
+        _sink.Seek(walker.MusicNow);
+        _sink.Play(_notes);
     }
 
     /// <summary>
