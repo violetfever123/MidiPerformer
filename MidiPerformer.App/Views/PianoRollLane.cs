@@ -16,13 +16,13 @@ namespace MidiPerformer.App.Views;
 /// 一条轨的卷帘。<b>画的全是 <see cref="PianoRollPresenter.LaneScene"/> 里算好的东西</b>，
 /// 这里一个乘法都不做 —— 「画什么」和「画在哪」分开，前者才能不起窗口就测。
 ///
-/// <b>它自己不改谱面。</b>按下 / 拖动 / 抬起只产出三种**意图**
-/// （<see cref="NotesMoved"/> / <see cref="NoteResized"/> / <see cref="NotesDeleted"/>），
+/// <b>它自己不改谱面。</b>按下 / 拖动 / 抬起只产出两种**意图**
+/// （<see cref="NotesMoved"/> / <see cref="NoteResized"/>），
 /// 调命令的是窗口：编辑脊柱只有一条，撤销的记账在装饰器里，谁调命令都自动有撤销，
 /// 但调命令的地方只该有一处。选中集也不存在这儿 —— 它住在
 /// <see cref="PianoRollController"/> 里（全程序一个），这里只负责调它、再喊一声
-/// <see cref="SelectionChanged"/>。多选只有一条路：在音符上 <c>Shift</c> 点
-/// （空白处横拖虽然也框住一段，但那一下的结局是直接删掉，不留选中）。
+/// <see cref="SelectionChanged"/>。多选有两条路：在音符上 <c>Shift</c> 点、
+/// 在空白处横拖框一段；删是另一件事，绑在 Delete / Backspace 上，归窗口。
 ///
 /// <b>拖动期间谱面一个字节都不改。</b>一边拖一边调命令，撤销栈会被灌满上百条微步，
 /// 用户按 Ctrl+Z 得按到手酸。所以每一帧只画**预览**：被拖的音用虚线幽灵画在它们将要去的位置上
@@ -202,15 +202,7 @@ public sealed class PianoRollLane : Control
     /// <summary>这个音的时值（和/或起点）被拖成了新的值，命令由窗口去调。</summary>
     public event EventHandler<NoteResizeRequest>? NoteResized;
 
-    /// <summary>
-    /// 空白处横拖框住了一段，这一段里的音要删掉。参数就是**要删的那些音**（已按区间算好），
-    /// 命令由窗口去调。
-    ///
-    /// 框里一个音都没有时不发这条（点一下空白的意思不是「删掉零个音」）。
-    /// </summary>
-    public event EventHandler<IReadOnlyList<NoteRef>>? NotesDeleted;
-
-    /// <summary>选中集变了（点中一个音、或空白处按下清空）。窗口靠它刷新读数条。</summary>
+    /// <summary>选中集变了（点中一个音、框住一段、或空白处按下清空）。窗口靠它刷新读数条。</summary>
     public event EventHandler<IReadOnlyList<NoteRef>>? SelectionChanged;
 
     /// <summary>
@@ -377,9 +369,8 @@ public sealed class PianoRollLane : Control
                 _anchor = note.Index;
                 CaptureAnchor(controller);
 
-                // Shift 点一下 = 把它也带上。这是**全片唯一能把选中集堆到两个以上的入口**：
-                // 空白处横拖那一下虽然也框住一段，可它的结局是直接删掉（见 default 一支），
-                // 不留选中 —— 于是「框选一组音符一起移动」这条只能走 Shift 一路。
+                // Shift 点一下 = 把它也带上。堆多选有两条路：这一条，和空白处横拖框一段
+                //（见 default 一支 —— 19 之前框选是「松手就删」、不留选中，那时只有这一条）。
                 //
                 // ExtendSelection 对已经在里面的音什么都不做，正合这里的语义：
                 // 用户点一个已选中的音，意思是「留着它」，而不是把整组收成它一个。
@@ -406,9 +397,10 @@ public sealed class PianoRollLane : Control
                 break;
 
             default:
-                // 空白处按下 = 框选。选中集**当场清掉**：这一次手势要么框出一段删掉、
-                // 要么什么也没框到，两种结果都不该留着上一次的选中
-                //（框选删完那几个音就没了，留着它们的下标只会指向别人）。
+                // 空白处按下 = 框选。选中集**当场清掉**：这一次手势要么框出一段、
+                // 要么什么也没框到，两种结果说的都是「从现在开始算」，不该留着上一次的选中
+                //（框完就删的那一版里，留着被删音的下标只会指向别人 —— 现在框完只是选中，
+                // 但「按下 = 重新开始框」这条语义没变，也从没变过）。
                 controller.ClearSelection();
                 selectionChanged = true;
                 _drag = DragKind.Marquee;
@@ -662,11 +654,22 @@ public sealed class PianoRollLane : Control
                 long to = (long)Math.Round(Math.Max(marqueeStart, marqueeEnd));
 
                 // 区间左闭右开，且 end <= start 就是空区间 —— 见 NotesInRange 的说明。
-                // 于是「点了下空白」这一次零长度的手势一个音都框不到，不会误删光标底下那个音。
-                // 零长度这件事由 UpdateDrag 的像素门槛保着：手一抖，起止就散开了，
-                // 而这里删的是「区间里的所有音」，**不分音高** —— 那一下删掉的是别行上的音
-                var hit = controller.NotesInRange(TrackIndex, from, to);
-                if (hit.Count > 0) NotesDeleted?.Invoke(this, hit);
+                // 于是「点了下空白」这一次零长度的手势一个音都框不到，而选中集在按下那一刻
+                // 已经清空了，这一次手势于是什么都不做（零长度由 UpdateDrag 的像素门槛保着）。
+                //
+                // **框住只选中，不删。** 19 之前这里是「松手就删」：那个手势没法反悔着调
+                //（框多了只能 Ctrl+Z 整批还回来，还得重新框一遍），而「框住 = 选中」
+                // 才是这个手势在别处的意思。删是另一件事，绑在 Delete / Backspace 上，
+                // 在窗口那一侧（见 <c>MainWindow.DeleteSelection</c>）——
+                // 于是「框一批 → 看一眼 → 删」这条路走得通，「框错了 → 松开手 → 重框」也走得通。
+                //
+                // 顺手补上了多选的第二条路：从前能堆出两个以上选中音的**只有** Shift + 点
+                //（见 OnPointerPressed 的 Body 一支），框选补上正好。
+                //
+                // 仍然**不分音高**：区间只按时间命中（NotesInRange 只认 startTick，纵向拖多高
+                // 结果都一样）。这是现状，这张工单不改。
+                controller.SetSelection(controller.NotesInRange(TrackIndex, from, to));
+                RaiseSelectionChanged();
                 break;
             }
         }

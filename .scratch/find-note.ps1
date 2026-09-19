@@ -12,8 +12,14 @@
 #
 # 加 -Blank 则反过来：报这一轨卷帘里**没有音符**的一个点（用来试「点空白」那条分支）。
 #
-# 用法: pwsh -File find-note.ps1 -Track 2 [-Blank] [-Out scan.png]
-param([int]$Track = 2, [switch]$Blank, [string]$Out = '.scratch/shots/scan.png')
+# 加 -Near "x,y" 则报**离这个点最近的、那个像素不是音符**的位置（x 不动，只上下挪）。
+# 拖框那一版必须用这个，不能用 -Blank：`-Blank` 是从扫查带的最下沿往上找的，
+# 找出来的往往正好是带的**边缘那一行**，那一行常常已经在卷帘外面了 —— 按下去什么也没发生，
+# 看着却像「框选没生效」。而框选只要求**按下那一点**是空白，不要求整行都空，
+# 所以就近找一个空白像素才是对的要求。
+#
+# 用法: pwsh -File find-note.ps1 -Track 2 [-Blank | -Near "x,y"] [-Out scan.png]
+param([int]$Track = 2, [switch]$Blank, [string]$Near = '', [string]$Out = '.scratch/shots/scan.png')
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 Add-Type -AssemblyName System.Drawing, UIAutomationClient, UIAutomationTypes
@@ -90,6 +96,35 @@ function 这一行的杠([int]$y) {
   if ($起 -ge 0 -and ($X1 - $起) -gt $最长) { $最长 = $X1 - $起; $最起 = $起 }
   # 括号不能省：PS 里逗号比 `+` 结合得紧，`@($a, $b + $c - 1)` 会算成 `($a,$b) + $c - 1`
   if ($最长 -ge $最短杠) { return @($最起, ($最起 + $最长 - 1)) } else { return $null }
+}
+
+if ($Near) {
+  # 上下各探一段，报第一个「自己跟上下各 2px 都不是音符色」的像素 ——
+  # 留 2px 是躲开横杠边缘那圈抗锯齿的过渡色（它在容差之外，只判自己会误判成空白）
+  $parts = $Near -split ','
+  $nx = [int]$parts[0]; $ny = [int]$parts[1]
+  $空 = {
+    param($y)
+    if ($y -lt $Y0 -or $y -ge $Y1) { return $false }
+    foreach ($d in -2, 0, 2) {
+      $yy = $y + $d
+      if ($yy -lt 0 -or $yy -ge $hh) { return $false }
+      if (是音符色 $bmp.GetPixel($nx, $yy)) { return $false }
+    }
+    return $true
+  }
+  for ($k = 0; $k -le 120; $k++) {
+    foreach ($y in @(($ny - $k), ($ny + $k))) {
+      if (-not (& $空 $y)) { continue }
+      $bmp.Dispose()
+      "离 ($nx,$ny) 最近的空白像素：($nx, $y)   上下挪了 $($y - $ny)px"
+      "$nx,$y"
+      exit 0
+    }
+  }
+  $bmp.Dispose()
+  "($nx,$ny) 上下 120px 以内找不到空白像素"
+  exit 1
 }
 
 if ($Blank) {

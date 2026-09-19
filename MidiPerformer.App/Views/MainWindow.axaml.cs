@@ -408,7 +408,6 @@ public partial class MainWindow : Window
             lane.ProgramRequested += OnProgramRequested;
             lane.NotesMoved += OnNotesMoved;
             lane.NoteResized += OnNoteResized;
-            lane.NotesDeleted += OnNotesDeleted;
             lane.SelectionChanged += OnLaneSelectionChanged;
             lane.FocusChanged += OnLaneFocusChanged;
             lane.CollapseChanged += OnLaneCollapseChanged;
@@ -918,15 +917,68 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// 卷帘空白处横拖划掉一段（落在区间里的是哪几个音，<c>PianoRollLane</c> 已经算好了）。
+    /// <c>Delete</c> / <c>Backspace</c>：把当前选中的音整批删掉（一次调用 = 撤销栈上一格）。
     ///
-    /// 删完**明确清空选中**，不靠按值去找：被删的音不该还选着，
-    /// 而同一个值在别处可能还有一份，按值找会把那个不相干的音捡回来选上。
+    /// <b>删完选中落到时间上最近的邻居，不清空</b> —— 连续删谱时手不用重新找位置。
+    /// 落的规则：拿被删那组里**最靠右**的那个音当基准（「从删掉的那一段末尾接着往下」），
+    /// 先找它右边最近的一个（<c>StartTick</c> 严格大于基准）；右边没有了就落回左边最近的一个。
+    /// 两边都没有（这条轨被删空了）就是空选中 —— 没地方可落，空着比指一个别的轨的音诚实。
+    ///
+    /// 基准取**最靠右**那个而不是最靠左：选中集可以是不挨着的（Shift + 点能点上相隔很远的两个），
+    /// 取最靠左的话，落点会掉进两次点击中间的缝里 —— 用户按着 Delete 想「接着往后删」，
+    /// 手却退回去了。取最靠右才是「继续往下走」。
+    ///
+    /// 基准落在**哪条轨**也由它定（那个音在哪条轨就落回哪条轨），不跟聚焦轨走：
+    /// 选中集可以横跨两条轨（Shift + 点），而「刚删掉的东西在哪儿」比「焦点在哪儿」
+    /// 更贴近用户此刻在看的地方。多轨同时删时只管一条 —— 落点只有一个。
+    ///
+    /// <b>删完按值重新认音</b>（<see cref="ApplySong"/> 那套）：<see cref="NoteRef"/> 是下标寻址，
+    /// 删一批之后后面所有音的下标整体前移，存下来的下标当场指向别人。
+    /// 这条不在这儿优化 —— 31 号工单会把那套按值镜像整个删掉，在这里投资是白干。
     /// </summary>
-    private void OnNotesDeleted(object? sender, IReadOnlyList<NoteRef> notes)
+    private void DeleteSelection()
     {
-        if (_song is not { } song || notes.Count == 0) return;
-        ApplySong(_editor.DeleteNotes(song, notes), Array.Empty<SelectedNote>());
+        if (_song is not { } song || _controller is not { } controller) return;
+
+        // 先抄下来：下面换曲子之后控制器里的那一串就作废了
+        var doomed = controller.SelectedNotes.ToArray();
+        if (doomed.Length == 0) return;
+
+        // 基准：最靠右的那个被删音（它所在的轨 + 它的起点）
+        int track = doomed[0].Track;
+        long edge = long.MinValue;
+        foreach (var reference in doomed)
+        {
+            if (NoteAt(song, reference) is not { } note) continue;
+            if (note.StartTick >= edge) { edge = note.StartTick; track = reference.Track; }
+        }
+        if (edge == long.MinValue) return;   // 一个都认不出来（ref 全过期），那就不删
+
+        var edited = _editor.DeleteNotes(song, doomed);
+        ApplySong(edited, NeighbourAfterDelete(edited, track, edge));
+    }
+
+    /// <summary>
+    /// 删完之后选中该落到哪儿：<paramref name="track"/> 上起点**严格大于** <paramref name="edge"/>
+    /// 的第一个音；没有就退回起点**小于等于**它的最后一个（也就是它左边最近的那个）。
+    /// 那条轨空了就给空表。
+    ///
+    /// 返回的是**值**（<see cref="SelectedNote"/>），不是下标：下标刚被这一删整体挪过。
+    /// 起点**严格大于**而不是大于等于：删掉的那一段里可能还有没被选中的音留在原地，
+    /// 用「大于等于」会把其中一个当成右邻居 —— 那是往后删的时候手突然不动了。
+    /// </summary>
+    private static List<SelectedNote> NeighbourAfterDelete(Song song, int track, long edge)
+    {
+        if (track < 0 || track >= song.Tracks.Count) return new List<SelectedNote>();
+
+        var notes = song.Tracks[track].Notes;
+        for (int i = 0; i < notes.Count; i++)
+            if (notes[i].StartTick > edge) return new List<SelectedNote> { new(track, notes[i]) };
+
+        // 右边没有了：退回左边最近的一个。音符按起点升序（Track.WithNotes 保证），所以是最后一个
+        return notes.Count > 0
+            ? new List<SelectedNote> { new(track, notes[^1]) }
+            : new List<SelectedNote>();
     }
 
     private void OnTrackRenameRequested(object? sender, string name)
@@ -1322,6 +1374,7 @@ public partial class MainWindow : Window
     /// 方向键按**方案 A**（工单 09）：<c>←/→</c> 移时间、<c>↑/↓</c> 移音高、
     /// <c>Shift+←/→</c> 改时值、<c>Ctrl+←/→</c> 在**焦点轨内**前后跳、
     /// <c>Ctrl+↑/↓</c> 在轨之间上下走（聚焦，见 <see cref="MoveFocus"/>）。
+    /// <c>Delete</c> / <c>Backspace</c> 删掉选中（见 <see cref="DeleteSelection"/>）。
     /// 07 原本把裸 <c>←/→</c> 绑成「前后跳」，09 把裸键让给了微调 ——
     /// <b>能力没砍，挪到 Ctrl 上了</b>：07 那两条测试测的是控制器上的 <c>MoveSelection</c>，
     /// 那条路一个字节都没动，所以不会红，变的只是这里把哪个键绑到它上面。
@@ -1382,6 +1435,16 @@ public partial class MainWindow : Window
         }
 
         if (ctrl) return;
+
+        // Delete / Backspace：把当前选中的音整批删掉。两个键都绑（两个键原本都空着），
+        // 因为「删掉」这件事在键盘上有两个同样顺手的落点，选哪个是肌肉记忆，不是配置项。
+        // 一个音都没选中时**不标记 Handled**：这一下不该被吃掉，让它照常往下走。
+        if (e.Key is Key.Delete or Key.Back && _controller.SelectedNotes.Count > 0)
+        {
+            e.Handled = true;
+            DeleteSelection();
+            return;
+        }
 
         // 空格 = 走带条上那颗「▶ 从当前位置播放」。**必须抢在控件前面**：
         // 焦点停在轨道头上那些按钮、下拉上的时候，空格本来归它们

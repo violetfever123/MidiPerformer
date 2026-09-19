@@ -22,7 +22,7 @@ namespace MidiPerformer.App.Views;
 /// （<see cref="TransposeRequested"/>），改名、删除、卷帘上拖出来的那几种编辑、以及
 /// 「抽掉一段」同样只喊一声
 /// （<see cref="RenameRequested"/> / <see cref="DeleteRequested"/> / <see cref="CutRangeRequested"/> /
-/// <see cref="NotesMoved"/> / <see cref="NoteResized"/> / <see cref="NotesDeleted"/>），
+/// <see cref="NotesMoved"/> / <see cref="NoteResized"/>），
 /// 命令由窗口去调 —— 编辑脊柱只有一条，撤销的记账在装饰器里，谁调命令都自动有撤销，
 /// 但调命令的地方只该有一处。
 ///
@@ -125,7 +125,6 @@ public partial class TrackLaneView : UserControl
         // 编辑意图：原样转发（形状都不动，见各个事件的说明）
         Roll.NotesMoved += (_, request) => NotesMoved?.Invoke(this, request);
         Roll.NoteResized += (_, request) => NoteResized?.Invoke(this, request);
-        Roll.NotesDeleted += (_, notes) => NotesDeleted?.Invoke(this, notes);
 
         // 这两条不一样：它们除了往上报，还得**自己重画一屏**。
         // 选中集和拖动预览都是场景的一部分（选中圈、虚线幽灵都画在里面），
@@ -273,9 +272,6 @@ public partial class TrackLaneView : UserControl
 
     /// <summary>卷帘上有一个音的起点 / 时值被拖成了新的值（绝对位置）。</summary>
     public event EventHandler<NoteResizeRequest>? NoteResized;
-
-    /// <summary>卷帘上空白处横拖框住的那几个音要删掉（参数就是要删的那些音）。</summary>
-    public event EventHandler<IReadOnlyList<NoteRef>>? NotesDeleted;
 
     /// <summary>卷帘上的选中集变了。窗口靠它刷新读数条和「选中」那一格。</summary>
     public event EventHandler<IReadOnlyList<NoteRef>>? SelectionChanged;
