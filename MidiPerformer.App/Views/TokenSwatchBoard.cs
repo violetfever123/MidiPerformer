@@ -9,7 +9,7 @@ using MidiPerformer.App.Theme;
 namespace MidiPerformer.App.Views;
 
 /// <summary>
-/// 自绘的令牌板：25 个令牌各占一格，标上名字和当前主题下的色值。dev-only 样板窗口的一部分。
+/// 自绘的令牌板：26 个令牌各占一格，标上名字和当前主题下的色值。dev-only 样板窗口的一部分。
 ///
 /// 它是<a href="../../docs/wireframe.html">取色桥</a>的可见产物 —— 这块画布拿不到
 /// <c>DynamicResource</c>，颜色**全部**来自 <see cref="TokenSource"/>。

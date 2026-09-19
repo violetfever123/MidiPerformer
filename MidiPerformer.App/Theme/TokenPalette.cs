@@ -6,7 +6,7 @@ using Avalonia.Styling;
 namespace MidiPerformer.App.Theme;
 
 /// <summary>
-/// 某一份主题下的 25 个令牌，取成 Avalonia 的类型。
+/// 某一份主题下的 26 个令牌，取成 Avalonia 的类型。
 ///
 /// 为什么需要它：<c>Styles/Tokens.axaml</c> 那套走的是 <c>DynamicResource</c>，
 /// 只有 XAML 里的控件吃得到。<b>卷帘和悬浮层是代码画的</b>，拿不到资源查找链，
@@ -14,7 +14,7 @@ namespace MidiPerformer.App.Theme;
 ///
 /// <b>属性名和令牌键是一回事</b>：<c>NoteEdge</c> 就是 <c>TokenNoteEdge</c>。
 /// <see cref="Resolve"/> 就靠这条机械映射按名字取，没有第二张对照表 ——
-/// 25 个同类型的参数排成一列手写，串一个位置是迟早的事，而且串了看不出来。
+/// 26 个同类型的参数排成一列手写，串一个位置是迟早的事，而且串了看不出来。
 /// 加令牌只要在这里加一个属性，别处自动跟上。
 ///
 /// 一次取一份快照：画一帧画到一半主题变了不会花屏，那一帧整个是旧主题，下一帧整个是新的。
@@ -44,6 +44,7 @@ public sealed record TokenPalette(
     Color GridBeat,
     Color LaneA,
     Color LaneB,
+    Color LaneFocus,
     BoxShadows Shadow)
 {
     /// <summary>令牌键的前缀。属性名加上它就是 <c>Tokens.axaml</c> 里的键。</summary>
@@ -51,7 +52,7 @@ public sealed record TokenPalette(
 
     /// <summary>
     /// 属性按**构造函数参数的名字**排，不是按 <c>GetProperties()</c> 的返回顺序 ——
-    /// 那个顺序 CLR 明确不保证，而 25 个令牌里 23 个是同一个类型：
+    /// 那个顺序 CLR 明确不保证，而 26 个令牌里 24 个是同一个类型：
     /// 顺序一旦变了，<see cref="Activator.CreateInstance(Type, object?[])"/> 会把颜色安安静静地
     /// 装错位置（Ground 拿到 Surface 的值），一个异常都不抛。
     /// 按参数名取属性，位置由语言保证对得上，而名单仍然只有这一张。

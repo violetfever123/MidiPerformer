@@ -27,8 +27,8 @@ public class TokenParityTests
     /// <summary>wireframe 里属于线框说明层、不进软件的三个令牌。</summary>
     private static readonly string[] WireframeOnly = { "--annot", "--annot-soft", "--annot-line" };
 
-    /// <summary>wireframe 的 :root 一共 28 条，减掉上面三个，进软件的是 25 条。</summary>
-    private const int ExpectedTokenCount = 25;
+    /// <summary>wireframe 的 :root 一共 29 条，减掉上面三个，进软件的是 26 条。</summary>
+    private const int ExpectedTokenCount = 26;
 
     private static readonly XNamespace Xaml = "http://schemas.microsoft.com/winfx/2006/xaml";
 
@@ -49,7 +49,7 @@ public class TokenParityTests
     // ==================== 1. 和 wireframe 对账 ====================
 
     [Test]
-    public void 令牌数正好是25条()
+    public void 令牌数正好是26条()
     {
         Assert.That(LightTokens().Count - WireframeOnly.Length, Is.EqualTo(ExpectedTokenCount),
             "wireframe 的 :root 减掉标注专用的三条，剩下的就是进软件的令牌数");
@@ -258,7 +258,7 @@ public class TokenParityTests
             e => (e.Name.LocalName, e.Value.Trim()));
     }
 
-    /// <summary>Tokens.axaml 和 Controls.axaml 里定义过的全部键（不只是那 25 个）。</summary>
+    /// <summary>Tokens.axaml 和 Controls.axaml 里定义过的全部键（不只是那 26 个）。</summary>
     private static HashSet<string> AllDeclaredKeys()
     {
         var keys = new HashSet<string>(StringComparer.Ordinal);
