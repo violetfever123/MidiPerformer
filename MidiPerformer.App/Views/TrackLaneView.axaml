@@ -163,6 +163,24 @@
       <Setter Property="VerticalAlignment" Value="Center" />
     </Style>
 
+    <!--
+      聚焦轨的轨道头底色。谁在什么时候换，见 TrackLaneView.SetFocused。
+
+      底色**必须**写成样式而不是控件上的 Background="…"：Avalonia 里局部值盖得住样式，
+      .head.focus 这条会一点效果都没有 —— 和 CSS 里那套优先级正好相反，
+      这一处是照 wireframe 抄过来时最容易带错的地方。
+
+      两条的先后就是优先级（同一条 Styles 里后写的赢，和上面 .strip / .strip.b 一样）：
+      平时是 Surface2，聚焦时整块换成 AccentSoft。
+    -->
+    <Style Selector="Border.head">
+      <Setter Property="Background" Value="{DynamicResource TokenSurface2}" />
+    </Style>
+
+    <Style Selector="Border.head.focus">
+      <Setter Property="Background" Value="{DynamicResource TokenAccentSoft}" />
+    </Style>
+
     <!-- 就地的改名输入框：和它顶替掉的那行名字同一个字号字重，换上去的时候整行不跳 -->
     <Style Selector="TextBox.rename">
       <Setter Property="FontSize" Value="12.5" />
@@ -174,8 +192,10 @@
     </Style>
   </UserControl.Styles>
 
+  <Panel>
   <StackPanel>
-    <Border Background="{DynamicResource TokenSurface2}"
+    <Border x:Name="Head"
+            Classes="head"
             BorderBrush="{DynamicResource TokenLineSoft}"
             BorderThickness="0,0,0,1"
             Padding="10,6">
@@ -330,4 +350,27 @@
       </Grid>
     </Border>
   </StackPanel>
+
+  <!--
+    聚焦轨左边那一根竖条。谁在什么时候亮，见 TrackLaneView.SetFocused。
+
+    **必须是一个盖在整条轨上面的独立元素。** 这一条是踩过的坑：
+    给整个 lane 加一圈「内描边」是不行的 —— 里面每一层（轨道头的 Border、卷帘的底色）
+    都是**不透明的、铺满整块**的，描边画在它们底下，一个像素都看不见。
+    在 CSS 里同一个坑长成 `box-shadow: inset`；在 Avalonia 里长成「给外层 Border 加背景色」。
+    所以这里画的是一根真的竖条，摆在最后 = 压在所有东西上面。
+
+    压在上面就得**让指针穿过去**（IsHitTestVisible="False"）：它盖住的是卷帘最左边 3px，
+    不放行的话那一小条上的按下拖不动、点不中，而屏幕上没有任何东西说得清为什么。
+
+    贴着左边缘、不撑开内容：撑开的话卷帘的宽度会随「是不是聚焦」变一下，
+    一屏几个小节的换算跟着变，整条谱会左右跳一下。
+  -->
+  <Border x:Name="FocusBar"
+          Width="3"
+          HorizontalAlignment="Left"
+          Background="{DynamicResource TokenAccent}"
+          IsVisible="False"
+          IsHitTestVisible="False" />
+  </Panel>
 </UserControl>

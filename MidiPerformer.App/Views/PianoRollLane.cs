@@ -155,6 +155,27 @@ public sealed class PianoRollLane : Control
     /// <summary>这条轨在 <c>Song.Tracks</c> 里的下标。</summary>
     public int TrackIndex { get; set; }
 
+    private bool _focused;
+
+    /// <summary>
+    /// 这是不是当前聚焦的那条轨（Ctrl+↑/↓ 走的那个光标，见
+    /// <see cref="PianoRollController.FocusedTrack"/>）。只影响这一条的底色。
+    ///
+    /// 底色**整条换掉**，不是在原来的底色上再压一层：令牌都是实色（26 条里没有带透明度的），
+    /// 往上叠一层的话叠出来是什么颜色就没准了 —— 而「准不准」正是这套令牌要保证的事。
+    /// 所以聚焦时铺的是 <c>LaneFocus</c> 那一条，奇偶底色这时候不参与。
+    /// </summary>
+    public bool Focused
+    {
+        get => _focused;
+        set
+        {
+            if (_focused == value) return;
+            _focused = value;
+            InvalidateVisual();
+        }
+    }
+
     /// <summary>悬停到的音符变了。参数是音符下标，-1 = 移开了或没命中。</summary>
     public event EventHandler<int>? HoverChanged;
 
@@ -237,7 +258,10 @@ public sealed class PianoRollLane : Control
 
         // 轨道底色铺满整条，顺带给鼠标一个能命中的面 —— 悬停要落在空白处也算「移开了」。
         // 深浅按轨号奇偶交替，照 wireframe 的 .lane.a / .lane.b：堆在一起时能看清一条轨在哪儿结束。
-        var background = TrackIndex % 2 == 0 ? palette.LaneA : palette.LaneB;
+        // 聚焦的那一条换成 LaneFocus —— 奇偶这时候不参与，整条一个色（见 Focused 的说明）。
+        var background = Focused
+            ? palette.LaneFocus
+            : TrackIndex % 2 == 0 ? palette.LaneA : palette.LaneB;
         context.FillRectangle(new ImmutableSolidColorBrush(background), new Rect(Bounds.Size));
 
         // 音高行的黑键底纹**刻意没画**：wireframe 用的是半透明灰（rgba(128,140,155,.075)），

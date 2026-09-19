@@ -168,6 +168,11 @@ public partial class TrackLaneView : UserControl
         Roll.Height = PianoRollGeometry.RulerHeight + (high - low + 1) * RowPixels;
         Roll.TrackIndex = trackIndex;
         Roll.Controller = controller;
+
+        // 聚焦那一笔也在这儿兜一次：控件刚建出来时窗口还没把控制器的聚焦设过来
+        // （SyncLanes 是先造控件、再造控制器里那个值），真正对上的值由随后的
+        // RefreshView 推 —— 推的还是同一个判断，重复一次不花什么，漏一次就是一条轨一直亮着
+        SetFocused(controller.FocusedTrack == trackIndex);
     }
 
     /// <summary>
@@ -281,6 +286,35 @@ public partial class TrackLaneView : UserControl
         }
     }
 
+    // ==================== 聚焦 ====================
+
+    /// <summary>这条轨是不是当前聚焦的那一条。只给画画用，窗口不读它（要读读控制器的）。</summary>
+    private bool _focused;
+
+    /// <summary>
+    /// 亮起 / 灭掉「聚焦轨」那三笔：左边那根竖条（<c>FocusBar</c>）、轨道头底色（<c>.head.focus</c>）、
+    /// 卷帘底色（推给 <see cref="PianoRollLane.Focused"/>，它自己取令牌画）。
+    ///
+    /// <b>不跟着折叠走。</b>收起来的轨也有活在干（展开、改名、删除、将来的分割都长在轨道头上），
+    /// 聚焦停在它身上时竖条照样得在 —— 不然 Ctrl+↑/↓ 走到一条收起来的轨上，
+    /// 屏幕上一个落点都没有，和按键失灵没有区别。
+    /// 所以 <see cref="Refresh"/> 把这一步摆在那些「收起来了就不画」的早退<b>之前</b>，
+    /// 另外由 <see cref="Bind"/> 兜一次底（控件刚建出来、还没人 Refresh 过的那一帧）。
+    ///
+    /// <b>一个颜色字面值都不出现。</b>三笔全走令牌：XAML 那半边的 <c>{DynamicResource}</c>
+    /// 换主题时自己会跟，卷帘那半边每次重画现取。这里要是塞一个 C# 画笔进去，
+    /// 主题一换它就停在旧色上不动了 —— 而这一类「只在某种主题下才看得出来」的毛病最难查。
+    /// </summary>
+    public void SetFocused(bool focused)
+    {
+        if (_focused == focused) return;
+        _focused = focused;
+
+        FocusBar.IsVisible = focused;
+        Head.Classes.Set("focus", focused);
+        Roll.Focused = focused;
+    }
+
     // ==================== 折叠 ====================
 
     private void OnFoldClick(object? sender, RoutedEventArgs e) => SetCollapsed(!_collapsed);
@@ -382,6 +416,10 @@ public partial class TrackLaneView : UserControl
         // 但拖动预览那一头的重画得拿这一份状态，不能因为这一帧没画就丢掉
         _lastPlayheadTick = playheadTick;
         _lastPlayheadVisible = playheadVisible;
+
+        // 聚焦那三笔画在早退**之前**：收起来的轨、宽度还没量出来的轨，竖条和底色照样得对
+        //（见 SetFocused 的说明）。挪到下面去的话，收起来的轨会一直亮着或者一直不亮
+        SetFocused(_controller.FocusedTrack == _trackIndex);
 
         // 收起来的轨没有卷帘可画（Roll 已经藏了），算了也没人看 ——
         // 这一趟不能省掉上面那两行：展开的那一下要拿「此刻」重算一屏
