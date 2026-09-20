@@ -86,6 +86,12 @@ public class ShortcutHintTests
         ("Ctrl + ← → 选同轨前/后一个音", new[] { "ctrl && e.Key is Key.Left or Key.Right", "JumpSelection(" }),
         // 19：Delete（Backspace 是同一个动作的第二个落点）
         ("Delete 删除", new[] { "Key.Delete or Key.Back", "DeleteSelection()" }),
+        // 37：Esc 放开选中的音。**这一条是补写法**：36 号把动作做了（`Key.Escape` 那一支
+        // 调 `ClearSelection()`），可屏幕上没有一处说得清它 —— 用户 2026-09-20 定了放哪儿：
+        // 「取消选中放在『选中一些音符之后』的那个提示行」，也就是这一层。
+        // 判别式挑的是 `Key.Escape` + `ClearSelection()`：左边光写前者的话，
+        // 把这一支改成「Esc 什么都不做」也是绿的。
+        ("Esc 取消选中", new[] { "Key.Escape", "ClearSelection()" }),
     };
 
     [Test]
@@ -271,6 +277,7 @@ public class ShortcutHintTests
                          "Shift + 空格 回跳一小节并播放",
                          "移时间（一格 = 十六分）",
                          "Ctrl + ← → 选同轨前/后一个音",
+                         "Esc 取消选中",
                      })
                 Assert.That(code, Does.Not.Contain(探针),
                     $"MainWindow.axaml.cs 里出现了「{探针}」这个字面量 —— 提示行的字得从 Format 来"

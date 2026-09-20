@@ -162,7 +162,7 @@ public class FormatTests
                 "一个音都没选中时屏幕上那一行 —— 改它之前先去看 MainWindow.OnWindowKeyDown，那是它的真身");
             Assert.That(Format.ReadoutHintEditing, Is.EqualTo(
                 "← → 移时间（一格 = 十六分）· ↑ ↓ 移音高 · Shift + ← → 改时值 · "
-                + "Ctrl + ← → 选同轨前/后一个音 · Delete 删除"),
+                + "Ctrl + ← → 选同轨前/后一个音 · Delete 删除 · Esc 取消选中"),
                 "选中了音时屏幕上那一行 —— 同上");
         });
     }
@@ -201,11 +201,16 @@ public class FormatTests
             Assert.That(Format.ReadoutHintEditing, Does.Contain("Ctrl + ← → 选同轨前/后一个音"));
             // 19：这一条是那次新加进提示里的（从前 Delete 根本没提）
             Assert.That(Format.ReadoutHintEditing, Does.Contain("Delete 删除"));
+            // 37：Esc 放开选中的音。动作是 36 号做的，写进这一行是 37 号 ——
+            // 用户原话：「取消选中放在『选中一些音符之后』的那个提示行」
+            Assert.That(Format.ReadoutHintEditing, Does.Contain("Esc 取消选中"));
 
             // 两类各归各的
             Assert.That(Format.ReadoutHintPerforming, Does.Not.Contain("移时间"),
                 "编辑那一类不该出现在走带那一行里");
             Assert.That(Format.ReadoutHintPerforming, Does.Not.Contain("Delete"));
+            Assert.That(Format.ReadoutHintPerforming, Does.Not.Contain("取消选中"),
+                "取消选中只在「已经选中了音」的时候才有意义 —— 它归编辑那一层（37）");
             Assert.That(Format.ReadoutHintEditing, Does.Not.Contain("播放/暂停"),
                 "走带那一类不该出现在编辑那一行里");
             Assert.That(Format.ReadoutHintEditing, Does.Not.Contain("换轨"));
