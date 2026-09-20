@@ -340,10 +340,14 @@
           所以 `TextWrapping="NoWrap"` 是**这句提示成立的前提**，不是漏写的默认值
           （谁要把它改回 Wrap，等于把下面那个 TextTrimming 变成一句空话）。
 
-          窗口最小宽度 720px，左边还压着合并后的读数栏（21），全写出来的键位表摆不下 ——
-          截掉的那半行从 ToolTip 看全。**完整文本在代码里由 `Format.ReadoutHint` 一句喂两处**
-          （见 MainWindow.axaml.cs 构造函数），不在这儿另抄一份：抄一份就是两个会走散的真相源，
-          改动一处之后屏幕上会同时挂着新的半行和旧的全文。
+          **36 号起这一行分两层**：屏幕上显示的是「此刻该看的那一类」——
+          没选中音时是走带那一行（`Format.ReadoutHintPerforming`）、选中了是编辑那一行
+          （`Format.ReadoutHintEditing`），选哪一行由 `RefreshHint` 按**选中集的个数**定。
+          分层之前是一整行 148 字，装了曲子之后（左边那套读数在场，提示行只剩 1486 物理 px）
+          会被省略号截掉约四分之一，而截掉哪几条由**像素宽度**决定 —— 分层之后两行都短到装得下。
+          **全文始终在 ToolTip 里**（两行合起来，见 `Format.ReadoutHintTooltip`），
+          它由 MainWindow.axaml.cs 构造函数那句 `ToolTip.SetTip` 设，不在这儿另抄一份：
+          抄一份就是两个会走散的真相源。
         -->
         <TextBlock Grid.Column="1" x:Name="HintText" Classes="faint"
                    TextAlignment="Right" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"

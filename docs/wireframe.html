@@ -532,7 +532,26 @@
           <span><span class="k">拍位</span> <span class="v mono" id="ro-pos">—</span></span>
           <span><span class="k">时值</span> <span class="v mono" id="ro-len">—</span></span>
         </span>
-        <span class="hint">空格 播放/暂停 · Shift + 空格 回跳一小节并播放 · ← → 移时间（一格 = 十六分）· ↑ ↓ 移音高 · Shift + ← → 改时值 · Ctrl + ← → 同轨前后跳 · Ctrl + ↑ ↓ 换轨 · Delete 删除 · Ctrl+Z 撤销 / Ctrl+Y 重做</span>
+        <!--
+          提示行**分两层**（36 号）：屏幕上只显「此刻该看的那一类」，
+          全文（两层拼起来）在 ToolTip 里。
+
+          这张样机上五个读数是 `—`，也就是「没选中任何音」那个状态 ——
+          所以这儿摆的是**走带那一层**：
+
+            空格 播放/暂停 · Shift + 空格 回跳一小节并播放 · Ctrl + ↑ ↓ 换轨
+
+          选中了音之后换成的**编辑那一层**（照抄 `Format.ReadoutHintEditing`，
+          不在这儿再铺一遍的地方是 ToolTip）：
+
+            ← → 移时间（一格 = 十六分）· ↑ ↓ 移音高 · Shift + ← → 改时值 ·
+            Ctrl + ← → 选同轨前/后一个音 · Delete 删除
+
+          撤销 / 重做**两层里都没有**（用户 2026-09-20：「不需要单独写，将它们作为快捷键，
+          直接放到『操作』里面作为提示就可以了」）—— 它们在「操作」菜单项的右侧。
+          样机是老早年的快照，改它只为「读数条这一行和代码别互相打架」。
+        -->
+        <span class="hint">空格 播放/暂停 · Shift + 空格 回跳一小节并播放 · Ctrl + ↑ ↓ 换轨</span>
       </div>
 
       <!--

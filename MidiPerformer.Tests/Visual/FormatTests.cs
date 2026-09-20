@@ -144,7 +144,7 @@ public class FormatTests
     // ==================== 读数条右边那行快捷键提示 ====================
 
     /// <summary>
-    /// 那行提示**逐字钉住**（26 号工单）。
+    /// 那两行提示**逐字钉住**（26 号工单，36 号分成两层）。
     ///
     /// 为什么值得逐字：它坏了不会报错，只会让人以为功能坏了 —— 而且这事已经发生过两次：
     /// 20 之前它写着「空格 播放」（那时空格真的只管开始），18 之前写着「Ctrl + ← → 前后跳」
@@ -153,20 +153,31 @@ public class FormatTests
     /// 有人改了这句话、按键那一段里却没这个键。
     /// </summary>
     [Test]
-    public void 快捷键提示逐字就是屏幕上那一行()
+    public void 快捷键提示逐字就是屏幕上那两行()
     {
-        Assert.That(Format.ReadoutHint, Is.EqualTo(
-            "空格 播放/暂停 · Shift + 空格 回跳一小节并播放 · ← → 移时间（一格 = 十六分）· "
-            + "↑ ↓ 移音高 · Shift + ← → 改时值 · "
-            + "Ctrl + ← → 同轨前后跳 · Ctrl + ↑ ↓ 换轨 · Delete 删除 · Ctrl+Z 撤销 / Ctrl+Y 重做"),
-            "改这句话之前先去看 MainWindow.OnWindowKeyDown —— 那是它的真身");
+        Assert.Multiple(() =>
+        {
+            Assert.That(Format.ReadoutHintPerforming, Is.EqualTo(
+                "空格 播放/暂停 · Shift + 空格 回跳一小节并播放 · Ctrl + ↑ ↓ 换轨"),
+                "一个音都没选中时屏幕上那一行 —— 改它之前先去看 MainWindow.OnWindowKeyDown，那是它的真身");
+            Assert.That(Format.ReadoutHintEditing, Is.EqualTo(
+                "← → 移时间（一格 = 十六分）· ↑ ↓ 移音高 · Shift + ← → 改时值 · "
+                + "Ctrl + ← → 选同轨前/后一个音 · Delete 删除"),
+                "选中了音时屏幕上那一行 —— 同上");
+        });
     }
 
     /// <summary>
-    /// 提示里点名的每一样，那一行里都写着一个（不能多一个「空格 播放」管两件事的旧说法）。
+    /// 提示里点名的每一样，都在**它该在的那一行**里（不能多一个「空格 播放」管两件事的旧说法）。
     ///
     /// 和逐字那条分开写：逐字那条挡的是「有人改了这句」，这条挡的是「这句话里少了一条，
     /// 而剩下的一整行照样过着逐字比对」—— 少一条比多一条难发现，因为少的那条不会打错字。
+    ///
+    /// 36 号加了两组断言，都是「分层」这件事本身的判据：
+    /// **两类各归各的**（走带那几条不在编辑行里、编辑那几条不在走带行里 ——
+    /// 两条会重叠的话，「分层」就只是把一整行切成两半而已），
+    /// 以及**撤销 / 重做确实撤出去了**（用户原话：「不需要单独写，将它们作为快捷键，
+    /// 直接放到『操作』里面作为提示就可以了」）。
     /// </summary>
     [Test]
     public void 提示里一条都不缺()
@@ -174,20 +185,40 @@ public class FormatTests
         Assert.Multiple(() =>
         {
             // 20：空格是**切换**，只写「播放」就是退回被推翻的旧决定
-            Assert.That(Format.ReadoutHint, Does.Contain("空格 播放/暂停"));
+            Assert.That(Format.ReadoutHintPerforming, Does.Contain("空格 播放/暂停"));
             // 35：Shift+空格 是**另一个动作**（回跳一小节并播放），不是空格的修饰版
-            Assert.That(Format.ReadoutHint, Does.Contain("Shift + 空格 回跳一小节并播放"));
-            // 18：「同轨」两个字是那张工单的全部内容
-            Assert.That(Format.ReadoutHint, Does.Contain("Ctrl + ← → 同轨前后跳"));
-            // 19：这一条是这次新加进提示里的（从前 Delete 根本没提）
-            Assert.That(Format.ReadoutHint, Does.Contain("Delete 删除"));
-            // 09 的方案 A 四条，一条都不能漏
-            Assert.That(Format.ReadoutHint, Does.Contain("← → 移时间"));
-            Assert.That(Format.ReadoutHint, Does.Contain("↑ ↓ 移音高"));
-            Assert.That(Format.ReadoutHint, Does.Contain("Shift + ← → 改时值"));
-            Assert.That(Format.ReadoutHint, Does.Contain("Ctrl + ↑ ↓ 换轨"));
-            Assert.That(Format.ReadoutHint, Does.Contain("Ctrl+Z 撤销"));
-            Assert.That(Format.ReadoutHint, Does.Contain("Ctrl+Y 重做"));
+            Assert.That(Format.ReadoutHintPerforming, Does.Contain("Shift + 空格 回跳一小节并播放"));
+            // 36：换轨归**演奏**那一行（用户原话：「将『音轨的选择』放到『播放』和
+            //『滚回上一小节播放』里面会比较好」）—— 它换的是焦点轨，而焦点轨决定你弹哪条轨
+            Assert.That(Format.ReadoutHintPerforming, Does.Contain("Ctrl + ↑ ↓ 换轨"));
+
+            // 09 的方案 A 四条，一条都不能漏；18 / 19 那两条也都在编辑这一行里
+            Assert.That(Format.ReadoutHintEditing, Does.Contain("← → 移时间"));
+            Assert.That(Format.ReadoutHintEditing, Does.Contain("↑ ↓ 移音高"));
+            Assert.That(Format.ReadoutHintEditing, Does.Contain("Shift + ← → 改时值"));
+            // 18：「同轨」两个字是那张工单的全部内容；36 把说法改成「选…一个音」
+            //（用户要的是「如何选下一个音」看得见，而原文里没有「选」字）
+            Assert.That(Format.ReadoutHintEditing, Does.Contain("Ctrl + ← → 选同轨前/后一个音"));
+            // 19：这一条是那次新加进提示里的（从前 Delete 根本没提）
+            Assert.That(Format.ReadoutHintEditing, Does.Contain("Delete 删除"));
+
+            // 两类各归各的
+            Assert.That(Format.ReadoutHintPerforming, Does.Not.Contain("移时间"),
+                "编辑那一类不该出现在走带那一行里");
+            Assert.That(Format.ReadoutHintPerforming, Does.Not.Contain("Delete"));
+            Assert.That(Format.ReadoutHintEditing, Does.Not.Contain("播放/暂停"),
+                "走带那一类不该出现在编辑那一行里");
+            Assert.That(Format.ReadoutHintEditing, Does.Not.Contain("换轨"));
+
+            // 全文 = 两行都在（分层之后，ToolTip 是唯一能看全的地方）
+            Assert.That(Format.ReadoutHintTooltip, Does.Contain(Format.ReadoutHintPerforming));
+            Assert.That(Format.ReadoutHintTooltip, Does.Contain(Format.ReadoutHintEditing));
+
+            // 36：撤销 / 重做从提示行**和它的 ToolTip** 里都撤出去了
+            //（「操作」菜单项右侧那一处还在，由 ShortcutHintTests 守着）
+            foreach (var gone in new[] { "撤销", "重做", "Ctrl+Z", "Ctrl+Y" })
+                Assert.That(Format.ReadoutHintTooltip, Does.Not.Contain(gone),
+                    $"「{gone}」在「操作」菜单里说一次就够了 —— 提示行和它的 ToolTip 里不该再有");
         });
     }
 

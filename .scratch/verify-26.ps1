@@ -361,8 +361,18 @@ function 曲名格($行) { (行里的文字 $行)[0] }
 # 播放/暂停与 ↻ 重头播放 的 ToolTip、撤销重做的键位只在一处、改名按钮连 ToolTip 一起没了），
 # 第七条「和实际键位**逐条**对得上」的**语义**那一半不在这儿量：它在
 # `ShortcutHintTests.提示里的每个手势在按键那一段里都真的绑着`（拿提示里每个手势
-# 去 `OnWindowKeyDown` 的方法体里找绑定，9 对）—— 那是机器测过的。
+# 去 `OnWindowKeyDown` 的方法体里找绑定，两张表共 8 对）—— 那是机器测过的。
 # 这里量的是**屏幕上真的出现了那句话**，而且和代码里那一份是同一个字符串。
+#
+# **36 号改写了这一票的「提示行」那两条**（分层 + 撤销/重做撤出），跟着动了四处：
+#   · 提示行从**一整行**变成**两层**：没选中音 = 走带那一层（§1，那时还没载曲子），
+#     选中了音 = 编辑那一层（§2 选中之后那一句）。所以脚本里存三份：
+#     `$预期走带` / `$预期编辑` / `$预期全文`（前两个拼出来的）。
+#   · 屏上那一层之外，**ToolTip 是两行合起来的全文** —— 它就是 UIA 里的 `HelpText`，
+#     不用悬停就能读（§1 直接断言），§4 那次悬停量的是「那张纸真的弹出来、纸上真是这句」。
+#   · `量读数行` 多一个 `$期望` 参数：宽窗/窄窗两次量的都该是编辑那一层（两次都已经选中了音）。
+#   · §6 那条正对照**反过来了**：26 号当年它证明「提示行的 ToolTip 里就有这对键位」，
+#     36 号之后提示行自己也得干净 —— 现在钉的是**没有**。
 #
 # 两个量法上的坑，先说清楚：
 #   · **省略号 UIA 里看不见。** `TextTrimming` 只影响渲染：元素的 `Name` 永远是全文，
@@ -465,7 +475,12 @@ function 找音符 {
     })
 }
 
-$预期 = '空格 播放/暂停 · Shift + 空格 回跳一小节并播放 · ← → 移时间（一格 = 十六分）· ↑ ↓ 移音高 · Shift + ← → 改时值 · Ctrl + ← → 同轨前后跳 · Ctrl + ↑ ↓ 换轨 · Delete 删除 · Ctrl+Z 撤销 / Ctrl+Y 重做'
+# 36 号工单起提示行**分两层**，所以脚本里也存两份，外加两行合起来的那份全文。
+# 撤销 / 重做不在任何一份里（用户：「不需要单独写，将它们作为快捷键，直接放到『操作』里面」）——
+# 它们现在由 §6 守着：屏幕上只剩「操作」菜单项右侧那一处。
+$预期走带 = '空格 播放/暂停 · Shift + 空格 回跳一小节并播放 · Ctrl + ↑ ↓ 换轨'
+$预期编辑 = '← → 移时间（一格 = 十六分）· ↑ ↓ 移音高 · Shift + ← → 改时值 · Ctrl + ← → 选同轨前/后一个音 · Delete 删除'
+$预期全文 = "$预期走带 · $预期编辑"
 $预期播放 = '播放 / 暂停：从播放头当前位置开始，再按停在原地、再按从那儿接着放（空格键同效）'
 # 33 号工单把 `■ 停止` 换成了 `↻ 重头播放` —— 26 号当年钉的是前者那句
 # 「停下来（急停是 F6）」，那句话连着那颗按钮一起作废了。这儿按**新的事实**改：
@@ -499,7 +514,8 @@ Write-Host "  重摆窗口：$([int]$r全.X),$([int]$r全.Y) $([int]$r全.Width)
 # 宽窗/窄窗各量一次，两次数值一比才叫「窄了」—— **读数栏在不在场会改变提示行的可用宽度**，
 # 所以两次都必须在「已经选中一个音」的状态下量；否则第一次量的是读数栏藏起来时的宽度，
 # 那个差里混着两件事，说不清是窗窄了还是读数栏冒出来了。
-function 量读数行([string]$标, [string]$图路径) {
+# `$期望` = 这一量之下提示行**该显的那一层**（36 号之后是参数，不是写死的常量）。
+function 量读数行([string]$标, [string]$图路径, [string]$期望) {
   $hs = @(按编号 'HintText')
   if ($hs.Count -ne 1) { throw "「$标」下提示行不唯一（$($hs.Count) 个）—— 那不是「挤」，那是没了或者撞名了" }
   foreach ($id in $读数栏) {
@@ -524,35 +540,64 @@ function 量读数行([string]$标, [string]$图路径) {
   $高 = [int]($rh.Y + $rh.Height) - $上 + 8
   截图 $图路径 ([int]$win.X) $上 ([int]$win.Width) $高 1
   Write-Host "  [$标] 提示行 $([int]$rh.X),$([int]$rh.Y) $([int]$rh.Width)x$([int]$rh.Height)；读数栏 Y=$([int]$ys[0]) 行高 $行高 距上一行 $上距 最右 $最右；图 $图路径"
-  @{ 提示 = $rh; Y = $ys; 最右 = $最右; 上距 = $上距; 行高 = $行高; 可见 = (-not $hs[0].Current.IsOffscreen); 全 = ($hs[0].Current.Name -ceq $预期) }
+  # 36 号起「全」比的是**此刻该显的那一层**（由调用方传进来）：量这两次的时候都已经选中了一个音，
+  # 所以两次都该是编辑那一行。写死成某一层的话，红了分不清是「层换错了」还是「这句抄错了」。
+  @{ 提示 = $rh; Y = $ys; 最右 = $最右; 上距 = $上距; 行高 = $行高; 可见 = (-not $hs[0].Current.IsOffscreen); 全 = ($hs[0].Current.Name -ceq $期望) }
 }
 
 $跑完了 = $false
 try {
 
 # ---------- 1. 提示行：是不是那一句话 ----------
-Write-Host "`n=== 1. 提示行（HintText）==="
+Write-Host "`n=== 1. 提示行（HintText）· 还没载曲子、一个音都没选中 → 走带那一层 ==="
 $hints = @(按编号 'HintText')
 断言真 '屏幕上有且只有一个 HintText' ($hints.Count -eq 1) "找到 $($hints.Count) 个"
 if ($hints.Count -ne 1) { throw '提示行不唯一，下面没法量 —— 先看是不是 x:Name 撞了' }
 $提示 = $hints[0]
-断言真 '提示行的字逐字就是工单里那一条' ($提示.Current.Name -ceq $预期) `
-  "读到「$($提示.Current.Name)」（$($提示.Current.Name.Length) 字，期望 $($预期.Length) 字）"
+断言真 '提示行的字逐字就是走带那一层' ($提示.Current.Name -ceq $预期走带) `
+  "读到「$($提示.Current.Name)」（$($提示.Current.Name.Length) 字，期望 $($预期走带.Length) 字）"
 
-# 静态对照：屏幕上那句和 Format.cs 里那一份是不是同一个字符串。
+# 36 号新加的一条：ToolTip 是**两行合起来的全文**（屏幕上那一行只是「此刻该看的那一类」，
+# 看全的出口只剩这一个）。它在 UIA 里就是 HelpText —— 不用悬停就能读，§4 那次悬停量的是
+# 「那张纸真的弹出来了、纸上真是这句」。
+断言真 '提示行的 ToolTip 逐字就是两行合起来的全文' ($提示.Current.HelpText -ceq $预期全文) `
+  "读到「$($提示.Current.HelpText)」（$($提示.Current.HelpText.Length) 字，期望 $($预期全文.Length) 字）"
+foreach ($字 in @('撤销', '重做', 'Ctrl+Z', 'Ctrl+Y')) {
+  断言真 "提示行与它的 ToolTip 里都没有「$字」（36 号撤出去了，只留「操作」菜单那一处）" `
+    (($提示.Current.Name -notlike "*$字*") -and ($提示.Current.HelpText -notlike "*$字*")) `
+    '用户原话：「不需要单独写，将它们作为快捷键，直接放到『操作』里面作为提示就可以了」'
+}
+
+# 静态对照：屏幕上那两句和 Format.cs 里那两份是不是同一个字符串。
 # 断言红了要能立刻分清「屏幕错了」还是「脚本里抄错了」—— 两份独立地比一下。
 $码 = Get-Content -Raw -Encoding UTF8 (Join-Path $PSScriptRoot '..\MidiPerformer.Adapters\Presenters\Format.cs')
-$m = [regex]::Match($码, 'ReadoutHint\s*=\s*([\s\S]*?);')
-if (-not $m.Success) { throw 'Format.cs 里没抓到 ReadoutHint' }
-$码里 = -join ([regex]::Matches($m.Groups[1].Value, '"((?:[^"\\]|\\.)*)"') | ForEach-Object { $_.Groups[1].Value })
-断言真 '代码里那一份和脚本里这一份逐字相同（红了先怀疑脚本抄错）' ($码里 -ceq $预期) `
-  "代码 $($码里.Length) 字 / 脚本 $($预期.Length) 字"
-
-foreach ($片段 in @('空格 播放/暂停', 'Shift + 空格 回跳一小节并播放', '← → 移时间', '↑ ↓ 移音高', 'Shift + ← → 改时值',
-                    'Ctrl + ← → 同轨前后跳', 'Ctrl + ↑ ↓ 换轨', 'Delete 删除', 'Ctrl+Z 撤销', 'Ctrl+Y 重做')) {
-  断言真 "提示里有「$片段」" ($提示.Current.Name -like "*$片段*") '工单点名的那几条'
+function 码里的([string]$名) {
+  $m = [regex]::Match($码, "$名\s*=\s*([\s\S]*?);")
+  if (-not $m.Success) { throw "Format.cs 里没抓到 $名" }
+  -join ([regex]::Matches($m.Groups[1].Value, '"((?:[^"\\]|\\.)*)"') | ForEach-Object { $_.Groups[1].Value })
 }
-Write-Host '  （这十条各自的键位在 OnWindowKeyDown 里真绑着没有，由 ShortcutHintTests 那 10 对机器测过，不在这儿量）'
+$码走带 = 码里的 'ReadoutHintPerforming'
+$码编辑 = 码里的 'ReadoutHintEditing'
+断言真 '代码里走带那一层和脚本里这一份逐字相同（红了先怀疑脚本抄错）' ($码走带 -ceq $预期走带) `
+  "代码 $($码走带.Length) 字 / 脚本 $($预期走带.Length) 字"
+断言真 '代码里编辑那一层和脚本里这一份逐字相同' ($码编辑 -ceq $预期编辑) `
+  "代码 $($码编辑.Length) 字 / 脚本 $($预期编辑.Length) 字"
+# 全文那一份必须是**拼出来的**，不是第三处手抄的：手抄的话，改了上面两层、它留在原地
+$m全文 = [regex]::Match($码, 'ReadoutHintTooltip\s*=\s*([\s\S]*?);')
+断言真 'ToolTip 那一份是两层拼起来的（不是手抄的第三份全文）' `
+  ($m全文.Success -and (($m全文.Groups[1].Value -replace '\s', '') -eq 'ReadoutHintPerforming+"·"+ReadoutHintEditing')) `
+  "Format.cs 里 ToolTip 那一行 = $(if ($m全文.Success) { $m全文.Groups[1].Value } else { '抓不到' })"
+
+# 分层之后「哪一条归哪一层」也成了判据的一部分：此刻一个音都没选中，
+# 屏幕上就该是走带那一层 —— 编辑那几条**一个都不该露头**。
+foreach ($片段 in @('空格 播放/暂停', 'Shift + 空格 回跳一小节并播放', 'Ctrl + ↑ ↓ 换轨')) {
+  断言真 "走带那一层里有「$片段」" ($提示.Current.Name -like "*$片段*") '工单点名的那几条'
+}
+foreach ($片段 in @('移时间', '移音高', '改时值', '选同轨前/后一个音', 'Delete')) {
+  断言真 "没选中音时屏幕上没有「$片段」（它归编辑那一层）" ($提示.Current.Name -notlike "*$片段*") `
+    '36 号的两层是「此刻该看的那一类」，不是把一整行切两半随便放'
+}
+Write-Host '  （每一层里那几条各自的键位在 OnWindowKeyDown 里真绑着没有，由 ShortcutHintTests 那两张表机器测过，不在这儿量）'
 
 $r提示全 = $提示.Current.BoundingRectangle
 Write-Host "  全宽时提示行：$([int]$r提示全.X),$([int]$r提示全.Y) $([int]$r提示全.Width)x$([int]$r提示全.Height)"
@@ -594,7 +639,22 @@ $读数 = 读数元素
 if (@($读数 | Where-Object { $_.Count -eq 1 }).Count -ne 5) { throw '读数栏没出来 —— 窄窗那条就没得量' }
 $音高值 = (按编号 'ReadoutPitchText')[0].Current.Name
 断言真 '读数是这个音的值，不是初始的破折号' ($音高值 -ne '—') "音高 = $音高值"
-$全读 = 量读数行 '全宽·有读数' (Join-Path $PSScriptRoot 'shot26-full.png')
+
+# 36 号：选中集的个数一非零，提示行就该换成编辑那一层 —— 这一下是**在屏幕上**量的，
+# 不是读代码（判据在代码里，由 ShortcutHintTests 守着）。
+$提示选中 = (按编号 'HintText')[0]
+断言真 '选中一个音之后提示行换成了编辑那一层（逐字）' ($提示选中.Current.Name -ceq $预期编辑) `
+  "读到「$($提示选中.Current.Name)」"
+foreach ($片段 in @('← → 移时间', '↑ ↓ 移音高', 'Shift + ← → 改时值', 'Ctrl + ← → 选同轨前/后一个音', 'Delete 删除')) {
+  断言真 "选中之后提示里有「$片段」" ($提示选中.Current.Name -like "*$片段*") ''
+}
+foreach ($片段 in @('播放/暂停', '回跳一小节并播放', '换轨')) {
+  断言真 "选中之后提示里没有「$片段」（走带那一层让位了）" ($提示选中.Current.Name -notlike "*$片段*") ''
+}
+断言真 '换层**不动 ToolTip**：它还是两行合起来的全文' ($提示选中.Current.HelpText -ceq $预期全文) `
+  "读到「$($提示选中.Current.HelpText)」"
+
+$全读 = 量读数行 '全宽·有读数' (Join-Path $PSScriptRoot 'shot26-full.png') $预期编辑
 $读数Y_全 = [int]$全读.Y[0]
 $读数右_全 = $全读.最右
 断言真 '全宽下提示行那一句仍是全文（没有截断）' $全读.全 'UIA 读到的是全文；屏幕上有没有截断看那张图'
@@ -614,7 +674,7 @@ $读数窄 = 读数元素
 断言真 '窄窗下读数还是那个音的值（没被挤空）' ((按编号 'ReadoutPitchText')[0].Current.Name -eq $音高值) `
   "窄窗 $((按编号 'ReadoutPitchText')[0].Current.Name) / 全宽 $音高值"
 
-$窄 = 量读数行 '最小宽度·有读数' (Join-Path $PSScriptRoot 'shot26-min.png')
+$窄 = 量读数行 '最小宽度·有读数' (Join-Path $PSScriptRoot 'shot26-min.png') $预期编辑
 $r窄提示 = $窄.提示
 $y窄 = $窄.Y
 $读数右_窄 = $窄.最右
@@ -664,7 +724,7 @@ foreach ($w in $别后) {
     foreach ($fx in 0.2, 0.5, 0.8) {
       $px = [int]($r纸.X + $r纸.Width * $fx); $py = [int]($r纸.Y + $r纸.Height * $fy)
       $at = $AE::FromPoint([System.Windows.Point]::new([double]$px, [double]$py))
-      if ($at -and $at.Current.ControlType -eq $CT::Text -and $at.Current.Name -ceq $预期) {
+      if ($at -and $at.Current.ControlType -eq $CT::Text -and $at.Current.Name -ceq $预期全文) {
         $纸面 = $at; $命中点 = @($px, $py); break
       }
     }
@@ -708,17 +768,23 @@ if ($重播.Count -eq 1) {
 Write-Host "`n=== 6. 撤销/重做：只有菜单项右侧那一处 ==="
 $全 = @(找类型 $CT::Text) + @(找类型 $CT::Button) + @(找类型 $CT::Edit) + @(找类型 $CT::MenuItem) + @(找类型 $CT::ComboBox)
 # 「没有重复的 ToolTip」= **没有哪个元素的 ToolTip 就是那一对键位本身**。
-# 不能写成「HelpText 里出现 Ctrl+Z 就算重复」：提示行自己那句里本来就有
-# 「Ctrl+Z 撤销 / Ctrl+Y 重做」（那是键位表，正是这一票要写上去的东西），
-# 轨头那几颗按钮的 ToolTip 里也有「只动这条轨，别的轨原地不动 —— Ctrl+Z 可以撤销」这种**正文里提一句**。
-# 第一版就是这么假红的（数出 5 个：提示行自己 + 4 颗轨头按钮）。
+# 不能写成「HelpText 里出现 Ctrl+Z 就算重复」：轨头那几颗按钮的 ToolTip 里有
+# 「只动这条轨，别的轨原地不动 —— Ctrl+Z 可以撤销」这种**正文里提一句**。
+# 第一版就是这么假红的（数出 5 个）。
+#
+# 36 号之后这条 regex 连提示行也命中不了了 —— 提示行的 ToolTip 里已经没有这对键位
+#（下一句钉的就是这个新事实，见那里）。
 $光键位 = @($全 | Where-Object { $_.Current.HelpText -match '^\s*Ctrl\s*\+?\s*[ZY]\s*$' })
 断言真 '全窗没有哪个元素的 ToolTip 只写着 Ctrl+Z / Ctrl+Y（那处键位只该在菜单项右侧）' ($光键位.Count -eq 0) `
   $(if ($光键位.Count) { ($光键位 | ForEach-Object { "$($_.Current.Name)→$($_.Current.HelpText)" }) -join ' / ' } else { '一处都没有' })
 $提示行自己 = (按编号 'HintText')[0]
-断言真 '（上面那条不是把提示行也算进去才过的：提示行自己的 ToolTip 里就有这对键位，那是键位表）' `
-  ($提示行自己.Current.HelpText -match 'Ctrl\+Z' -and $提示行自己.Current.HelpText -match 'Ctrl\+Y') `
-  '提示行的帮助文本里 Ctrl+Z / Ctrl+Y 都在（它被上面那条 regex 排除在外，是**按内容**排除，不是按元素）'
+# 26 号当年这一句是**反着**写的：那时提示行的 ToolTip 里写着「Ctrl+Z 撤销 / Ctrl+Y 重做」，
+# 所以上面那条 regex 是把提示行**按内容**排除在外的（不是按元素），这一句就是那个「按内容」的证据。
+# 36 号把这两条从提示行撤走了（用户：「不需要单独写……直接放到『操作』里面作为提示就可以了」），
+# 于是这一句跟着变成**新的事实**：提示行自己也干净了。
+断言真 '36 号起提示行与它的 ToolTip 里都不再写 Ctrl+Z / Ctrl+Y（撤出去了）' `
+  (($提示行自己.Current.HelpText -notmatch 'Ctrl\+Z') -and ($提示行自己.Current.HelpText -notmatch 'Ctrl\+Y')) `
+  "提示行的帮助文本：$($提示行自己.Current.HelpText)"
 断言真 '工具栏上没有「撤销」这个按钮了（它进了菜单）' ((按钮 '撤销').Count -eq 0) "找到 $((按钮 '撤销').Count) 个"
 断言真 '工具栏上没有「重做」这个按钮了' ((按钮 '重做').Count -eq 0) "找到 $((按钮 '重做').Count) 个"
 

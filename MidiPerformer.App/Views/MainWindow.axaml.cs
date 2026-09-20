@@ -153,8 +153,12 @@ public partial class MainWindow : Window
         // 就是同一个常量 —— 两边各抄一份的话，改一处漏一处，屏幕上会同时挂着新的半行和旧的全文，
         // 那比只说一句更坏。（ToolTip 只在代码里设，XAML 那边一个字节都不写：
         // 两处都能设，谁赢要看加载顺序，那种「哪份生效」的问题不该出现在文案上。）
-        HintText.Text = Format.ReadoutHint;
-        ToolTip.SetTip(HintText, Format.ReadoutHint);
+        //
+        // 36 号起这一行**分两层**：屏幕上是「此刻该看的那一类」（没选中音 = 走带那一行、
+        // 选中了 = 编辑那一行），ToolTip 始终是两行合起来的全文。选哪一行由 RefreshHint 定，
+        // 起手这一下只是把「还没载曲子、什么都没选中」那个初始状态摆对。
+        HintText.Text = Format.ReadoutHintPerforming;
+        ToolTip.SetTip(HintText, Format.ReadoutHintTooltip);
 
         // 窗口改宽 = 每小节变宽（固定 4 小节，没有缩放），所以要按新的宽度重算场景
         SizeChanged += (_, _) => RefreshView();
@@ -1453,14 +1457,16 @@ public partial class MainWindow : Window
     /// 撤销 / 重做（Ctrl+Z、Ctrl+Y、Ctrl+Shift+Z）、保存（Ctrl+S）、
     /// 方向键微调、Ctrl+←/→ 定位、Ctrl+↑/↓ 换聚焦轨。
     ///
-    /// **这一段就是屏幕上那行提示的真身**（<see cref="Format.ReadoutHint"/>）——
+    /// **这一段就是屏幕上那两行提示的真身**（<see cref="Format.ReadoutHintPerforming"/> /
+    /// <see cref="Format.ReadoutHintEditing"/>）——
     /// 这里动的每一个键，那边那行字都得跟着动：两处对不上的提示比没有提示更坏，
     /// 它会让人以为功能坏了（26 号工单就是来收这一处的）。
     ///
     /// 方向键按**方案 A**（工单 09）：<c>←/→</c> 移时间、<c>↑/↓</c> 移音高、
     /// <c>Shift+←/→</c> 改时值、<c>Ctrl+←/→</c> 在**焦点轨内**前后跳、
     /// <c>Ctrl+↑/↓</c> 在轨之间上下走（聚焦，见 <see cref="MoveFocus"/>）。
-    /// <c>Delete</c> / <c>Backspace</c> 删掉选中（见 <see cref="DeleteSelection"/>）。
+    /// <c>Delete</c> / <c>Backspace</c> 删掉选中（见 <see cref="DeleteSelection"/>），
+    /// <c>Esc</c> 放开选中（36 号，见上面那一支）。
     /// 07 原本把裸 <c>←/→</c> 绑成「前后跳」，09 把裸键让给了微调 ——
     /// <b>能力没砍，挪到 Ctrl 上了</b>：07 那两条测试测的是控制器上的 <c>MoveSelection</c>，
     /// 那条路一个字节都没动，所以不会红，变的只是这里把哪个键绑到它上面。
@@ -1477,15 +1483,37 @@ public partial class MainWindow : Window
         // Esc：收掉「删掉这条轨？」和「抽掉一段」那两问。它们都不是弹窗（只是轨道头上换了一排控件），
         // 收不掉的话键盘用户除了再点一次「取消」没有别的退路。
         // 焦点在改名框 / 小节号框里时上面那一句已经让开了 —— 那时 Esc 归输入框自己用。
+        //
+        // 36 号在这一支后面接了**第三件事**：那两问都没收掉时，把**选中的音**放开
+        //（用户 2026-09-20：「当你单独选中一个音的时候，按 Escape 键可以取消选择这一个音」）。
+        // 顺序是这么排的：屏幕上正摆着一问一答（「删掉这条轨？[删掉][取消]」）的时候，
+        // Esc 的意思是「我不回答」，不是「顺手把我选的东西也丢了」；
+        // 收了那一问之后，同一颗键再按才是放开选中 —— 两件事各按各的，谁也不抢谁。
+        //
+        // **只放音，不动焦点轨**（用户同一天：「但是焦点轨不能取消选择，必须选一个」）：
+        // 焦点轨是「我要弹哪条轨」，它一直有一条，Esc 不碰它 ——
+        // 所以放开选中之后按 Ctrl+←→，跳的还是原来那条轨上的音。
         if (e.Key == Key.Escape)
         {
-            bool dismissed = false;
+            bool consumed = false;
             foreach (var lane in _lanes)
             {
-                dismissed |= lane.CancelPendingDelete();
-                dismissed |= lane.CancelPendingSplit();
+                consumed |= lane.CancelPendingDelete();
+                consumed |= lane.CancelPendingSplit();
             }
-            e.Handled = dismissed;
+
+            // 一个音都没选中时**不标记 Handled**：这一下不该被吃掉，让它照常往下走
+            //（和 Delete 那一支同一条规矩）。放开选中要重画的那两下也在这儿：
+            // 读数和提示行归 RefreshReadout，卷帘上那圈高亮归 RefreshView。
+            if (!consumed && _controller is { } controller && controller.SelectedNotes.Count > 0)
+            {
+                controller.ClearSelection();
+                RefreshReadout();
+                RefreshView();
+                consumed = true;
+            }
+
+            e.Handled = consumed;
             return;
         }
 
@@ -1761,6 +1789,27 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
+    /// 读数条那一行提示**该显示哪一层**（36 号工单）。
+    ///
+    /// 判据是**选中集的个数**，不是「悬停在哪」：悬停是**一过性**的，鼠标一移开就得变回去 ——
+    /// 那行字会跟着鼠标闪，比截断更坏。**选中**是一个稳定的状态（点一下才变），
+    /// 而这一行说的正是「选中了之后你能拿它干什么」。
+    ///
+    /// 为什么 &gt; 0 而不是 == 1：`← →` / `↑ ↓` / `Delete` 动的都是**整批选中**
+    ///（见 <see cref="NudgeNotes"/> / <see cref="DeleteSelection"/>），选中一批的时候
+    /// 显示走带那一行是答非所问。多选在 UI 里做得出来（`Shift` 点、空白处框选）。
+    /// 用户 2026-09-20 拍的判据就是这一条（另一个选项是「恰好一个才切」）。
+    ///
+    /// **不动 ToolTip**：它始终是两行合起来的全文（见 <see cref="Format.ReadoutHintTooltip"/>），
+    /// 换层换的是屏幕上那一行，不是「能看全」的那一处。
+    /// </summary>
+    private void RefreshHint()
+    {
+        bool hasNote = _controller is { } controller && controller.SelectedNotes.Count > 0;
+        HintText.Text = hasNote ? Format.ReadoutHintEditing : Format.ReadoutHintPerforming;
+    }
+
+    /// <summary>
     /// 读数条上那一套（轨 / 音高 / 小节 / 拍位 / 时值）**唯一的出处**。
     ///
     /// 值从哪来：**悬停优先，没悬停就用主选中的音**。这就是「合并成一套」的兑现 ——
@@ -1771,9 +1820,16 @@ public partial class MainWindow : Window
     /// 整窗跟着跳一下，比留着几个占位符还难受。
     ///
     /// 轨号留着：合起来之后它是「这个音在哪条轨」的唯一线索（从前那句「选中」里也有它）。
+    ///
+    /// **提示行也在这条上，所以也在这儿喊**（<see cref="RefreshHint"/>）：
+    /// 一个是「悬停优先」，一个是「只看选中」，判据不同所以分成两个方法；
+    /// 但改选中的每一条路最后都会走到这儿（点、框选、Ctrl+←→ 跳、Escape 放开、编辑、撤销），
+    /// 所以这儿是它们**唯一**的汇合点 —— 另起一处喊，早晚有一条路忘了喊。
     /// </summary>
     private void RefreshReadout()
     {
+        RefreshHint();
+
         if ((_hovered ?? _controller?.DescribeSelection()) is not { } note)
         {
             ReadoutDetail.IsVisible = false;
