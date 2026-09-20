@@ -465,7 +465,7 @@ function 找音符 {
     })
 }
 
-$预期 = '空格 播放/暂停 · ← → 移时间（一格 = 十六分）· ↑ ↓ 移音高 · Shift + ← → 改时值 · Ctrl + ← → 同轨前后跳 · Ctrl + ↑ ↓ 换轨 · Delete 删除 · Ctrl+Z 撤销 / Ctrl+Y 重做'
+$预期 = '空格 播放/暂停 · Shift + 空格 回跳一小节并播放 · ← → 移时间（一格 = 十六分）· ↑ ↓ 移音高 · Shift + ← → 改时值 · Ctrl + ← → 同轨前后跳 · Ctrl + ↑ ↓ 换轨 · Delete 删除 · Ctrl+Z 撤销 / Ctrl+Y 重做'
 $预期播放 = '播放 / 暂停：从播放头当前位置开始，再按停在原地、再按从那儿接着放（空格键同效）'
 # 33 号工单把 `■ 停止` 换成了 `↻ 重头播放` —— 26 号当年钉的是前者那句
 # 「停下来（急停是 F6）」，那句话连着那颗按钮一起作废了。这儿按**新的事实**改：
@@ -548,11 +548,11 @@ $码里 = -join ([regex]::Matches($m.Groups[1].Value, '"((?:[^"\\]|\\.)*)"') | F
 断言真 '代码里那一份和脚本里这一份逐字相同（红了先怀疑脚本抄错）' ($码里 -ceq $预期) `
   "代码 $($码里.Length) 字 / 脚本 $($预期.Length) 字"
 
-foreach ($片段 in @('空格 播放/暂停', '← → 移时间', '↑ ↓ 移音高', 'Shift + ← → 改时值',
+foreach ($片段 in @('空格 播放/暂停', 'Shift + 空格 回跳一小节并播放', '← → 移时间', '↑ ↓ 移音高', 'Shift + ← → 改时值',
                     'Ctrl + ← → 同轨前后跳', 'Ctrl + ↑ ↓ 换轨', 'Delete 删除', 'Ctrl+Z 撤销', 'Ctrl+Y 重做')) {
   断言真 "提示里有「$片段」" ($提示.Current.Name -like "*$片段*") '工单点名的那几条'
 }
-Write-Host '  （这九条各自的键位在 OnWindowKeyDown 里真绑着没有，由 ShortcutHintTests 那 9 对机器测过，不在这儿量）'
+Write-Host '  （这十条各自的键位在 OnWindowKeyDown 里真绑着没有，由 ShortcutHintTests 那 10 对机器测过，不在这儿量）'
 
 $r提示全 = $提示.Current.BoundingRectangle
 Write-Host "  全宽时提示行：$([int]$r提示全.X),$([int]$r提示全.Y) $([int]$r提示全.Width)x$([int]$r提示全.Height)"

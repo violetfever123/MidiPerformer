@@ -1297,21 +1297,53 @@ public partial class MainWindow : Window
     /// <summary>
     /// 重头播放（33 号工单把走带条右边那颗 `■ 停止` 换成了它）：
     /// **播放头回开头、视野回第一小节，然后立刻开始放。**
-    ///
-    /// 「开头」照抄 <see cref="OnNavSeek"/> 的算法（`TickOfBarClamped(0)` 那条），
-    /// 不硬写 <c>SeekSeconds(0)</c>：两处对「开头在哪」必须是同一个定义。
-    ///
-    /// 这一步**不做 <c>Stop()</c>**。正在播的时候按它，<see cref="PreviewPlayback.Play"/>
-    /// 那句 <c>Seek(MusicNow)</c> 拿到的就是刚寻过去的开头，于是自然变成「从头重放」——
-    /// 中间插一次 <c>Stop</c> 只会多改一次状态（它顺带把暂停态清掉），对结果没有任何影响，
-    /// 却会让人以为「必须先停一下才敢重放」。
     /// </summary>
-    private void RestartPlayback()
+    private void RestartPlayback() => SeekBarAndPlay(0);
+
+    /// <summary>
+    /// 回跳一小节并播放（35 号工单，绑在 **Shift + 空格** 上）。
+    ///
+    /// 用户原话：「增加一个功能：回跳上一小节并播放……这个是很经常用的功能」。
+    /// 练琴时它就是「这一小节弹糊了，退一小节再来」—— 而它退的是**整整一小节的预备**
+    /// （在**当前小节 − 1** 的**小节头**上起播，不是「回本小节开头」）：播放头停在第 8 小节
+    /// 第 3 拍时按一下，从第 7 小节头开始放。第 1 小节按 = 回第 1 小节（夹住，见下）。
+    ///
+    /// 「退到哪」和 <see cref="RestartPlayback"/> 是同一套算法，只是那一格写 0、这一格写
+    /// `当前小节 − 2`：<see cref="PianoRollController.BarOfTick"/> 给的是**1 起**的小节号，
+    /// 而 <see cref="PianoRollController.TickOfBarClamped"/> 收的是**0 起**的 ——
+    /// 中间那个减 2 就是这个换算，不是笔误。越界由 `TickOfBarClamped` 自己夹
+    ///（第 1 小节 → −1 → 夹到 0），和「跳到 __ 小节」框、和 ↻ 是同一把夹子。
+    /// </summary>
+    private void BackOneBarAndPlay()
     {
         if (_controller is null) return;
 
-        _controller.CenterOnBar(0);
-        _playback.SeekSeconds(_controller.Song.TempoMap.SecondsAt(_controller.TickOfBarClamped(0)));
+        int bar = _controller.BarOfTick(_playback.PlayheadTick);   // 1 起：现在在第几小节
+        SeekBarAndPlay(bar - 2);                                    // 0 起：上一小节
+    }
+
+    /// <summary>
+    /// 寻到某一小节的小节头，然后立刻开始放 —— ↻ 和 Shift+空格 共用的那一半。
+    ///
+    /// **不硬写 <c>SeekSeconds(0)</c>**：照抄 <see cref="OnNavSeek"/> 的算法
+    ///（`TickOfBarClamped` → `TempoMap.SecondsAt`），三处对「一小节从哪一秒开始」必须是同一个定义。
+    ///
+    /// 这一步**不做 <c>Stop()</c>**。正在播的时候按它，<see cref="PreviewPlayback.Play"/>
+    /// 那句 <c>Seek(MusicNow)</c> 拿到的就是刚寻过去的位置，于是自然变成「从那儿重放」——
+    /// 中间插一次 <c>Stop</c> 只会多改一次状态（它顺带把暂停态清掉），对结果没有任何影响，
+    /// 却会让人以为「必须先停一下才敢重放」。
+    ///
+    /// **能不能放以那颗播放键为准**（`IsEnabled`），不另算一套 —— 和空格那一支同一句话。
+    /// ↻ 本来就有这道闸门（按钮灰着点不动，所以以前不必写出来）；Shift+空格 是**按键**，
+    /// 绕得过按钮的灰，所以这道闸门得显式写着 —— 谱面一条轨都没有时这一下不该响。
+    /// </summary>
+    private void SeekBarAndPlay(int barZeroBased)
+    {
+        if (_controller is null) return;
+        if (!PlayButton.IsEnabled) return;
+
+        _controller.CenterOnBar(barZeroBased);
+        _playback.SeekSeconds(_controller.Song.TempoMap.SecondsAt(_controller.TickOfBarClamped(barZeroBased)));
         // 之后的事全归 StartPlayback：它 RefreshTransport（按钮亮灭 / 字）+ RefreshView
         // （红线、「位置」读数、缩略图都在里面）。这儿不额外补那两下 ——
         // 补了就是第二处规矩，迟早和第一处不一样。
@@ -1510,6 +1542,19 @@ public partial class MainWindow : Window
             return;
         }
 
+        // **Shift + 空格 = 回跳一小节并播放**（35 号工单）。
+        // 空格**本身**还是播放 / 暂停，一个字都没变（用户 2026-09-20 的原话：
+        // 「空格还是播放和暂停的切换，然后 Shift+空格是快速回调上一小节并播放」）——
+        // 这一支只认按住 Shift 的那一下，所以它必须排在下面那一支**前面**。
+        // 落点、夹法、为什么不做 Stop 都写在 BackOneBarAndPlay 上。
+        if (e.Key == Key.Space && shift)
+        {
+            e.Handled = true;
+            ReleaseControlFocus();
+            BackOneBarAndPlay();
+            return;
+        }
+
         // 空格 = 走带条上那颗「▶ 从当前位置播放」。**必须抢在控件前面**：
         // 焦点停在轨道头上那些按钮、下拉上的时候，空格本来归它们
         //（按钮是「按一下」，下拉是「展开」），不抢的话「空格播放」就是时灵时不灵 ——
@@ -1518,19 +1563,7 @@ public partial class MainWindow : Window
         if (e.Key == Key.Space)
         {
             e.Handled = true;
-
-            // **光标记 Handled 是拦不住的。** 实测：焦点停在轨头那颗「折叠」上按空格，
-            // 那条轨收起来了**而且**开始播放了 —— 一个键干了两件事。
-            // 原因是 <c>Button</c>（下拉也一样）对空格走的是**类处理器**，
-            // 它不看你在这个隧道处理器里标没标 Handled，照按不误。
-            //
-            // 所以顺手把键盘焦点收回窗口：KeyUp 的路由是按**抬起那一刻**的焦点重新算的，
-            // 焦点已经不在那颗按钮上了，它「按下 → 抬起 → 触发」这条路就断在中间
-            //（Avalonia 的按钮是**抬起**才触发的，ClickMode.Release）。
-            // 收回来的副作用只有一样：那颗按钮不再带着焦点框 —— 而它本来也不该有，
-            // 空格是走带键，不是「按按钮」。
-            if (FocusManager?.GetFocusedElement() is InputElement { Focusable: true })
-                FocusManager.ClearFocus();
+            ReleaseControlFocus();
 
             // 能不能按以**那颗按钮**为准，不是另算一套：它在没曲子、没音轨时是灰的，
             // 空格一并跟着没反应（见 RefreshTransport）。
@@ -1572,6 +1605,30 @@ public partial class MainWindow : Window
                 NudgeNotes(0, -1);
                 break;
         }
+    }
+
+    /// <summary>
+    /// 把键盘焦点从「会被空格按响」的控件上收回来 —— 空格和 Shift+空格 起手都要先做这一下。
+    ///
+    /// **光在隧道处理器里标记 Handled 是拦不住的。** 实测：焦点停在轨头那颗「折叠」上按空格，
+    /// 那条轨收起来了**而且**开始播放了 —— 一个键干了两件事。
+    /// 原因是 <c>Button</c>（下拉也一样）对空格走的是**类处理器**，
+    /// 它不看你在这个隧道处理器里标没标 Handled，照按不误。
+    ///
+    /// 所以顺手把键盘焦点收回窗口：KeyUp 的路由是按**抬起那一刻**的焦点重新算的，
+    /// 焦点已经不在那颗按钮上了，它「按下 → 抬起 → 触发」这条路就断在中间
+    ///（Avalonia 的按钮是**抬起**才触发的，ClickMode.Release）。
+    /// 收回来的副作用只有一样：那颗按钮不再带着焦点框 —— 而它本来也不该有，
+    /// 空格是走带键，不是「按按钮」。
+    ///
+    /// **35 号工单把它从空格那一支里提出来**：Shift+空格 走的是同一条「抢在控件前面」的路，
+    /// 抄一份就是第二处规矩，迟早有一处忘了改（那一处的症状是「一个键干了两件事」，
+    /// 而屏幕上什么也看不出来）。
+    /// </summary>
+    private void ReleaseControlFocus()
+    {
+        if (FocusManager?.GetFocusedElement() is InputElement { Focusable: true })
+            FocusManager.ClearFocus();
     }
 
     /// <summary>

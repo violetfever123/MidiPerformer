@@ -48,7 +48,8 @@ public static class Format
     ///（不像走带条上的按钮，字印在脸上）。
     /// </summary>
     public const string ReadoutHint =
-        "空格 播放/暂停 · ← → 移时间（一格 = 十六分）· ↑ ↓ 移音高 · Shift + ← → 改时值 · "
+        "空格 播放/暂停 · Shift + 空格 回跳一小节并播放 · ← → 移时间（一格 = 十六分）· "
+        + "↑ ↓ 移音高 · Shift + ← → 改时值 · "
         + "Ctrl + ← → 同轨前后跳 · Ctrl + ↑ ↓ 换轨 · Delete 删除 · Ctrl+Z 撤销 / Ctrl+Y 重做";
 
     /// <summary>

@@ -156,7 +156,8 @@ public class FormatTests
     public void 快捷键提示逐字就是屏幕上那一行()
     {
         Assert.That(Format.ReadoutHint, Is.EqualTo(
-            "空格 播放/暂停 · ← → 移时间（一格 = 十六分）· ↑ ↓ 移音高 · Shift + ← → 改时值 · "
+            "空格 播放/暂停 · Shift + 空格 回跳一小节并播放 · ← → 移时间（一格 = 十六分）· "
+            + "↑ ↓ 移音高 · Shift + ← → 改时值 · "
             + "Ctrl + ← → 同轨前后跳 · Ctrl + ↑ ↓ 换轨 · Delete 删除 · Ctrl+Z 撤销 / Ctrl+Y 重做"),
             "改这句话之前先去看 MainWindow.OnWindowKeyDown —— 那是它的真身");
     }
@@ -174,6 +175,8 @@ public class FormatTests
         {
             // 20：空格是**切换**，只写「播放」就是退回被推翻的旧决定
             Assert.That(Format.ReadoutHint, Does.Contain("空格 播放/暂停"));
+            // 35：Shift+空格 是**另一个动作**（回跳一小节并播放），不是空格的修饰版
+            Assert.That(Format.ReadoutHint, Does.Contain("Shift + 空格 回跳一小节并播放"));
             // 18：「同轨」两个字是那张工单的全部内容
             Assert.That(Format.ReadoutHint, Does.Contain("Ctrl + ← → 同轨前后跳"));
             // 19：这一条是这次新加进提示里的（从前 Delete 根本没提）

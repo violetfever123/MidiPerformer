@@ -54,6 +54,11 @@ public class ShortcutHintTests
     {
         // 20：空格从「开始」改成播放 / 暂停
         ("空格 播放/暂停", new[] { "Key.Space", "TogglePlayback()" }),
+        // 35：Shift+空格 是**另一个动作**，绑在**另一个方法**上。
+        // 判别式挑的是 `Key.Space && shift` 这一整句 + `BackOneBarAndPlay()`：
+        // 左边光写 `Key.Space` 的话，把这一支删了、空格那一支照样在，这条会假绿；
+        // 右边光写方法名的话，绑到裸空格上（= 空格变成回跳，播放/暂停没了）也是绿的。
+        ("Shift + 空格 回跳一小节并播放", new[] { "Key.Space && shift", "BackOneBarAndPlay()" }),
         // 09 方案 A：←/→ 移时间一格（十六分），和拖动吸的是同一个格
         ("← → 移时间（一格 = 十六分）", new[] { "NudgeNotes(-grid, 0)", "NudgeNotes(grid, 0)" }),
         // 09 方案 A：↑/↓ 移音高一个半音（方向不能反 —— 卷帘上高音在上）
