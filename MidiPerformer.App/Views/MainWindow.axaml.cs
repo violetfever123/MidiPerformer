@@ -1380,11 +1380,23 @@ public partial class MainWindow : Window
         RefreshView();
     }
 
-    /// <summary>「跳到 __ 小节」：回车生效，越界的小节号夹到首尾（输 999 的意思就是「去最后」）。</summary>
+    /// <summary>
+    /// 「跳到 __ 小节」：回车生效，越界的小节号夹到首尾（输 999 的意思就是「去最后」）。
+    ///
+    /// **回车之后焦点从框里放开**（34 号工单），和速度框、曲名框同一句话。
+    /// 这一格尤其要放：跳过去就是为了听，而接着按下去的十有八九是**空格** ——
+    /// 焦点还在框里的话，那一下会把一个空格打进框里（数字后面多一个看不见的字符），
+    /// 曲子一动不动。用户看不出发生了什么，只觉得「空格坏了」。
+    ///
+    /// 放开焦点放在**校验之前**，照抄 <see cref="OnBpmKeyDown"/> 的次序：
+    /// 输了个不是数的东西、报了错、框退回原值之后焦点一样要出来 ——
+    /// 不然用户接着按空格修，空格又进框了。
+    /// </summary>
     private void OnJumpKeyDown(object? sender, KeyEventArgs e)
     {
         if (e.Key != Key.Enter || _controller is null) return;
         e.Handled = true;
+        ReleaseEditFocus();
 
         if (!int.TryParse(JumpBox.Text?.Trim(), out int bar))
         {
