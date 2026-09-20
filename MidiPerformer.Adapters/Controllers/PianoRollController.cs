@@ -379,8 +379,40 @@ public sealed class PianoRollController
         return hits;
     }
 
-    // ==================== 静音 / 长度 ====================
+    /// <summary>
+    /// 本轨上选中的那些音**整体盖住**的那一段时间，两端吸到格线 ——
+    /// 「抽掉一段」装备上时预填给它用（见 <c>TrackLaneView.CutPrefill</c>）。
+    ///
+    /// 为什么是「选中的音」：用户点了几个音、发现这一段不对，再按「抽掉一段」，
+    /// 想剪的多半就是它们。预填出来一段比空着强 —— 空着的话他还得自己对着谱子
+    /// 量一遍「从哪儿到哪儿」，而那正是这一票想让他少干的事。
+    ///
+    /// **只认本轨的音**：选中集是全局的（可以跨轨），而抽掉一段一次只抽一条轨。
+    /// 别条轨上的选中在这儿不参与，否则预填出来的那一段会被一条无关的轨撑长。
+    ///
+    /// 返回 null 有两种情形，都交给调用方去兜底（退回「播放头那一小节」）：
+    /// 本轨一个音都没选中，或者选中的音**短到吸完只剩零宽**（比一格还短的音）——
+    /// 零宽在 <c>SpanOf</c> 那儿的定义就是「不是一段」。
+    /// </summary>
+    public (long Start, long End)? SelectionSpan(int trackIndex)
+    {
+        if (trackIndex < 0 || trackIndex >= _song.Tracks.Count) return null;
 
+        long minStart = long.MaxValue, maxEnd = long.MinValue;
+        foreach (var reference in _selected)
+        {
+            if (reference.Track != trackIndex || !IsValidNote(reference)) continue;
+            var track = _song.Tracks[reference.Track];
+            var note = track.Notes[IndexOfId(track, reference.Id)];
+            if (note.StartTick < minStart) minStart = note.StartTick;
+            if (note.EndTick > maxEnd) maxEnd = note.EndTick;
+        }
+
+        if (minStart == long.MaxValue) return null;
+        return PianoRollGeometry.SpanOf(minStart, maxEnd, GridTicks);
+    }
+
+    // ==================== 静音 / 长度 ====================
     /// <summary>
     /// 换一份「哪几条轨不发声」的名单。折叠 / 展开一条轨走这条。
     ///

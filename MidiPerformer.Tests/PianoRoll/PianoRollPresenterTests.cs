@@ -417,7 +417,7 @@ public class PianoRollPresenterTests
 
     // ==================== 拖动预览（幽灵块）与框选 ====================
 
-    /// <summary>建一张带拖动预览 / 框选 / 多选的场景。位移是**增量**，和命令收的是同一个说法。</summary>
+    /// <summary>建一张带拖动预览 / 框选 / 划段 / 多选的场景。位移是**增量**，和命令收的是同一个说法。</summary>
     private static PianoRollPresenter.LaneScene BuildDragging(
         Track track,
         PianoRollGeometry.Viewport view,
@@ -426,7 +426,8 @@ public class PianoRollPresenterTests
         long lengthDelta = 0,
         int pitchDelta = 0,
         PianoRollPresenter.MarqueeRange? marquee = null,
-        IReadOnlyList<NoteId>? selected = null)
+        IReadOnlyList<NoteId>? selected = null,
+        PianoRollPresenter.MarqueeRange? cut = null)
         => PianoRollPresenter.BuildLane(
             track, view, 8, TicksPerQuarter,
             Array.Empty<bool>(),
@@ -435,7 +436,8 @@ public class PianoRollPresenterTests
                 dragging is null
                     ? null
                     : new PianoRollPresenter.DragPreview(dragging, startDelta, lengthDelta, pitchDelta),
-                marquee));
+                marquee,
+                cut));
 
     [Test]
     public void 没在拖的时候没有幽灵块()
@@ -527,6 +529,61 @@ public class PianoRollPresenterTests
         {
             Assert.That(rect.Y, Is.EqualTo(PianoRollGeometry.RulerHeight));
             Assert.That(rect.Height, Is.EqualTo(view.Height - PianoRollGeometry.RulerHeight));
+        });
+    }
+
+    [Test]
+    public void 没在划段时没有红带子()
+        => Assert.That(Build(Lane(new Note(60, 0, 240, 100)), View()).CutBand, Is.Null);
+
+    /// <summary>
+    /// 红带子和蓝带子铺的是同一份几何 —— 这条和下面那条本来就在量
+    /// <see cref="PianoRollGeometry"/> 的那两行，写在这儿是为了钉住
+    /// 「红带子复用蓝带子的算法」这件事，而不是各算各的。
+    /// </summary>
+    [Test]
+    public void 划段那把红带子往左拖也是正的宽()
+    {
+        var view = View();
+        var rect = BuildDragging(Lane(new Note(60, 0, 240, 100)), view,
+            cut: new PianoRollPresenter.MarqueeRange(Bar, 0)).CutBand!.Value;
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(rect.X, Is.EqualTo(PianoRollGeometry.XAtTick(view, 0)).Within(1e-9), "左边缘取小的那头");
+            Assert.That(rect.Width, Is.EqualTo(PianoRollGeometry.XAtTick(view, Bar)).Within(1e-9));
+        });
+    }
+
+    [Test]
+    public void 划段那把红带子铺满标尺以下的整条轨()
+    {
+        // 和框选同理：抽掉的是「这段时间里的所有音」，与音高无关
+        var view = View();
+        var rect = BuildDragging(Lane(new Note(60, 0, 240, 100)), view,
+            cut: new PianoRollPresenter.MarqueeRange(0, Bar)).CutBand!.Value;
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(rect.Y, Is.EqualTo(PianoRollGeometry.RulerHeight));
+            Assert.That(rect.Height, Is.EqualTo(view.Height - PianoRollGeometry.RulerHeight));
+        });
+    }
+
+    [Test]
+    public void 红蓝两条带子互不干扰()
+    {
+        var view = View();
+        var scene = BuildDragging(Lane(new Note(60, 0, 240, 100)), view,
+            marquee: new PianoRollPresenter.MarqueeRange(0, Bar),
+            cut: new PianoRollPresenter.MarqueeRange(Bar * 2, Bar * 3));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(scene.Marquee!.Value.X, Is.EqualTo(PianoRollGeometry.XAtTick(view, 0)).Within(1e-9),
+                "框选那条还在自己该在的地方");
+            Assert.That(scene.CutBand!.Value.X, Is.EqualTo(PianoRollGeometry.XAtTick(view, Bar * 2)).Within(1e-9),
+                "划段那条也在自己该在的地方 —— 两个字段没写串");
         });
     }
 

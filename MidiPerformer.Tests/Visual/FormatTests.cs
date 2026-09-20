@@ -229,9 +229,20 @@ public class FormatTests
 
     // ==================== 抽掉一段的预览 ====================
 
+    /// <summary>用例里那一首的刻度：3/4 拍、每四分音符 480 tick ⇒ 一小节 1440。</summary>
+    private const long 一小节 = 3 * 480;
+    private const int 四分音符 = 480;
+
+    /// <summary>第 n 小节（1 起）的起始 tick。</summary>
+    private static long 第几小节(int n) => (n - 1) * 一小节;
+
     /// <summary>
     /// 那一行预览是「按下抽掉之前，屏幕上唯一说得清会发生什么的地方」，所以逐字钉住。
     /// 三样都得在：哪几小节、动几个音、这条轨短几小节。
+    ///
+    /// 38 号之后那一段是**拖出来的 tick**（可以停在任何一条十六分线上），
+    /// 但整小节对齐的那一刀仍然说「第 5–8 小节（共 4 小节）」—— 读起来最短，
+    /// 而它是最常见的那一刀。
     /// </summary>
     [Test]
     public void 抽掉一段的预览把三样都说出来()
@@ -239,7 +250,7 @@ public class FormatTests
         var preview = new CutPreview.Result(Deleted: 12, Trimmed: 2, Shifted: 30, BarsBefore: 96, BarsAfter: 92);
 
         Assert.That(
-            Format.CutSummary(5, 8, 3, preview),
+            Format.CutSummary(第几小节(5), 第几小节(9), 3, preview, 一小节, 四分音符),
             Is.EqualTo("第 5–8 小节（共 4 小节）：删掉 12 个音、在切口上剪短 2 个、后面 30 个提前 4 小节"
                        + " · 第 03 轨 96 → 92 小节"));
     }
@@ -253,7 +264,7 @@ public class FormatTests
         var preview = new CutPreview.Result(Deleted: 4, Trimmed: 0, Shifted: 0, BarsBefore: 8, BarsAfter: 7);
 
         Assert.That(
-            Format.CutSummary(3, 3, 1, preview),
+            Format.CutSummary(第几小节(3), 第几小节(4), 1, preview, 一小节, 四分音符),
             Is.EqualTo("第 3–3 小节（共 1 小节）：删掉 4 个音 · 第 01 轨 8 → 7 小节"));
     }
 
@@ -264,8 +275,70 @@ public class FormatTests
         var preview = new CutPreview.Result(0, 0, 0, BarsBefore: 8, BarsAfter: 8);
 
         Assert.That(
-            Format.CutSummary(5, 8, 3, preview),
+            Format.CutSummary(第几小节(5), 第几小节(9), 3, preview, 一小节, 四分音符),
             Is.EqualTo("第 5–8 小节（共 4 小节）：这一段里没有音，抽了和没抽一样"));
+    }
+
+    /// <summary>
+    /// **38 号的正题**：那一段没对齐小节线的时候，说的不再是「第几小节」，
+    /// 而是两端各在**小节内的哪个位置**。
+    ///
+    /// 这一条是「更精准的切割」在屏幕上的那一半：用户拖到第 5 小节的第 2.75 拍上，
+    /// 那一行就得说 2.75 拍 —— 只说「第 5 小节」等于把他刚拖出来的落点又抹掉了，
+    /// 而那正是他放弃填小节号的理由。
+    /// </summary>
+    [Test]
+    public void 没对齐小节线时说小节内的位置()
+    {
+        var preview = new CutPreview.Result(Deleted: 3, Trimmed: 0, Shifted: 7, BarsBefore: 96, BarsAfter: 96);
+
+        // 第 5 小节的第 2 拍（+480）到**第 6 小节的头上**（+1440）
+        long start = 第几小节(5) + 480;
+        long end = 第几小节(6);
+
+        Assert.That(
+            Format.CutSummary(start, end, 3, preview, 一小节, 四分音符),
+            Is.EqualTo("第 5 小节第 2 拍 到 第 6 小节：删掉 3 个音、后面 7 个提前 2 拍"
+                       + " · 第 03 轨 96 → 96 小节"));
+    }
+
+    /// <summary>
+    /// 前移多少**不能再写死「几小节」**：切点落在拍上时，提前的量是 2 小节 3 拍。
+    /// 写死小节数会算出「提前 0 小节」—— 明明提前了三拍，那是一句错话。
+    /// </summary>
+    [Test]
+    public void 提前多少写得出小节加拍()
+    {
+        var preview = new CutPreview.Result(Deleted: 1, Trimmed: 0, Shifted: 5, BarsBefore: 10, BarsAfter: 10);
+
+        // 一整小节又三拍：一小节 3 拍，所以正好切了两小节 —— 用来对照下面那一条
+        Assert.That(
+            Format.CutSummary(0, 2 * 一小节, 1, preview, 一小节, 四分音符),
+            Does.Contain("提前 2 小节"));
+
+        // 两小节 + 一拍
+        Assert.That(
+            Format.CutSummary(0, 2 * 一小节 + 480, 1, preview, 一小节, 四分音符),
+            Does.Contain("提前 2 小节 1 拍"));
+    }
+
+    /// <summary>位置与长度的两种写法本身：整小节 / 整拍 / 小数拍，各自都在。</summary>
+    [Test]
+    public void 位置和长度的写法()
+    {
+        Assert.Multiple(() =>
+        {
+            Assert.That(Format.BarPosition(第几小节(5), 一小节, 四分音符), Is.EqualTo("第 5 小节"));
+            Assert.That(Format.BarPosition(第几小节(5) + 480, 一小节, 四分音符),
+                Is.EqualTo("第 5 小节第 2 拍"), "正好落在拍线上写整拍，拍从 1 起");
+            Assert.That(Format.BarPosition(第几小节(5) + 360, 一小节, 四分音符),
+                Is.EqualTo("第 5 小节第 1.75 拍"), "十六分的偏移写成小数拍");
+
+            Assert.That(Format.SpanLength(4 * 一小节, 一小节, 四分音符), Is.EqualTo("4 小节"));
+            Assert.That(Format.SpanLength(480, 一小节, 四分音符), Is.EqualTo("1 拍"), "不够一小节就只说拍");
+            Assert.That(Format.SpanLength(一小节 + 2 * 480, 一小节, 四分音符), Is.EqualTo("1 小节 2 拍"));
+            Assert.That(Format.SpanLength(0, 一小节, 四分音符), Is.EqualTo("0 拍"), "零长度不写空串");
+        });
     }
 
     // ==================== 预检不放行的提示 ====================

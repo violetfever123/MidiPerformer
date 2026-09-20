@@ -224,11 +224,78 @@ public static class Format
     public static double Beats(long ticks, int ticksPerQuarterNote) =>
         ticksPerQuarterNote <= 0 ? 0 : ticks / (double)ticksPerQuarterNote;
 
-    /// <summary>「抽掉一段」那两个框还没填好的时候，那一行预览里写的话。</summary>
-    public const string CutNeedNumbers = "两个框都填上小节号（1 起，两头都算在内）";
+    /// <summary>
+    /// 「抽掉一段」还没在卷帘上拖出范围的时候，那一行里写的话。
+    ///
+    /// 38 号之前这儿写的是「两个框都填上小节号」—— 那两个框已经退役了，
+    /// 那一段现在是在卷帘上**直接拖**出来的（用户 2026-09-20：「原来的按小节切放弃
+    /// 不要再出现填小节数字的窗口了」）。所以这句话的任务只剩下一个：
+    /// 说清楚那一段**从哪儿来**。
+    /// </summary>
+    public const string CutNeedRange = "在这条轨的卷帘上横向拖一段 —— 拖出来的那一段就是要消失的";
 
     /// <summary>
-    /// 「抽掉第 5–8 小节」按下去**会发生什么**。
+    /// 某个 tick 落在**小节内的哪个位置**：整小节头上写「第 5 小节」，
+    /// 正好落在拍线上写「第 5 小节第 2 拍」，其余写小数拍「第 5 小节第 1.75 拍」。
+    ///
+    /// **拍从 1 起算**，和小节内拍位的读数（<c>PianoRollController.NoteInfo.BeatInBar</c>）
+    /// 是同一个口径：那儿是 <c>Beats(intoBar, …) + 1</c>，这儿也得 +1，
+    /// 不然同一根拍线在读数条上写「2.00 拍」、在剪的预览里写「第 1 拍」——
+    /// 两处说的是同一件事，对不上就没人敢信。
+    ///
+    /// 为什么要小数拍：拖出来的那一段现在可以停在**任何一条十六分线上**（38 号），
+    /// 于是「第 5 小节第 1.75 拍」这种位置是常事。只说「第 5 小节」等于把落点抹掉，
+    /// 而用户正是为了那个落点才放弃填小节号的。
+    ///
+    /// 「一拍」的口径和 <see cref="Beats"/> 一致（四分音符），**不看拍号** ——
+    /// 6/8 里的一拍也是四分音符，这样同一个 tick 在读数条上和在这儿是同一个数。
+    /// </summary>
+    public static string BarPosition(long tick, long ticksPerBar, int ticksPerQuarterNote)
+    {
+        long barTicks = Math.Max(1, ticksPerBar);
+        long at = Math.Max(0, tick);
+        long bar = at / barTicks;                 // 0 起
+        long intoBar = at - bar * barTicks;
+        if (intoBar == 0) return $"第 {BarNumber((int)bar + 1)} 小节";
+
+        double beats = Beats(intoBar, ticksPerQuarterNote) + 1;
+        return $"第 {BarNumber((int)bar + 1)} 小节第 {BeatCount(beats)} 拍";
+    }
+
+    /// <summary>
+    /// 一段时间的长度写法：「4 小节」「3 拍」「2 小节 3 拍」「2 小节 1.25 拍」。
+    ///
+    /// 抽掉一段之后后半截**提前多少**就说这个数。从前那一格写死「{n} 小节」，
+    /// 因为切点只能落在小节线上；38 号之后切点可以是任何一条十六分线，
+    /// 再写「提前 0 小节」就是一句错话 —— 明明提前了三拍。
+    /// </summary>
+    public static string SpanLength(long ticks, long ticksPerBar, int ticksPerQuarterNote)
+    {
+        if (ticks <= 0) return "0 拍";
+
+        long barTicks = Math.Max(1, ticksPerBar);
+        long bars = ticks / barTicks;
+        double beats = Beats(ticks % barTicks, ticksPerQuarterNote);
+
+        var parts = new List<string>();
+        if (bars > 0) parts.Add($"{bars} 小节");
+        if (beats > 0) parts.Add($"{BeatCount(beats)} 拍");
+        return parts.Count == 0 ? "0 拍" : string.Join(" ", parts);
+    }
+
+    /// <summary>
+    /// 拍数怎么写：整拍给整数（<c>3</c>），非整拍给小数（<c>2.75</c>）。
+    ///
+    /// 不套 <c>F2</c>：整拍写成「3.00 拍」是多余的两位，
+    /// 而十六分的偏移只需要两位小数就够精确（再细的格子在界面上也点不出来）。
+    /// </summary>
+    private static string BeatCount(double beats)
+        => Math.Abs(beats - Math.Round(beats)) < 1e-9
+            ? ((long)Math.Round(beats)).ToString(CultureInfo.InvariantCulture)
+            : beats.ToString("0.##", CultureInfo.InvariantCulture);
+
+    /// <summary>
+    /// 「抽掉这一段」按下去**会发生什么**。
     ///
     /// 这条预览是这一步的主心骨：抽掉一段是这个软件里唯一会**改时间轴**的编辑
     /// （别的编辑只动音高、时值、名字），所以它是唯一一个「光看界面看不出结果」的动作 ——
@@ -238,27 +305,59 @@ public static class Format
     /// 剪的那条要是本来就是最长的那条（这个软件最常见的用法就是只留一条轨来吹），
     /// 整曲跟着一起短。所以这里只说**这条轨**的 96 → 92 ——
     /// 它由 <see cref="CutPreview"/> 算出来，和真跑一遍命令的结果一致（见那边的对照测试）。
+    ///
+    /// <b>收的是 tick，不是小节号</b>（38 号）：那一段是在卷帘上拖出来的，
+    /// 它可以停在任何一条十六分线上。整小节对齐的时候仍然说「第 5–8 小节（共 4 小节）」——
+    /// 那是最常见的一刀，读起来最短；没对齐才改说两端各在**小节内的哪个位置**。
+    /// 两种说法都只由这两个 tick 决定，不会出现「预览说 5–8、实际剪了 5–9」。
     /// </summary>
-    /// <param name="firstBar">起点小节（1 起，含）。</param>
-    /// <param name="lastBar">终点小节（1 起，含）。</param>
+    /// <param name="startTick">要抽掉的那一段的起点（含）。</param>
+    /// <param name="endTick">终点（不含）。</param>
     /// <param name="trackNumber">轨号，1 起。</param>
     /// <param name="preview">抽完会怎样，见 <see cref="CutPreview.Of"/>。</param>
-    public static string CutSummary(int firstBar, int lastBar, int trackNumber, CutPreview.Result preview)
+    /// <param name="ticksPerBar">一小节多少 tick。</param>
+    /// <param name="ticksPerQuarterNote">四分音符多少 tick —— 拍数换算只用它（见 <see cref="Beats"/>）。</param>
+    public static string CutSummary(
+        long startTick, long endTick, int trackNumber, CutPreview.Result preview,
+        long ticksPerBar, int ticksPerQuarterNote)
     {
-        int bars = lastBar - firstBar + 1;
-        string range = $"第 {BarNumber(firstBar)}–{BarNumber(lastBar)} 小节（共 {bars} 小节）";
+        string range = CutRangeLabel(startTick, endTick, ticksPerBar, ticksPerQuarterNote);
 
         // 一个音都不动：命令会原样返回同一份曲子，连撤销都不记一笔 —— 直说，别让人按了等着看变化
         if (!preview.Changes) return $"{range}：这一段里没有音，抽了和没抽一样";
 
         // 三段分开写、各自可能不出现：只有「删掉」而没有「前移」是常事（剪的是尾巴上的一段），
         // 硬凑成一句就会出现「后面 0 个提前 4 小节」这种没人看得懂的话
+        string shift = SpanLength(endTick - startTick, ticksPerBar, ticksPerQuarterNote);
         var parts = new List<string>();
         if (preview.Deleted > 0) parts.Add($"删掉 {preview.Deleted} 个音");
         if (preview.Trimmed > 0) parts.Add($"在切口上剪短 {preview.Trimmed} 个");
-        if (preview.Shifted > 0) parts.Add($"后面 {preview.Shifted} 个提前 {bars} 小节");
+        if (preview.Shifted > 0) parts.Add($"后面 {preview.Shifted} 个提前 {shift}");
 
         return $"{range}：{string.Join("、", parts)}"
              + $" · 第 {TrackNumber(trackNumber)} 轨 {preview.BarsBefore} → {preview.BarsAfter} 小节";
+    }
+
+    /// <summary>
+    /// 那一段的写法。两端都落在小节线上时说「第 5–8 小节（共 4 小节）」，
+    /// 否则说两端各在小节内的哪儿（「第 5 小节第 2.75 拍 到 第 6 小节第 1 拍」）。
+    ///
+    /// 终点那个 tick 是**不含**的（照 <c>ISongEditor.CutRange</c> 的约定），
+    /// 所以它正好落在小节线上时，说的那一小节是**它前面的一小节**。
+    /// </summary>
+    private static string CutRangeLabel(
+        long startTick, long endTick, long ticksPerBar, int ticksPerQuarterNote)
+    {
+        long barTicks = Math.Max(1, ticksPerBar);
+        if (startTick % barTicks == 0 && endTick % barTicks == 0 && endTick > startTick)
+        {
+            long firstBar = startTick / barTicks;        // 0 起
+            long lastBar = endTick / barTicks;           // 0 起，不含
+            return $"第 {BarNumber((int)firstBar + 1)}–{BarNumber((int)lastBar)} 小节"
+                 + $"（共 {lastBar - firstBar} 小节）";
+        }
+
+        return $"{BarPosition(startTick, barTicks, ticksPerQuarterNote)}"
+             + $" 到 {BarPosition(endTick, barTicks, ticksPerQuarterNote)}";
     }
 }

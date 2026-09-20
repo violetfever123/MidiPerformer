@@ -78,10 +78,12 @@ public sealed class PianoRollLane : Control
     private static readonly ImmutableDashStyle GhostDash = new(new double[] { 3, 2 }, 0);
 
     /// <summary>
-    /// 框选那根带子底色补的透明度，照 wireframe 的 <c>.rangebar { opacity: .7 }</c>。
+    /// 带子底色补的透明度，照 wireframe 的 <c>.rangebar { opacity: .7 }</c>。
+    /// 框选那根（蓝）和「抽掉一段」那根（红）共用这一个数 —— 两根带子要的观感是同一件事：
+    /// 看得见「盖住了哪一段」，同时里面的音还看得清。
     ///
     /// 令牌里只有实色，透明是**画的时候**配上去的（同 <c>RollNavStrip.WithAlpha</c>）——
-    /// 本切片不新增颜色值，基色仍然只从令牌来。实心铺满会把框里的音盖住，
+    /// 本切片不新增颜色值，基色仍然只从令牌来。实心铺满会把带子里的音盖住，
     /// 而那几个音正是用户盯着要看的东西。
     /// </summary>
     private const double MarqueeOpacity = 0.7;
@@ -112,7 +114,16 @@ public sealed class PianoRollLane : Control
         ResizeTail,
 
         /// <summary>在空白处按下：框一段时间出来。</summary>
-        Marquee
+        Marquee,
+
+        /// <summary>
+        /// 「抽掉一段」装备着的时候按下：在卷帘上横拖出**会消失的那一段**。
+        ///
+        /// 它是**模式**，不是「空白的另一种用法」：装备期间不管手落在哪儿（音符上也算）
+        /// 都是划段，因为要剪的那一段是**时间**，和音高无关 —— 落在音符上开始划，
+        /// 划出来的仍然是整条轨上的一段时间。
+        /// </summary>
+        Cut
     }
 
     private TokenSource? _tokens;
@@ -158,6 +169,24 @@ public sealed class PianoRollLane : Control
     /// <summary>框选的起止 tick（未吸附 —— 框说的是「我框到哪儿了」，不是「吸到哪条线上」）。</summary>
     private double _marqueeStart;
     private double _marqueeEnd;
+
+    /// <summary>
+    /// 「抽掉一段」装备着（轨道头上正摆着那一问）。
+    ///
+    /// 装备期间这一次手势**只划段**：按下不选中、不挪音，整条卷帘只有一个意思。
+    /// 想改音符就先按「取消」或 Esc 收掉 —— 一个模式有明确的进出口，比「按位置猜意图」好懂。
+    /// </summary>
+    private bool _cutArmed;
+
+    /// <summary>
+    /// 抽掉那一段的起止 tick（**已吸附到格线**，起止有序）。
+    ///
+    /// 和框选那两个不一样，这两个是**持久**的：松手之后要留着，用户得先看着这一段、
+    /// 再决定按不按「抽掉」（见 <see cref="CutRange"/>）。所以 <see cref="ResetDrag"/>
+    /// **不清它们** —— 清它们的是 <see cref="DisarmCut"/>。
+    /// </summary>
+    private long _cutStart;
+    private long _cutEnd;
 
     /// <summary>这一次要动的整组音（按下那一刻的快照，见 <see cref="NoteMoveRequest"/>）。</summary>
     private readonly List<NoteRef> _group = new();
@@ -257,6 +286,67 @@ public sealed class PianoRollLane : Control
                 (long)Math.Round(_marqueeStart), (long)Math.Round(_marqueeEnd))
             : null;
 
+    /// <summary>
+    /// 装备着「抽掉一段」时，此刻划出来的那一段。没装备、或者还没拖出宽度就是 null。
+    ///
+    /// **松手之后照样有值**（这正是它和 <see cref="Marquee"/> 的分别）：
+    /// 用户拖一段、看一眼轨道头上那句预览，然后才按「抽掉」。
+    /// </summary>
+    public PianoRollPresenter.MarqueeRange? CutRange
+        => _cutArmed && _cutStart != _cutEnd
+            ? new PianoRollPresenter.MarqueeRange(_cutStart, _cutEnd)
+            : null;
+
+    /// <summary>
+    /// 装备上「抽掉一段」：整条卷帘从此只划段，并且**先替用户划好一段**。
+    ///
+    /// 预填这一段是有讲究的（由调用方算好给进来）：多半是「本轨选中的那几个音」——
+    /// 用户点了几个音发现不对、再按「抽掉一段」，想剪的多半就是它们；
+    /// 一个音都没选中才退回「播放头所在的那一小节」。
+    ///
+    /// 不在这儿算，是因为算它要知道选中集（控制器）和播放头（<c>TrackLaneView</c> 手上）——
+    /// 卷帘这一层只存「划到哪儿了」，不问「该划哪儿」。
+    /// </summary>
+    public void ArmCut(long startTick, long endTick)
+    {
+        _cutArmed = true;
+        if (startTick > endTick) (startTick, endTick) = (endTick, startTick);
+        _cutStart = startTick;
+        _cutEnd = endTick;
+
+        InvalidateVisual();
+        RaiseCutRangeChanged();
+    }
+
+    /// <summary>
+    /// 收掉「抽掉一段」：划好的那一段一起丢掉（它说的就是这一问），卷帘回到平时那个意思。
+    ///
+    /// 没装备时什么都不做，也不喊 —— 窗口每次编辑都会重挂控件、无条件来收一遍
+    ///（见 <c>TrackLaneView.Rebind</c>），空喊一声会让窗口白重画一屏。
+    /// </summary>
+    public void DisarmCut()
+    {
+        if (!_cutArmed) return;
+
+        _cutArmed = false;
+        _cutStart = 0;
+        _cutEnd = 0;
+        // 手上正划着的那一次也作废：它划的是「已经收掉的那一问」里的一段
+        if (_drag == DragKind.Cut) _drag = DragKind.None;
+
+        InvalidateVisual();
+        RaiseCutRangeChanged();
+    }
+
+    /// <summary>
+    /// 划出来的那一段变了（装备上、拖动中、收掉），轨道头上那句预览要重算。
+    ///
+    /// 和 <see cref="PreviewChanged"/> 分开，是因为两者的代价差着量级：
+    /// 那一声让整条轨重算一屏场景，这一声只让一行字重算一遍
+    /// （<c>CutPreview.Of</c> 要把这条轨的音扫一遍）。拖动中每帧两个都喊就白扫几百遍。
+    /// </summary>
+    public event EventHandler? CutRangeChanged;
+
     public TokenSource? Tokens
     {
         get => _tokens;
@@ -311,6 +401,7 @@ public sealed class PianoRollLane : Control
         }
 
         DrawMarquee(context, palette, scene.Marquee);
+        DrawCutBand(context, palette, scene.CutBand);
 
         // 标尺下沿那条横线：刻度区到此为止，照 wireframe 的 `moveTo(0, RULER_H + .5)`。
         //
@@ -342,7 +433,6 @@ public sealed class PianoRollLane : Control
 
         var viewport = scene.Viewport;
         var point = e.GetPosition(this);
-        var hit = controller.HitTestRef(TrackIndex, viewport, point.X, point.Y, out var note);
 
         _pressTick = PianoRollGeometry.TickAtX(viewport, point.X);
         _pressPitch = PianoRollGeometry.PitchAtY(viewport, point.Y);
@@ -360,6 +450,26 @@ public sealed class PianoRollLane : Control
         // **四支都算** —— 拖头尾、拖身体、Shift 加选、点空白和拖框，说的都是同一句话：
         // 「我现在在弄这条轨」。只有悬浮不算（见 OnPointerMoved）。
         bool focusChanged = controller.SetFocusedTrack(TrackIndex);
+
+        // 「抽掉一段」装备着的时候，整条卷帘只有这一个意思：按下就是**重新划一段**，
+        // 划到哪儿算哪儿。命中判定、选中集一概不参与 —— 要剪的那一段是时间，
+        // 和手落在哪个音上无关，而顺手把选中集改了反而会让预填的那一段（多半就是选中的那几个音）
+        // 在手底下一闪就没了。
+        if (_cutArmed)
+        {
+            _drag = DragKind.Cut;
+            _cutStart = _cutEnd = PianoRollGeometry.SnapToGrid(_pressTick, controller.GridTicks);
+
+            UpdateCursor(PianoRollGeometry.RollHit.None);
+            InvalidateVisual();
+            // 叫一声把那一行预览说回「先拖一段」：上一次划的那一段已经被这一下清掉了，
+            // 而「抽掉」还灰着（范围是空的）—— 不喊的话它会停在上一次那句数上
+            RaiseCutRangeChanged();
+            if (focusChanged) FocusChanged?.Invoke(this, EventArgs.Empty);
+            return;
+        }
+
+        var hit = controller.HitTestRef(TrackIndex, viewport, point.X, point.Y, out var note);
 
         bool selectionChanged = false;
 
@@ -541,6 +651,16 @@ public sealed class PianoRollLane : Control
             _lengthDelta = 0;
             _pitchDelta = 0;
             _marqueeEnd = _marqueeStart;
+
+            // 划段这一支也要退回去：拖出去又拖回门槛以内的话，留着的那一段得跟着收成零宽
+            //（不退的话，「抽掉」会照着一个手已经收回来的宽度剪下去）
+            if (_drag == DragKind.Cut)
+            {
+                _cutEnd = _cutStart;
+                RaiseCutRangeChanged();
+                return;
+            }
+
             RaisePreviewChanged();
             return;
         }
@@ -605,6 +725,19 @@ public sealed class PianoRollLane : Control
                 // 吸附一下反而会让「框住的那个音」和画出来的框对不上，那才是真的没法用。
                 _marqueeEnd = rawTick;
                 break;
+
+            case DragKind.Cut:
+            {
+                // 划段**要吸附**，和框选正相反：这一段是要交给命令的（剪掉多少 tick 就是多少），
+                // 「更精准的切割」正是用户要的那件事。两端都吸到十六分格上，
+                // 于是拖出来的边界一定落在和拖音符同一套格线上 —— 剪完之后的音还在拍上。
+                var span = PianoRollGeometry.SpanOf(_pressTick, rawTick, grid);
+                if (span is { } cut) (_cutStart, _cutEnd) = (cut.Start, cut.End);
+                else _cutEnd = _cutStart;   // 还没挪过半格：这一段是空的
+
+                RaiseCutRangeChanged();
+                return;
+            }
 
             default:
                 return;
@@ -697,6 +830,13 @@ public sealed class PianoRollLane : Control
                 RaiseSelectionChanged();
                 break;
             }
+
+            // 划段**结算成什么也不发**：那一段已经落在 _cutStart/_cutEnd 上了，
+            // 上面 ResetDrag 不动它们，于是红带子照旧画着、轨道头上那句预览照旧算着。
+            // 真要动谱面的是「抽掉」那颗按钮（它读 Roll.CutRange 发 CutRangeRequest）——
+            // 松手只是把这一段定下来给用户看一眼，这一步**一个撤销格子都不该记**。
+            case DragKind.Cut:
+                break;
         }
     }
 
@@ -712,15 +852,35 @@ public sealed class PianoRollLane : Control
     ///
     /// （从前这里的理由是「快照指的全是旧曲子上的下标」—— 下标那一半随着
     /// 31 号工单的按身份寻址一起没了，但「这次手势作废」这件事没变。）
+    ///
+    /// **划段那一次按「作废」处理，不是「留着刚划到的宽度」**：捕获丢了谁也不知道
+    /// 用户本来要划到哪儿，那一段收成零宽（= 没划），轨道头上那句预览跟着说回「先拖一段」。
+    /// 编好的那一段（上一次松手定下来的）本来就是这么被覆盖掉的，和按下去那一下同一个结果。
     /// </summary>
     public void CancelDrag()
     {
         if (_drag == DragKind.None) return;
+
+        bool wasCut = _drag == DragKind.Cut;
         ResetDrag();
+
+        if (wasCut)
+        {
+            _cutEnd = _cutStart;
+            RaiseCutRangeChanged();
+            return;
+        }
+
         RaisePreviewChanged();
     }
 
-    /// <summary>拖动状态清零（预览、寄存器、快照）。<c>_drag</c> 也一起回到 None。</summary>
+    /// <summary>
+    /// 拖动状态清零（预览、寄存器、快照）。<c>_drag</c> 也一起回到 None。
+    ///
+    /// **不碰 <c>_cutArmed</c> / <c>_cutStart</c> / <c>_cutEnd</c>**：那三个不是「这一次拖动」
+    /// 的状态，是「抽掉一段」那一问的状态 —— 松手、作废、重挂都不该把它划好的那一段抹掉，
+    /// 收掉它的是 <see cref="DisarmCut"/>。
+    /// </summary>
     private void ResetDrag()
     {
         _drag = DragKind.None;
@@ -736,6 +896,9 @@ public sealed class PianoRollLane : Control
 
     /// <summary>拖动预览变了，让场景重算一遍。没有订阅者时是空操作。</summary>
     private void RaisePreviewChanged() => PreviewChanged?.Invoke(this, EventArgs.Empty);
+
+    /// <summary>划出来的那一段变了，轨道头上那句预览要重算一遍。没有订阅者时是空操作。</summary>
+    private void RaiseCutRangeChanged() => CutRangeChanged?.Invoke(this, EventArgs.Empty);
 
     // ==================== 光标与悬停 ====================
 
@@ -865,6 +1028,42 @@ public sealed class PianoRollLane : Control
     /// <summary>给令牌色配一个透明度。**不是颜色字面值** —— 基色仍然只从令牌来（同 RollNavStrip）。</summary>
     private static Color WithAlpha(Color color, double alpha)
         => Color.FromArgb((byte)Math.Round(alpha * 255), color.R, color.G, color.B);
+
+    /// <summary>红带子那两条竖边的宽度（像素）。比框选那根粗一倍 —— 见 DrawCutBand。</summary>
+    private const double CutEdgeWidth = 2;
+
+    /// <summary>
+    /// 「抽掉一段」正划着的那一段：**红色**的带子，形状和框选那根一模一样
+    /// （整条轨那么高、左右两条竖边，同一个 <c>MarqueeOf</c> 算出来的像素）。
+    ///
+    /// <b>为什么是红的，而且必须是红的。</b>蓝的那根（<c>AccentSoft</c>）说的是「选中了这一段，
+    /// 留着」；这一根说的是「这一段会**消失**」—— 意思正好相反，画成一个样子，
+    /// 用户按「抽掉」之前那一眼就白看了。颜色只从令牌来：底 <c>StopSoft</c>、边 <c>Stop</c>，
+    /// 就是播放头红线和「删掉这条轨」那个按钮用的同一档（26 条令牌里没有新增一条）。
+    ///
+    /// 边比框选那根粗一倍（2px 对 1px）：红带子多半比框选那根窄得多（十六分一格，
+    /// 一屏 4 小节下只有十几个像素），1px 的边在那么窄的一条上就吃掉大半宽度，
+    /// 看着像一个实心红块而不是「从这儿到那儿」。
+    ///
+    /// 纵向一样铺满是必须的：剪的是这段时间里的**所有**音，与音高无关 ——
+    /// 画矮了就是在撒谎（只盖住两行的带子，凭什么剪掉第三行的音）。
+    /// </summary>
+    private static void DrawCutBand(
+        DrawingContext context, TokenPalette palette, PianoRollPresenter.MarqueeRect? band)
+    {
+        if (band is not { } cut) return;
+
+        context.FillRectangle(
+            new ImmutableSolidColorBrush(WithAlpha(palette.StopSoft, MarqueeOpacity)),
+            new Rect(cut.X, cut.Y, cut.Width, cut.Height));
+
+        var pen = new Pen(new ImmutableSolidColorBrush(palette.Stop), CutEdgeWidth);
+        double top = cut.Y, bottom = cut.Y + cut.Height;
+        // 和框选那根同一个偏法：边画在带的**里侧**，带子不会比划出来的那一段宽出 1px
+        context.DrawLine(pen, new Point(cut.X + 1, top), new Point(cut.X + 1, bottom));
+        double right = cut.X + cut.Width - 1;
+        context.DrawLine(pen, new Point(right, top), new Point(right, bottom));
+    }
 
     private static void DrawRulerLabels(
         DrawingContext context, TokenPalette palette, PianoRollPresenter.LaneScene scene)

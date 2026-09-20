@@ -35,12 +35,21 @@ public static class PianoRollPresenter
     /// </param>
     /// <param name="Drag">拖动中「将要落到哪」。没在拖（或者这一帧还没有位移）就是 null。</param>
     /// <param name="Marquee">框选中的那根带子。没在框选就是 null。</param>
+    /// <param name="Cut">
+    /// 「抽掉一段」正划着的那一段。没在装备状态（或者还没拖出宽度）就是 null。
+    ///
+    /// 和 <paramref name="Marquee"/> 是**同一套几何**（都是整条轨那么高的一根带子），
+    /// 但说的不是一件事，所以画法也不同：框选那根是蓝的（选中），这一根是红的（会消失）。
+    /// 分成两个字段而不是复用一个，是因为拖出来的那一段**在松手之后要留着** ——
+    /// 用户得先看着这一段、再决定按不按「抽掉」。
+    /// </param>
     public readonly record struct RollOverlay(
         long PlayheadTick,
         bool PlayheadVisible,
         IReadOnlyList<NoteId> SelectedNotes,
         DragPreview? Drag = null,
-        MarqueeRange? Marquee = null)
+        MarqueeRange? Marquee = null,
+        MarqueeRange? Cut = null)
     {
         /// <summary>
         /// 只选中一个音时的写法（08 起建场景的那些地方写的都是这个形状）。
@@ -142,6 +151,14 @@ public static class PianoRollPresenter
 
         /// <summary>框选那根带子。没在框选就是 null。</summary>
         public MarqueeRect? Marquee { get; init; }
+
+        /// <summary>
+        /// 「抽掉一段」正划着的那一段（红色带子）。没在装备状态就是 null。
+        ///
+        /// 和 <see cref="Marquee"/> 分开，是因为两者会同时出现在屏幕上（先框一批音、
+        /// 再按「抽掉一段」），而且意思相反：蓝的是「留着并选中」，红的是「这一段会消失」。
+        /// </summary>
+        public MarqueeRect? CutBand { get; init; }
     }
 
     /// <summary>
@@ -261,7 +278,8 @@ public static class PianoRollPresenter
             SelectedNotes = CopyOf(overlay.SelectedNotes),
             SelectedNote = overlay.SelectedNotes.Count > 0 ? overlay.SelectedNotes[^1] : NoteId.None,
             GhostNotes = ghosts,
-            Marquee = MarqueeOf(viewport, overlay.Marquee)
+            Marquee = MarqueeOf(viewport, overlay.Marquee),
+            CutBand = MarqueeOf(viewport, overlay.Cut)
         };
     }
 
@@ -285,10 +303,11 @@ public static class PianoRollPresenter
     }
 
     /// <summary>
-    /// 框选那根带子的像素位置。
+    /// 带子的像素位置。<see cref="MarqueeRange"/> 那一套几何只有这一份 ——
+    /// 框选那根（蓝）和「抽掉一段」那根（红）走的是同一个算法，只是喂进去的区间不同。
     ///
     /// 起止统一归一（往左拖时起止是反的），纵向**铺满标尺以下的整条轨** ——
-    /// 框的纵向本来就不参与判定，见 <see cref="MarqueeRange"/>。
+    /// 一根带子的纵向本来就不参与判定，见 <see cref="MarqueeRange"/>。
     /// </summary>
     private static MarqueeRect? MarqueeOf(in PianoRollGeometry.Viewport viewport, MarqueeRange? range)
     {

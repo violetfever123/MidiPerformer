@@ -18,8 +18,12 @@
 # 看着却像「框选没生效」。而框选只要求**按下那一点**是空白，不要求整行都空，
 # 所以就近找一个空白像素才是对的要求。
 #
-# 用法: pwsh -File find-note.ps1 -Track 2 [-Blank | -Near "x,y"] [-Out scan.png]
-param([int]$Track = 2, [switch]$Blank, [string]$Near = '', [string]$Out = '.scratch/shots/scan.png')
+# 用法: pwsh -File find-note.ps1 -Track 2 [-Blank | -Near "x,y"] [-Out scan.png] [-Drop px]
+#
+# 加 -Drop <px> 则把扫查带整体往下推这么多像素。给「轨道头上多摆了一行」的状态用
+#（38 号：装备上「抽掉一段」之后，轨道头长出第二行，卷帘整条被推下去）——
+# 那种时候按默认的那把尺子扫，扫到的是另一个音高行，量出来的东西全不对。
+param([int]$Track = 2, [switch]$Blank, [string]$Near = '', [string]$Out = '.scratch/shots/scan.png', [int]$Drop = 0)
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 Add-Type -AssemblyName System.Drawing, UIAutomationClient, UIAutomationTypes
@@ -71,7 +75,7 @@ $bot = if ($Track -lt $heads.Count) { [int]$heads[$Track].Current.BoundingRectan
 # **要夹到窗口里**：轨多的时候列表会滚动，滚出去的轨头 Y 是负的，
 # 拿负数去 GetPixel 会一路抛越界，脚本卡死在那儿看不出所以然。
 $X0 = 460; $X1 = [Math]::Min(2500, $w - 20)
-$Y0 = [Math]::Max($top + 60, 0)
+$Y0 = [Math]::Max($top + 60 + $Drop, 0)
 $Y1 = [Math]::Min($bot - 20, $hh - 10)
 if ($Y1 -le $Y0) { "轨 $Track 整条都在窗口外（轨头 Y=$top，窗口高 $hh）—— 先把它滚进视野"; exit 1 }
 "抓图 $w x $hh -> $Out"

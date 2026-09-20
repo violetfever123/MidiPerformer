@@ -1047,6 +1047,57 @@ public class PianoRollControllerTests
         });
     }
 
+    // ==================== 选中那一段（「抽掉一段」的预填） ====================
+
+    /// <summary>
+    /// 本轨上选中的音**整体盖住**的那一段 —— 装备「抽掉一段」时先替用户划出来的就是它。
+    ///
+    /// 量的是「最小的起点到最大的末尾」，不是「第一个音到最后一个音」：
+    /// 选中的两个音一前一后、中间隔着一个没选中的，那一段仍然只盖到这两个音各自的两端
+    /// （用户点的是这两个音，中间那个是顺带的还是别人，他不一定想过；
+    /// 而**多盖**一节就是把没选中的音也剪了进去）。
+    /// </summary>
+    [Test]
+    public void 选中那一段是最小起点到最大末尾()
+    {
+        // RangeSong：0:[0,1920) 1:[480,4320) 2:[1920,2400) 3:[2160,2400) 4:[2400,2880) 5:[2880,3360)
+        var controller = new PianoRollController(RangeSong());
+        controller.SetSelection(new[] { Ref(0, 2), Ref(0, 4) });
+
+        Assert.That(controller.SelectionSpan(0), Is.EqualTo((1920L, 2880L)),
+            "第 3 个音 [1920,2400) 和第 5 个音 [2400,2880)：中间那个第 4 个音没选中，但它本来就在这一段里");
+    }
+
+    /// <summary>没选中任何音 → null（调用方退回「播放头那一小节」），不抛也不给一段空的。</summary>
+    [Test]
+    public void 没选中音时预填不出来()
+    {
+        var controller = new PianoRollController(RangeSong());
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(controller.SelectionSpan(0), Is.Null, "一个音都没选中");
+            controller.SelectOnly(Ref(0, 0));
+            Assert.That(controller.SelectionSpan(1), Is.Null, "选中的音在别的轨上 —— 抽掉一次只抽一条轨");
+            Assert.That(controller.SelectionSpan(9), Is.Null, "没有这条轨");
+        });
+    }
+
+    /// <summary>
+    /// 两端都吸到十六分格上（一屏 480 PPQ ⇒ 一格 120）：预填出来的那一段和用户自己拖出来的
+    /// 走的是同一个 <c>SpanOf</c>，于是他拖一下能吸到的那条线，预填也一定落在上面。
+    /// </summary>
+    [Test]
+    public void 预填的那一段也吸到格线上()
+    {
+        // 第一个音起在 0、长 100 tick（远不到一格），末尾 100 → 吸成 120
+        var controller = new PianoRollController(SongOf(Melody(new Note(60, 0, 100, 100))));
+        controller.SelectOnly(Ref(0, 0));
+
+        Assert.That(controller.SelectionSpan(0), Is.EqualTo((0L, 120L)),
+            "末尾吸到最近的那条格线上（0 和 120 之间它离 120 更近）");
+    }
+
     // ==================== 命中判定的边角 ====================
 
     /// <summary>

@@ -370,6 +370,29 @@ public static class PianoRollGeometry
     /// </summary>
     public static long SnapToBar(double tick, long ticksPerBar) => SnapToGrid(tick, ticksPerBar);
 
+    // ==================== 抽掉一段 ====================
+
+    /// <summary>
+    /// 在卷帘上横拖出来的那一段：**两端都吸到格线上**，再归一（往左拖时起止是反的）。
+    /// 两头吸到同一条线上（手没挪够、或者挪的距离不到半格）→ <c>null</c>，
+    /// 也就是「这一段是空的」—— 空的不能当一段，命令收到零长度会原样还回来一份同样的曲子。
+    ///
+    /// 这是「抽掉一段」从两个小节号框换成**直接拖**之后，那一段唯一的算法出处。
+    /// 吸的是十六分格（<see cref="GridTicks"/>），和拖音符是同一个格：
+    /// 两处各用一套格的话，用户把音拖到某条线上、再想把它整段抽掉，
+    /// 拖出来的边界会和那条线差一点点，而差一点点就是「抽掉之后对不上拍」。
+    /// </summary>
+    /// <param name="fromTick">按下那一刻的 tick（锚点，不吸 —— 由这一份算法吸）。</param>
+    /// <param name="toTick">当前指针的 tick。</param>
+    /// <param name="gridTicks">一格多少 tick。</param>
+    public static (long Start, long End)? SpanOf(double fromTick, double toTick, long gridTicks)
+    {
+        long a = SnapToGrid(fromTick, gridTicks);
+        long b = SnapToGrid(toTick, gridTicks);
+        if (a == b) return null;
+        return a < b ? (a, b) : (b, a);
+    }
+
     /// <summary>
     /// 视图左边缘的合法范围。
     ///

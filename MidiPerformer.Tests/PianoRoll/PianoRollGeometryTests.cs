@@ -512,10 +512,71 @@ public class PianoRollGeometryTests
         });
     }
 
+    // ==================== 抽掉一段：拖出来的那一段 ====================
+
+    /// <summary>
+    /// 「抽掉一段」那一段是**拖**出来的（38 号），这里钉的就是「拖出来的两头落在哪儿」。
+    ///
+    /// 两头都吸到**十六分格**上，和拖音符用的是同一个格：两处各用一套格的话，
+    /// 用户把音拖到某条线上、再想整段抽掉，拖出来的边界会和那条线差一点点 ——
+    /// 剪完之后的音就不在拍上了。
+    /// </summary>
+    [Test]
+    public void 抽掉那一段两头都吸到格线上()
+    {
+        Assert.Multiple(() =>
+        {
+            // 480 PPQ ⇒ 一格 120
+            var span = PianoRollGeometry.SpanOf(1000, 2000, 120);
+            Assert.That(span, Is.EqualTo((960L, 2040L)), "两端各吸到最近的十六分线上");
+
+            Assert.That(PianoRollGeometry.SpanOf(960, 2040, 120), Is.EqualTo((960L, 2040L)),
+                "本来就在格线上，一动不动");
+        });
+    }
+
+    /// <summary>往左拖：起止是反的，出来的一律是**有序**的那一对（命令收到反的会抛）。</summary>
+    [Test]
+    public void 抽掉那一段往左拖也是有序的()
+    {
+        Assert.That(PianoRollGeometry.SpanOf(2000, 1000, 120), Is.EqualTo((960L, 2040L)),
+            "和往右拖同一段，结果一模一样");
+    }
+
+    /// <summary>
+    /// 两头吸到**同一条线上**就是「没划出东西来」—— 返回 null，不是一对相等的数。
+    ///
+    /// 这一条挡的是「手一抖就抽掉一小段」：按下没动、或者只挪了不到半格，
+    /// 那一段是空的，界面上「抽掉」得灰着（命令收到零长度会原样还回来一份同样的曲子）。
+    /// </summary>
+    [Test]
+    public void 没挪过半格就不算划出东西来()
+    {
+        Assert.Multiple(() =>
+        {
+            Assert.That(PianoRollGeometry.SpanOf(1000, 1000, 120), Is.Null, "按下去没动");
+            Assert.That(PianoRollGeometry.SpanOf(1000, 1010, 120), Is.Null, "还没过半格，吸回原来那条线");
+            Assert.That(PianoRollGeometry.SpanOf(1000, 1030, 120), Is.EqualTo((960L, 1080L)), "过半格就成了");
+        });
+    }
+
+    /// <summary>非有限数不该传下去（视口没量出来那一帧的 tick 可能是 NaN），坏格按一格算。</summary>
+    [Test]
+    public void 划段碰上非有限数和坏网格都不崩()
+    {
+        Assert.Multiple(() =>
+        {
+            Assert.That(PianoRollGeometry.SpanOf(double.NaN, 2000, 120), Is.EqualTo((0L, 2040L)),
+                "NaN 吸成 0，那一段仍然成立");
+            Assert.That(PianoRollGeometry.SpanOf(double.NaN, double.NaN, 120), Is.Null);
+            Assert.That(PianoRollGeometry.SpanOf(1000, 2000, 0), Is.EqualTo((1000L, 2000L)),
+                "格是 0 时按一格算（见 SnapToGrid），于是每个 tick 都是一条线");
+        });
+    }
+
     [Test]
     public void 小节吸附就是拿小节当格的网格吸附()
-    {
-        // SnapToBar 转发给 SnapToGrid，于是舍入、NaN、负数夹取只有一份实现。
+    {        // SnapToBar 转发给 SnapToGrid，于是舍入、NaN、负数夹取只有一份实现。
         // 这条直接对着两个函数比 —— 日后谁把它们拆回两份，这里先红
         foreach (double tick in new[] { -100, -0.5, 0, 1, 959, 960, 961, 2879, 2880, 12345.6, double.NaN })
         {
