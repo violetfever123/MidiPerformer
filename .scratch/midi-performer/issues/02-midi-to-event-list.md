@@ -117,3 +117,25 @@
   真出现就是 04 的时钟坏了，藏起来反而难查。前提写在方法注释里。
 - **`.rmi`（RIFF 壳）**：成功路径和「RIFF 里没有 MThd」的报错路径都补了测试；
   但真实的 `.rmi` 样本没有，壳子是测试现搭的。
+
+### 复跑记录（2026-09-20，第七次发布前）
+
+用户要求「再跑一次对拍，看同一首曲子进两条链，操作逻辑是否还一样」。跑的是三个 HAP 对拍类，
+`dotnet test --filter "FullyQualifiedName~EventBuilderParityTests|FullyQualifiedName~FullChainParityTests|FullyQualifiedName~PortFidelityTests"`：
+
+| 类 | 用例 | 结果 |
+| --- | --- | --- |
+| `EventBuilderParityTests` | 221 | 全过 |
+| `FullChainParityTests` | 127 | 全过 |
+| `PortFidelityTests` | 4 | 全过 |
+| **合计** | **352** | **352 通过 / 0 失败 / 0 跳过，41 秒** |
+
+**结论：操作逻辑仍然一致。** 其中 `FullChainParityTests` 就是「同一份 `.mid` 分别喂给
+本程序与原版 Harmonic Auto Player 的整条链，逐事件比对」的那一组 —— 127 个用例全过。
+
+两点说明，免得下次看数字对不上：
+
+- 这三个类里只有前两个名字里有 `Parity`。按 `~Parity` 过滤会**漏掉** `PortFidelityTests`（4 个），
+  却会**捎上** `Visual.TokenParityTests`（11 个，那是视觉令牌的，和 HAP 无关）——
+  所以 `~Parity` 是 359，而 HAP 对拍本身是 352。
+- 对拍**不在发布自检里**（`tools/run-selftest.ps1` 是冒烟级的），要跑得单独 `dotnet test`。

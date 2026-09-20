@@ -260,3 +260,92 @@ UI、用例层、实体层，裁剪产物基本没动，说明这堆改动没把
 警告里点到名的文件只有 `MidiPerformer.App.cs`、`Converters.cs`、`SongProjectFile.cs` 三个，
 一条也没落在 40 号改过的那些文件上。
 
+
+---
+
+**2026-09-20 第七次发布**（精简打包体积，`main` @ `2316e62` 之后）：
+
+| 项 | 数 |
+| --- | --- |
+| `tools/publish.ps1` | 退出码 **0**，publish 目录里只有那一个 exe（顶层文件数 **1**） |
+| 产物 | `MidiPerformer.App\bin\Release\net8.0\win-x64\publish\MidiPerformer.exe`，**22 107 792 字节**（21.1 MB），mtime 17:51:42 |
+| `tools/run-selftest.ps1` | **20 PASS / 0 FAIL**，耗时 0.9 秒，退出码 **0**（「结果：全部通过」） |
+| 报告里自述的运行时 | 8.0.31；**单文件发布：是** |
+| 报告 | `%TEMP%\midiperformer-selftest-20260920-175147.txt` |
+| 裁剪分析 | **36 条**，和上一轮逐条同源（33 条 `IL2026` + 1 条 `IL2075` + 2 条 `IL2104`） |
+| 工作区 | `git status --porcelain -uno` 只有本轮的 csproj 一条（见下） |
+
+和第六次发布的 41 061 678 字节比，**少了 18 953 886 字节（−46.2%）** —— 体积砍掉将近一半，
+没有换掉任何功能，也没动一行界面代码。
+
+### 砍在哪：一次干净构建一次的实测
+
+「干净」= 每次先删 `obj` 再 publish（不删 `obj` 的话，只改 `-p:` 开关**增量构建不会重跑裁剪器**，
+量出来的数字会一模一样，第一轮扫描就栽在这上面）。
+
+| 变体 | 配置 | 字节 | 说明 |
+| --- | --- | --- | --- |
+| A | 不压缩（第六次发布的配置） | 41 401 646 | 基线 |
+| B | A + `EnableCompressionInSingleFile` | 22 273 293 | **省 46.2%**，一行开关 |
+| C | B + 全套功能开关（含 `NullabilityInfoContextSupport=false`） | 22 069 140 | 再省 0.4% |
+| D | C + `TrimMode=full` | 21 744 915 | **自检直接红**，见下 |
+| E | C + `UseSystemResourceKeys=true` | 21 823 952 | 只省 245 KB，代价见下 |
+| **F** | **B + 除 `NullabilityInfoContextSupport` 外的那几个开关** | **22 107 792** | **← 采用** |
+
+A 与第六次发布交付的那个（41 061 678）差 339 968 字节：同一套开关的两次干净构建之间
+本来就有这个量级的抖动（单文件打包的拼接顺序会变），所以下面只比同一批测量内部的大小。
+
+**「压缩会让启动变慢」这个理由被实测推翻了。** 这条理由原先写在 csproj 的注释里，是上一版
+不开压缩的依据。实测（裸 exe 启动到窗口出现，各 5 次）：不压缩中位 **412 ms**、
+压缩后中位 **402 ms** —— 压缩反而略快，因为读 22 MB 再解压比读 41 MB 更省 I/O。
+`IncludeNativeLibrariesForSelfExtract` 本来就开着，自解压那一层早就存在，压缩并没有新增一层。
+注释已经按实测改掉，并把三个**有意没开**的开关连同理由一起写在旁边（都在 csproj 里）。
+
+**为什么没开 `TrimMode=full`**：能再省 36 万字节，但自检 **17 PASS / 1 FAIL** ——
+`System.Text.Json` 报「`Song` 的反序列化构造器参数名被裁掉了，考虑改用源生成序列化器」。
+要吃下这 36 万，得先把 `SongProjectFile` 换成源生成序列化器，那是另一张工单的活。
+
+**为什么没开 `NullabilityInfoContextSupport=false`**：它只值 **38 652 字节（0.17%）**，
+而 Avalonia 的绑定引擎会用到 `NullabilityInfoContext`。为一个四舍五入都不见的零头
+去赌绑定引擎，不值 —— 这一条是整个扫描里唯一一处「体积换风险」，选择是不换。
+
+**为什么没开 `UseSystemResourceKeys`**：只省 245 KB，代价是 .NET 的异常文本变成资源键
+（`Arg_...` 这种），而曲库的 JSON 报错是**直接显示给用户看**的（`ShowError`）。
+
+### 在跑着的应用里验过（自检看不见的那一半）
+
+自检**不建窗口**，所以裁剪裁坏 XAML / 绑定 / JSON 反序列化这类事它一条也测不出来 ——
+这一轮真开了窗口，在**发布产物**上走了一遍：
+
+- 曲库窗口列出的 **8 首**都在，中文名没乱码，每首都是「没动过」；
+- 双击载入**重新导入**的那一份（`I Really Want To Stay At Your House …`）：钢琴卷帘画出来了，
+  2 轨 368 音 / 249 音，48 小节，128 拍/分；
+- 双击载入**原样恢复**的那一份 `Carulli_Duetto_No2_Op4`：4 轨（guitar 1605 音 / guitar 27 音 /
+  violin 640 音 / violin 16 音），124 小节，50 拍/分 —— 和文件内容逐项对上。
+  这一份是**旧格式**（没有音符 `Id` 字段），能载进来 = 向后兼容成立。
+
+顺带记一条踩坑：曲库那个模态窗口**不认注入的鼠标点击**（`SetCursorPos`+`mouse_event` 点不动，
+先抢前台、设 TOPMOST、`SetActiveWindow` 都不行，`WindowFromPoint` 却明说那一点上挨着的就是它），
+但**投递 `WM_LBUTTONDOWN`/`WM_LBUTTONUP`（PostMessage，客户区坐标）就认**。
+主窗口的按钮注入点击是好使的，只有模态窗这样。脚本见 `.scratch/verify-lib-ui.ps1`。
+
+### ⚠️ 本轮出过一次事故：曲库被清空，已恢复
+
+按上面那张表做「干净构建」时，`rm -rf MidiPerformer.App/bin` **连发布目录下的 `songs\` 一起删了** ——
+曲库住在 exe 旁边（`App.axaml.cs` 那句 `Path.Combine(AppContext.BaseDirectory, "songs")`），
+`bin` 一删，7 首 `.mproj` 就没了。回收站是空的（`rm` 是 unlink）、没有卷影副本/还原点、没有 OneDrive。
+**恢复情况**：
+
+- `Carulli_Duetto_No2_Op4.mproj`、`cargo.mproj`：`%TEMP%` 里有两份验证时留下的副本，
+  **md5 逐字节相同**，原样放回（两份曲库都放了）；
+- 另外 5 首（`（三角洲适配）勾指起誓`、`I Really Want To Stay At Your House …`、`侏儒之歌 - 罗大佑`、
+  `兰花草`、`弱水三千 DJ版 调教用`）+ `pink_floyd-time`：从源 `.mid` **重新导入**。
+  走的是应用自己那条链（`MidiReader.Read` → `WriteProject`），验过：拿 `Carulli` 回放，
+  除新增的 `Id` 字段外内容逐字段相同（2288 个音、速度表都一致）—— 也就是说重新导入得到的就是
+  应用今天会写出的那份；
+- **恢复不了的**：如果哪一首在应用里改过又存过，那些改动没了（重新导入是干净的源版本）。
+  存下来的文件当时都是 `Edited: false`，所以这一条按「没有」计，但话得说清楚。
+- 备份另存了一份在仓库外：`C:\Users\cao17\Desktop\midiplayer\曲库备份-20260920\`（8 个文件，约 3 MB）。
+
+顺带一条教训：**这个仓库里不能对 `MidiPerformer.App\bin` 整个 `rm -rf`** ——
+发布形态的曲库就住在那底下。要强制重裁只删 `obj` 就够了（本轮后半程就是这么做的）。

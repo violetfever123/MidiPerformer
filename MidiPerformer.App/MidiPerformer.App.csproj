@@ -47,16 +47,52 @@
       不能当交付物。交付物一律走 tools/publish.ps1。
 
     DebugType=none：单文件 exe 是唯一交付物，不带 .pdb 伴生文件（发布目录里就只能有一个 exe）。
-    EnableCompressionInSingleFile 没开：exe 大一点，但少一层自解压，启动与排错都更直白。
+
+    ── 体积（2026-09-20 实测，win-x64 自包含单文件，每次都是干净 obj 重裁）──
+      不开压缩                      41 401 646
+      EnableCompressionInSingleFile 22 273 293   ← 省掉 46.2%
+      ＋下面那几个功能开关           22 107 792   ← 再省 0.4%，合计 46.6%
+
+    开压缩曾经被否掉，理由是"多一层自解压，启动会慢"。**实测把这个理由推翻了**：
+    启动到窗口出现（各 5 次）不压缩中位 412 ms、压缩后中位 402 ms —— 压缩反而略快，
+    因为读 22 MB 再解压比读 41 MB 更省 I/O。IncludeNativeLibrariesForSelfExtract
+    本来就已经开着，自解压这一层早就存在了，压缩并没有新增一层。
+
+    下面这几个开关都是"这个程序用不到"的能力，关掉只是不给裁剪器留着：
+      DebuggerSupport                       连调试器用的（交付形态不挂调试器）
+      EventSourceSupport                    ETW 事件源
+      MetadataUpdaterSupport                热重载（dotnet watch 那套）
+      HttpActivityPropagationSupport         HttpClient 的 Activity 传播（本程序不联网）
+      EnableUnsafeBinaryFormatterSerialization  .NET 8 本来就默认关，这里写明是表态
+      AutoreleasePoolSupport                macOS 专用，win-x64 上是空操作
+
+    **有意没开的三个**，每一个都是拿体积换风险，不划算：
+      NullabilityInfoContextSupport=false  只再省 38 652 字节（0.17%），但 Avalonia 的绑定
+                                            引擎会用到 NullabilityInfoContext —— 为一个
+                                            四舍五入都不见的零头去赌绑定引擎，不值。
+      TrimMode=full                        能再省 36 万字节，但自检直接红：17 PASS / 1 FAIL，
+                                            System.Text.Json 报"Song 的反序列化构造器参数名
+                                            被裁掉了，考虑改用源生成序列化器"。要吃得先
+                                            把 SongProjectFile 换成源生成序列化器，另开工单。
+      UseSystemResourceKeys=true           只省 245 KB，代价是 .NET 的异常文本变成资源键
+                                            （"Arg_..."这种），而曲库的 JSON 报错是**直接
+                                            显示给用户看**的（ShowError）——不换。
   -->
   <PropertyGroup Condition="'$(MidiPerformerPublish)' == 'true'">
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <SelfContained>true</SelfContained>
     <PublishSingleFile>true</PublishSingleFile>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
     <DebugType>none</DebugType>
     <PublishTrimmed>true</PublishTrimmed>
     <TrimMode>partial</TrimMode>
+    <DebuggerSupport>false</DebuggerSupport>
+    <EventSourceSupport>false</EventSourceSupport>
+    <MetadataUpdaterSupport>false</MetadataUpdaterSupport>
+    <HttpActivityPropagationSupport>false</HttpActivityPropagationSupport>
+    <EnableUnsafeBinaryFormatterSerialization>false</EnableUnsafeBinaryFormatterSerialization>
+    <AutoreleasePoolSupport>false</AutoreleasePoolSupport>
   </PropertyGroup>
 
   <!--
