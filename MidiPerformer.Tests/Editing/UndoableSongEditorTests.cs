@@ -6,14 +6,8 @@ using NUnit.Framework;
 namespace MidiPerformer.Tests.Editing;
 
 /// <summary>
-/// 撤销装饰器的**外部行为**（S2 缝）。
-///
-/// 撤销栈本身是私有的，这里一个字段都不碰：只从外面看「撤了几步、撤到哪一份谱」。
-/// 判据用的是**逐字段比较**而不是引用 —— 引用相等是实现细节，而「撤销之后谱面回到改之前」
-/// 是给用户看的事实。两者这次恰好都成立，但红的理由该是可读的那一个。
-///
-/// 每条命令都把 <c>Transpose</c> 设成一个**认得出第几步**的数，
-/// 于是「撤到底停在第几步」这种断言写得出来（栈封顶那条全靠它）。
+/// 撤销装饰器的外部行为：只从外面看「撤了几步、撤到哪一份谱」，不碰私有的撤销栈。
+/// 每条命令都把 <c>Transpose</c> 设成认得出第几步的数，栈封顶那条断言靠它。
 /// </summary>
 public class UndoableSongEditorTests
 {
@@ -60,7 +54,7 @@ public class UndoableSongEditorTests
         var s1 = editor.SetTranspose(initial, 0, 1);
         var s2 = editor.SetBpm(s1, 90);
 
-        // 撤两步再重做两步，来回两遍 —— 只看落点，「走过几趟」不该影响结果
+        // 撤两步再重做两步，来回两遍：只看落点，走过几趟不该影响结果
         for (int round = 0; round < 2; round++)
         {
             AssertSameSong($"第 {round + 1} 轮撤到 s1", s1, editor.Undo());
@@ -99,8 +93,7 @@ public class UndoableSongEditorTests
 
     // ==================== 空栈 ====================
 
-    /// <summary>栈空时 Undo / Redo 是**什么也不做**，不是抛异常：界面上那两颗按钮虽然会置灰，
-    /// 键盘快捷方式（Ctrl+Z）却随时可能被按到，那儿没有能拦的按钮。</summary>
+    /// <summary>栈空时 Undo / Redo 什么也不做、不抛异常（键盘快捷方式随时可能被按到，那儿没有按钮拦）。</summary>
     [Test]
     public void 栈空时撤销重做什么都不做()
     {
@@ -114,7 +107,7 @@ public class UndoableSongEditorTests
             Assert.That(editor.CanRedo, Is.False);
         });
 
-        // 撤销栈空了但重做栈有货：这时再撤还是空的，而且**不能**把重做栈搅乱
+        // 撤销栈空了但重做栈有货：再撤还是空的，且不能搅乱重做栈
         var once = editor.SetTranspose(SongAt(0), 0, 3);
         editor.Undo();
 
@@ -135,7 +128,7 @@ public class UndoableSongEditorTests
         var back = editor.Undo()!;
         Assert.That(editor.CanRedo, Is.True);
 
-        // 撤回去之后又改了别的：原来那条重做链已经不在同一条时间线上了
+        // 撤回去之后又改了别的，原来那条重做链已不在同一条时间线上
         var s2 = editor.SetTranspose(back, 0, 7);
 
         Assert.Multiple(() =>
@@ -148,8 +141,7 @@ public class UndoableSongEditorTests
         AssertSameSong("撤一步回到「撤销后那一份」", back, editor.Undo());
         Assert.Multiple(() =>
         {
-            // 撤销栈上只剩「撤销后那一份 → 新改的那一份」这一格：原来那条链整条作废了，
-            // 不会撤着撤着又撤到刚才那条被抛弃的时间线上去
+            // 撤销栈上只剩一格：被抛弃的那条链整条作废了
             Assert.That(editor.CanUndo, Is.False);
             Assert.That(editor.Undo(), Is.Null);
         });
@@ -157,12 +149,7 @@ public class UndoableSongEditorTests
 
     // ==================== 栈封顶 ====================
 
-    /// <summary>
-    /// 撤销栈封顶 <see cref="UndoableSongEditor.MaxUndoSteps"/> 步，最老的被丢掉。
-    ///
-    /// 不封顶的话，一晚上连着调速度就能攒出几百份整曲的引用 —— 那是一整个曲子的内存，
-    /// 而用户永远不会撤到 500 步之前。
-    /// </summary>
+    /// <summary>撤销栈封顶 <see cref="UndoableSongEditor.MaxUndoSteps"/> 步，最老的先丢（否则会攒下几百份整曲的引用）。</summary>
     [Test]
     public void 撤销栈封顶一百步最老的先丢()
     {
@@ -182,7 +169,7 @@ public class UndoableSongEditorTests
             Assert.That(editor.CanUndo, Is.False);
         });
 
-        // 丢的是撤的深度，不是重做：重做链上仍然是完整的 100 步
+        // 丢的是撤的深度不是重做：重做链仍然是完整的
         int forward = 0;
         while (editor.Redo() is not null) forward++;
         Assert.That(forward, Is.EqualTo(UndoableSongEditor.MaxUndoSteps));
@@ -208,12 +195,7 @@ public class UndoableSongEditorTests
 
     // ==================== 没改的命令不记账 ====================
 
-    /// <summary>
-    /// 按了等于没按的命令（速度填成原来那个数、移调按到 0）不该占一格撤销。
-    ///
-    /// 占了的话，用户连按十下 Ctrl+Z 会有好几下「什么也没发生」——
-    /// 看上去像撤销坏了，而不是像他确实改过那么多次。
-    /// </summary>
+    /// <summary>按了等于没按的命令（速度填成原值、移调按到原值）不占一格撤销。</summary>
     [Test]
     public void 没改的命令不记账()
     {
@@ -254,11 +236,7 @@ public class UndoableSongEditorTests
 
     // ==================== Reset ====================
 
-    /// <summary>
-    /// 换一首曲子必须 <c>Reset()</c>：撤销栈里装的是**上一首**的 <see cref="Song"/>，
-    /// 不清的话，装了新曲子之后按 Ctrl+Z 会把上一首捞出来铺到界面上 —— 数据没错，
-    /// 只是「撤着撤着换了一首歌」，谁遇上都要懵。
-    /// </summary>
+    /// <summary>换一首曲子必须 <c>Reset()</c>：不清的话按 Ctrl+Z 会把上一首捞出来铺到界面上。</summary>
     [Test]
     public void Reset之后两个栈都空了()
     {
@@ -314,17 +292,12 @@ public class UndoableSongEditorTests
 
     // ==================== 换音色 ====================
 
-    /// <summary>
-    /// 换音色也记一格账：挑了一个新音色，撤销回到原来那一号，重做再回去。
-    ///
-    /// 这条命令是 16 加进来的，装饰器一行都没为它改过 —— 它自动就有撤销。
-    /// 这里断的就是这件事，不是 SetProgram 会不会改 Program（那是 SongEditorTests 的事）。
-    /// </summary>
+    /// <summary>换音色也自动记一格账：挑新音色、撤销回原来那一号、重做再回去。</summary>
     [Test]
     public void 换音色可以撤销()
     {
         var editor = NewEditor();
-        var initial = SongAt(0);                    // 音色 24（尼龙弦吉他）
+        var initial = SongAt(0);
         var edited = editor.SetProgram(initial, 0, 22);
 
         Assert.That(edited.Tracks[0].Program, Is.EqualTo(22));
@@ -337,7 +310,7 @@ public class UndoableSongEditorTests
         Assert.That(((Song)forward!).Tracks[0].Program, Is.EqualTo(22));
     }
 
-    /// <summary>挑的还是原来那一号：装饰器不该记一笔「按了没反应」的账。</summary>
+    /// <summary>挑的还是原来那一号，不记账也不清重做链。</summary>
     [Test]
     public void 音色没变时不记这一笔()
     {
@@ -357,12 +330,7 @@ public class UndoableSongEditorTests
 
     // ==================== 剪一段 ====================
 
-    /// <summary>
-    /// 剪一段也记一格账，而且撤销要把它挪过的东西**一起**退回去。
-    ///
-    /// 这条命令牵动的比别的都多：位置、时值、音符数一起变。装饰器照样一行都没为它改过 ——
-    /// 栈里装的是整份旧 <see cref="Song"/>，怎么变的不用记。
-    /// </summary>
+    /// <summary>剪一段也记一格账，撤销把它挪过的位置、时值、音符数一起退回去（栈里装的是整份旧 <see cref="Song"/>）。</summary>
     [Test]
     public void 剪一段可以撤销()
     {
@@ -376,8 +344,7 @@ public class UndoableSongEditorTests
         Assert.That(editor.Redo(), Is.SameAs(edited), "重做拿到的还是当初那一份");
     }
 
-    /// <summary>这段区间本来就空（起终点相等，或者里面没音、后面也没音要前移）：
-    /// 装饰器不该记一笔「按了没反应」的账。</summary>
+    /// <summary>这段区间本来就空（起终点相等、里面没音、后面也没音要前移）时不记账也不清重做链。</summary>
     [Test]
     public void 剪了等于没剪时不记这一笔()
     {
@@ -399,12 +366,8 @@ public class UndoableSongEditorTests
     // ==================== 转发 ====================
 
     /// <summary>
-    /// 装饰器**原样转发**：参数一个不改、内层交出来的那一份原样返回。
-    ///
-    /// 这一条用的是一个手写的记录型假编辑器（NUnit 这边没有 mock 库，也不打算为一个装饰器引一个）。
-    /// 之所以要这么一条：装饰器最坏的坏法是「忘了转发」或者「把参数改了一下再转发」——
-    /// 前者结果永远不变（界面看上去像点了没反应），后者是悄悄改了用户填的数。
-    /// 两者都不会抛异常，只有盯住「内层到底收到了什么」才看得见。
+    /// 装饰器原样转发：参数一个不改、内层交出来的那一份原样返回。
+    /// 转发错（忘了转、或改了参数再转）不抛异常，只有盯住内层收到了什么才看得见。
     /// </summary>
     [Test]
     public void 每条命令都原样转给内层并记上账()
@@ -413,7 +376,7 @@ public class UndoableSongEditorTests
         var editor = new UndoableSongEditor(inner);
         var song = SongAt(0);
 
-        // 每调完一条就立刻看内层收到了什么：假编辑器只留最后一笔，看晚了就被下一条盖掉了
+        // 假编辑器只留最后一笔，看晚了会被下一条盖掉
         var byBpm = editor.SetBpm(song, 96);
 
         Assert.Multiple(() =>
@@ -433,7 +396,7 @@ public class UndoableSongEditorTests
             Assert.That(byTranspose, Is.SameAs(inner.LastResult));
         });
 
-        // 内层每次交出来一份新的，装饰器就该记两笔账，能一路撤回最初那一份
+        // 内层每次交出新的，装饰器就记一笔账，能一路撤回最初那一份
         Assert.Multiple(() =>
         {
             Assert.That(editor.Undo(), Is.SameAs(byBpm));
@@ -443,10 +406,8 @@ public class UndoableSongEditorTests
     }
 
     /// <summary>
-    /// 剪一段那两个 tick 是**起点和终点**，不是起点和长度 —— 假编辑器把两个分开记就是为了这条。
-    ///
-    /// 转错（把终点当成长度）不会抛异常，也不会少剪：剪出来的那一块长度是 2880 而不是 960，
-    /// 位置也挪了。只有盯住内层收到的两个数才看得见。
+    /// 剪一段那两个 tick 是起点和终点，不是起点和长度（假编辑器分开记就是为了这条）；
+    /// 转错不抛异常也不少见东西，只有盯住内层收到的两个数才看得见。
     /// </summary>
     [Test]
     public void 剪一段的两个tick原样转给内层()
@@ -481,10 +442,7 @@ public class UndoableSongEditorTests
             },
             new TempoMap(TimeDivision.PulsesPerQuarter(480)));
 
-    /// <summary>
-    /// 逐字段比两份谱子。为什么不用引用相等：引用相等是**实现**的判据（装饰器拿它判断改没改），
-    /// 而这里要断的是**给用户看的事实** —— 撤销之后谱面确实回到了改之前。
-    /// </summary>
+    /// <summary>逐字段比两份谱子：要断的是「撤销之后谱面回到了改之前」这个给用户看的事实，不是引用相等。</summary>
     private static void AssertSameSong(string what, Song expected, Song? actual)
     {
         Assert.That(actual, Is.Not.Null, $"{what}：不该是空");
@@ -498,10 +456,7 @@ public class UndoableSongEditorTests
         });
     }
 
-    /// <summary>
-    /// 记录型的假编辑器：把收到的参数记下来，返回一份**新的** <see cref="Song"/>
-    /// （= 「这条命令改过了」）。假得足够小，读它一眼就知道它想证明什么。
-    /// </summary>
+    /// <summary>记录型假编辑器：记下收到的参数，返回一份新的 <see cref="Song"/>（= 这条命令改过了）。</summary>
     private sealed class RecordingSongEditor : ISongEditor
     {
         public Song? LastSong { get; private set; }
@@ -542,9 +497,7 @@ public class UndoableSongEditorTests
             return LastResult = new Song(song.Tracks, song.TempoMap);
         }
 
-        // 音符那几条命令的记账（挪 / 改时值 / 删音 / 剪一段 / 改名 / 删轨）。这里只留下「收到了什么」，
-        // 行为归 SongEditorNoteCommandTests 盯着 —— 假编辑器存在的唯一理由是看转发，
-        // 让它自己也算一份谱面，就等于在这一层又实现了一遍要被验的东西。
+        // 音符那几条命令只记「收到了什么」，行为归 SongEditorNoteCommandTests 盯着（这个假编辑器只为看转发）。
 
         public Song MoveNotes(Song song, IReadOnlyList<NoteRef> notes, long deltaTicks, int deltaPitch)
         {
@@ -571,8 +524,7 @@ public class UndoableSongEditorTests
             return LastResult = new Song(song.Tracks, song.TempoMap);
         }
 
-        // 两个 tick 各记各的：剪一段收的是**终点**不是长度，和 SetNoteSpan 的第二个参数
-        // 差得很远，共用一个格子的话这里就再也看不出转错没有。
+        // 两个 tick 各记各的：CutRange 收的是终点不是长度，共用一格就看不出转错没有。
         public Song CutRange(Song song, int trackIndex, long startTick, long endTick)
         {
             LastSong = song;

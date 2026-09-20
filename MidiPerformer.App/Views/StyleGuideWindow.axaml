@@ -6,11 +6,9 @@
         Width="1200" Height="900">
 
   <!--
-    dev-only 样板窗口。把令牌、圆角、阴影、字体、控件平铺出来，
-    和 docs/wireframe.html 的对应部分逐块对照 —— 它是 03 的可见产物，
-    也是日后改样式时的对照页。产品界面里没有入口，只能用 style-guide 启动参数打开。
-
-    窗口用**系统标题栏**：wireframe 里那条 .wintitle（含右侧三个圆点）不实现。
+    dev-only 样板窗口：把令牌、圆角、阴影、字体、控件平铺出来，和 docs/wireframe.html 的
+    对应部分逐块对照。产品界面里没有入口，只能用 style-guide 启动参数打开。
+    窗口用系统标题栏：wireframe 里那条 .wintitle（含右侧三个圆点）不实现。
   -->
 
   <Window.Styles>
@@ -136,12 +134,7 @@
               <StackPanel Orientation="Horizontal" Spacing="8">
                 <Button Content="保存" />
                 <Button Classes="primary" Content="导入 MIDI…" />
-                <!--
-                  `launch` 那一格从前写的是「演奏器…」—— 40 号工单把工具栏上那颗按钮
-                  换成了素的 `<c>menubar</c>` 长相，产品里**现在没有一处用 `launch` 了**。
-                  样式本身留着（它是一条正经的令牌组合，样式册的活儿就是把它们列出来），
-                  但样张上的字不该再指着一颗已经不存在的按钮，所以换成一句中性的话。
-                -->
+                <!-- 产品里现在没有一处用 `launch`；样式本身留着（样式册的活儿就是把令牌组合列出来），样张上的字换成一句中性的话。 -->
                 <Button Classes="launch" Content="打开" />
                 <Button Classes="danger" Content="删除" />
                 <Button Content="不可用" IsEnabled="False" />
@@ -185,11 +178,7 @@
             <StackPanel Spacing="6">
               <TextBlock Classes="note" Text="滑块 · 正常 / 锁死（曲子还没选）" />
               <Slider Value="62" Width="260" HorizontalAlignment="Left" />
-              <!--
-                锁死的那条一定要摆出来：圆点颜色走的是 Fluent 的资源键（见 Controls.axaml），
-                而「禁用态的圆点不能和没走过的那半截轨道同色」这种事，
-                只有并排放在这儿才看得出来 —— 圆点化进轨道里就成一根进度条了。
-              -->
+              <!-- 锁死的那条一定要摆出来：圆点颜色走的是 Fluent 的资源键（见 Controls.axaml），同色相撞只有并排看才看得出来。 -->
               <Slider Value="62" Width="260" HorizontalAlignment="Left" IsEnabled="False" />
             </StackPanel>
 

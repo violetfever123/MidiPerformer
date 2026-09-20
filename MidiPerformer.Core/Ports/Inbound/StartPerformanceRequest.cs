@@ -5,19 +5,13 @@ namespace MidiPerformer.Core.Ports.Inbound;
 
 /// <summary>
 /// 起一场演奏要说的全部话：曲子、弹哪条轨、基准八度、时序档位、倒计时几秒。
-///
-/// <b>它是全程序唯一值得做成具名类型的 Request</b>。编辑命令都是收一两个散参返回一个
-/// <see cref="Song"/>，「改没改」比引用就够了（见 spec 的 Request / Result 一节）；
-/// 这里五六个参数散着传，调用点会变成一串位置参数，谁也说不清第三个 <c>int</c> 是轨下标还是八度。
-///
-/// 它是**入站端口**那一类：由外向内递进用例，没有第二个实现，也不需要倒置 ——
-/// 它存在的理由是「打包」，不是「抽象」。
+/// 参数多，散着传会变成一串位置参数，谁也说不清第三个 <c>int</c> 是轨下标还是八度，所以打包成具名类型。
 /// </summary>
 /// <param name="Song">要弹的曲子（不可变，起跑之后由用例持有引用）。</param>
 /// <param name="TrackIndex">弹哪条轨，<see cref="Song.Tracks"/> 里的下标。</param>
 /// <param name="BaseOctave">口琴的基准八度（MIDI 编号，C4 = 第 4 八度）。<c>null</c> = 自动：
 /// 让可演奏区容下最多音符，同分时取平均八度最近的（见 <c>NoteMapper.AutoBaseOctave</c>）。</param>
-/// <param name="Timing">时序档位。三档原样用 <see cref="InputTiming"/>，这里不另立一套编号。</param>
+/// <param name="Timing">时序档位，原样用 <see cref="InputTiming"/>。</param>
 /// <param name="CountdownSeconds">盲倒计时秒数：用户用这段时间切到游戏窗口，倒计时结束才发第一个音。</param>
 public sealed record StartPerformanceRequest(
     Song Song,
@@ -27,13 +21,8 @@ public sealed record StartPerformanceRequest(
     double CountdownSeconds);
 
 /// <summary>
-/// 预检的结论。<b>是枚举，不是 Result 对象。</b>
-///
-/// 它必须存在：三种失败要给三种不同的中文提示。但**文案是界面的事** ——
-/// Core 只回一个原因，界面把它翻成「以管理员身份重开」「切到英文输入法」这类人话。
-/// 用例层一旦开始拼中文句子，文案就再也没法集中改，也没法翻译。
-///
-/// 这也不是 DTO 层：它不映射任何外部格式，跟文件格式那件事没有关系。
+/// 预检的结论：放行，或者三种失败之一。文案是界面的事 —— Core 只回一个原因，
+/// 界面把它翻成「以管理员身份重开」「切到英文输入法」这类人话。
 /// </summary>
 public enum PerformanceStartOutcome
 {

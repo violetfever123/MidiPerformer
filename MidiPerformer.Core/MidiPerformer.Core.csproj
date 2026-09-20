@@ -1,15 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <!--
-    内层：实体 + 用例 + 端口。
-    依赖方向一律朝内 —— 这个工程**不许**引用 Avalonia，也**不许**碰 Win32。
-    强制手段就是下面这份依赖清单本身：这里只允许出现 BCL 和 DryWetMidi。
-    TFM 用 net8.0（不是 net8.0-windows），所以 Avalonia / System.Windows.Forms / WPF
-    这些在编译期就找不到 —— 想塞进来必须先改这一行，那是显式的决定。
-
-    边界说清楚，别把它当万能：拦住的是**框架提供的** Windows API 和任何没引用的包。
-    手写的 [DllImport("user32.dll")] 编译期拦不住（P/Invoke 本身不需要引用），
-    那要靠 review 兜。真正需要机器强制的场合在 Adapters，不在 Core。
+    内层：实体 + 用例 + 端口。依赖方向朝内 —— 只允许 BCL 和 DryWetMidi，不引用 Avalonia、不碰 Win32。
+    靠 TFM 是 net8.0（不是 net8.0-windows）加上下面那份依赖清单强制：框架提供的 Windows API
+    在编译期就找不到。手写的 [DllImport] 拦不住（P/Invoke 不需要引用），那靠 review 兜。
   -->
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
@@ -21,7 +15,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- 只有 MidiReader / MidiWriter 能用它，见 spec「DryWetMidi 住在 Core」 -->
+    <!-- 只有 MidiReader / MidiWriter 能用它 -->
     <PackageReference Include="Melanchall.DryWetMidi" Version="7.2.0" />
   </ItemGroup>
 

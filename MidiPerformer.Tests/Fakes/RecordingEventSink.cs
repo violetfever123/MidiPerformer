@@ -4,12 +4,8 @@ using MidiPerformer.Core.UseCases.Perform.Repertoire;
 namespace MidiPerformer.Tests.Fakes;
 
 /// <summary>
-/// 记录型 sink：把每次 <see cref="Send"/> 连同**发出时的物理时刻**记下来，
-/// <see cref="ReleaseAll"/> 只计数。有了它，<c>Dispatcher</c> 和 <c>Watchdog</c>
-/// 能在不碰真键盘、不发一个按键的前提下被测。
-///
-/// 时刻取自构造时注入的时钟 —— 所以配 <see cref="FakeClock"/> 用，记下来的就是假时间轴上的时刻，
-/// 断言可以写得和谱面一样精确。
+/// 记录型 sink：记下每次 <see cref="Send"/> 的内容与发出时刻，<see cref="ReleaseAll"/> 只计数，
+/// 让用它的代码不必碰真键盘。时刻取自构造时注入的时钟，配 <see cref="FakeClock"/> 用。
 /// </summary>
 public sealed class RecordingEventSink : IEventSink
 {
@@ -29,7 +25,7 @@ public sealed class RecordingEventSink : IEventSink
         get { lock (_gate) return _sent.ToArray(); }
     }
 
-    /// <summary><see cref="ReleaseAll"/> 被调了几次。急停、看门狗、放完收尾都要让它 ≥ 1。</summary>
+    /// <summary><see cref="ReleaseAll"/> 被调了几次（急停、看门狗、放完收尾都要求它 ≥ 1）。</summary>
     public int ReleaseAllCount
     {
         get { lock (_gate) return _releaseAllCount; }

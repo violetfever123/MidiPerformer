@@ -32,18 +32,18 @@ public sealed class MappingResult
 }
 
 /// <summary>
-/// 把主旋律 MIDI 音高映射到游戏口琴按键：一个八度 do..ti → z x c v b n m；
-/// 升半音 → 加按鼠标中键；不按鼠标=基准八度、按左键=低八度、按右键=高八度；超出三个八度则空拍。
+/// 把主旋律音高映射到游戏口琴按键：do..ti → z x c v b n m，升半音加按鼠标中键；
+/// 不按鼠标=基准八度、左键=低八度、右键=高八度；超出三个八度则空拍。
 /// </summary>
 public static class NoteMapper
 {
-    /// <summary>do..ti 对应的键位（z x c v b n m）。</summary>
+    /// <summary>do..ti 对应的键位。</summary>
     public static readonly char[] Keys = PlayKeys.Keys;
 
-    /// <summary>高高音do 用的键：键盘逗号“，”。</summary>
+    /// <summary>高高音do 用的键（逗号）。</summary>
     public const char TopKey = PlayKeys.TopKey;
 
-    /// <summary>某个音高在基准=baseOct 下是否可演奏：基准±1 八度，外加最高两个音。</summary>
+    /// <summary>该音高在基准八度下是否可演奏（基准±1 八度，外加最高两个音）。</summary>
     private static bool Reachable(int pitch, int baseOct)
     {
         int d = pitch / 12 - 1 - baseOct;
@@ -67,7 +67,7 @@ public static class NoteMapper
         _ => -1
     };
 
-    /// <summary>取任意音高的键位：先按半音号归到最近的自然音，再给 z..m 键。</summary>
+    /// <summary>取任意音高的键位（升号音先降到最近的自然音）。</summary>
     public static char KeyOfPitch(int pitch)
     {
         int pc = Music.Mod(pitch, 12);
@@ -81,10 +81,10 @@ public static class NoteMapper
         return Keys[idx];
     }
 
-    /// <summary>该音高是否属于“向上的半音”（需要中键）。</summary>
+    /// <summary>该音高是否需要按中键。</summary>
     public static bool IsSharpPitch(int pitch) => SharpPc.Contains(Music.Mod(pitch, 12));
 
-    /// <summary>自动选出基准八度，使可演奏区（基准±1八度 + 高高音do/#do）容纳最多音符。</summary>
+    /// <summary>自动选出基准八度，使可演奏区容纳最多音符。</summary>
     public static int AutoBaseOctave(IReadOnlyList<int> pitches)
     {
         if (pitches.Count == 0) return 4;
@@ -116,8 +116,7 @@ public static class NoteMapper
     }
 
     /// <summary>
-    /// 执行映射。notes 为主旋律原始音符；transpose 为整体移调半音数（-24..+24）；
-    /// manualBaseOctave 为手动基准八度，null 表示自动。
+    /// 执行映射，返回每个音符的键位与档位。manualBaseOctave 为 null 时自动选基准八度。
     /// </summary>
     public static MappingResult Map(IReadOnlyList<RawNote> notes, int transpose, int? manualBaseOctave)
     {
@@ -208,8 +207,8 @@ public static class NoteMapper
     }
 
     /// <summary>
-    /// 多声部合奏合成单音线：同刻多个声部一起响时只保留编号最小（Rank 最小）的声部；
-    /// 低优先级音压在高优先级音尾音上 → 该段让位。
+    /// 多声部合奏合成单音线：同刻只保留 Rank 最小的声部，低优先级音落在高优先级音
+    /// 持续期间时让位（超出部分补回）。
     /// </summary>
     public static List<RawNote> MergeVoicesByPriority(IEnumerable<(int Rank, RawNote Note)> voices)
     {
@@ -282,10 +281,7 @@ public static class NoteMapper
         return result.OrderBy(n => n.Start).ToList();
     }
 
-    /// <summary>
-    /// 整体平移旋律，使首音从 0 秒开始（音间相对时值不变）；很多 MIDI 开头有几小节休止，剪掉后点播放立刻出音。
-    /// 首音 ≈0s 时原样返回。
-    /// </summary>
+    /// <summary>整体平移旋律，使首音从 0 秒开始（相对时值不变）。</summary>
     public static List<RawNote> TrimLeadingSilence(IReadOnlyList<RawNote> notes)
     {
         if (notes.Count == 0) return new List<RawNote>();
@@ -301,7 +297,7 @@ public static class NoteMapper
         }).ToList();
     }
 
-    /// <summary>给界面用的单音描述。</summary>
+    /// <summary>单音描述。</summary>
     public static string Describe(MappedNote n, bool withTime)
     {
         string slot = n.OctaveSlot switch

@@ -9,31 +9,14 @@
   <!--
     窗口一：编辑器外壳（docs/wireframe.html 那一块 .toolbar / .lanes / .nav / .readout / .transport）。
 
-    切片到这儿已经合齐了，工具栏几条命令的着落：
-      · 导入 MIDI… → 本窗口直接读（MidiReader.Read）
-      · 保存 / 另存为… → 写进曲库（SongProjectFile.WriteProject），装了曲子才亮
-      · 导出 → 本窗口写回一个标准 MIDI 文件（MidiWriter.Write），装了曲子才亮
-      · 撤销 / 重做 → 08 的编辑脊柱（UndoableSongEditor），没有可撤的就置灰
-      · 演奏 → 组装点给的工厂，另开一个独立窗口（04）
-      · 歌曲库 → 组装点给的曲库，另开一个独立窗口（40）
+    工具栏左边四样：文件 ▾ | 歌曲库 | 操作 ▾ | 演奏。两组菜单一组进出盘（导入 / 保存 / 另存为 /
+    导出）、一组动谱面（撤销 / 重做）；中间两颗按一下直接开一个窗口，长相照抄菜单头。
+    快捷键写在菜单项右边（InputGesture），只负责显示，真按键由本窗口的 OnWindowKeyDown 接。
 
-    前四条和撤销 / 重做收在工具栏那两组菜单里（23 号工单）：
-      「文件」= 进出盘的几件，「操作」= 动谱面的那些。
-      快捷键写在菜单项**右边**（InputGesture），真按键由本窗口的 OnWindowKeyDown 接 ——
-      它的说明在 MainWindow.axaml.cs 里。
-
-    能改谱面的有两处，都走同一条脊柱：走带条上的速度框（回车提交）和轨道头上的移调步进器。
-
-    工具栏左边那一排四样（文件 ▾ | 歌曲库 | 操作 ▾ | 演奏）是 40 号工单的样子：
-      · 曲库**不再是左边那条常驻侧栏**，改成一个和「文件」平齐的按钮，按一下开窗口（10 + 40）。
-        侧栏一撤，卷帘白得 212px。
-      · 右上的「演奏器…」挪到「操作」旁边、改名「演奏」——两处入口从两种长相变成一种
-        （`Button.menubar`，见下面的 Window.Styles）。
-    两个窗口都是**代码开出来的**，不走 XAML：它们要曲库 / 工厂和取色桥这些构造参数，
+    歌曲库和演奏两个窗口都是代码开出来的，不走 XAML：它们要曲库 / 工厂和取色桥这些构造参数，
     而 XAML 只能调无参构造。见 MainWindow.axaml.cs 的 OnLibraryClick / OnPerformerClick。
 
-    样式全部写在这儿的 Window.Styles 里：Styles/Controls.axaml 归 03，本切片不动它，
-    而新增的容器（工具栏 / 导航条 / 读数条 / 走带条）总得有长相。
+    新增的容器（工具栏 / 导航条 / 读数条 / 走带条）的长相都写在这儿的 Window.Styles 里，
     一个颜色字面值都没有 —— 全走令牌。
   -->
   <Window.Styles>
@@ -46,17 +29,12 @@
     </Style>
 
     <!--
-      工具栏上那两颗菜单按钮（「文件」/「操作」）。
-      要压的是**高度和分量**：Fluent 的菜单项自带一圈更宽的内边距和更大的字号，
-      直接摆进工具栏，会比旁边那颗「演奏器…」和「歌曲名」框高出一截，那一行就不平了 ——
-      所以 Padding / MinHeight / FontSize 三样都按按钮那头对齐（按钮是 11,5 + 12.5px）。
+      工具栏上那两颗菜单按钮（「文件」/「操作」）。Padding / MinHeight / FontSize 三样都按按钮
+      那头对齐（11,5 + 12.5px），不然会比旁边高出一截，那一行就不平了。
+      Menu 壳子只要看不见：它自带底色和边框，留着就会压出一块深一档的方块。
 
-      Menu 这个壳子只要**看不见**：它自带底色和边框，留着就会在工具栏上压出一块
-      比周围深一档的方块。壳子的作用是接住两颗菜单按钮，不是自己要有长相。
-
-      下拉里那些项**这儿管不到**：它们住在一棵单独的视觉树里（Popup），Window.Styles
-      够不着 —— 那一头长的是 Fluent 暗色那一套，和本程序的暗色主题是一路的。
-      （ComboBoxItem 那几条之所以管得到下拉，是因为它们写在**应用级**的 Controls.axaml 里。）
+      下拉里那些项这儿管不到：它们住在一棵单独的视觉树里（Popup），Window.Styles 够不着 ——
+      ComboBoxItem 那几条之所以管得到下拉，是因为它们写在应用级的 Controls.axaml 里。
     -->
     <Style Selector="Menu.toolbar">
       <Setter Property="Background" Value="Transparent" />
@@ -73,18 +51,12 @@
     </Style>
 
     <!--
-      工具栏上那两个「按一下就开一个窗口」的入口（歌曲库 / 演奏）。
-      它们和左右两组菜单**长得一样、并排站**（用户 2026-09-20：「增加一个与文件平齐的按钮」、
-      「将「演奏器」改名为「演奏」，并放在「操作」旁边」）——
-      尺子照抄上面那条 `MenuItem.toolbar`：12.5 号字、11,5 的内边距、MinHeight 0。
-      差的只有底色与描边：`MenuItem` 自己就是平的，而 `Button` 底下压着 `Styles/Controls.axaml`
-      那条基础样式（底色 TokenSurface、1px 描边）—— **不抹掉，这两颗会比菜单高出一圈**。
+      工具栏上那两个「按一下就开一个窗口」的入口（歌曲库 / 演奏）。尺子照抄上面那条
+      `MenuItem.toolbar`：12.5 号字、11,5 的内边距、MinHeight 0；差的只有底色与描边 ——
+      Button 底下压着 Controls.axaml 那条基础样式（底色 TokenSurface、1px 描边），不抹掉会比菜单高。
 
-      **要抹两处，不是一处**：Fluent 的悬停 / 按下底色画在模板里那个 ContentPresenter 上，
-      只设 Button 自己的 Background / BorderThickness 挡不住它（同一个坑见 Button.launch）。
-      所以底下照 Button.launch 的样子把 ContentPresenter 那一条也写出来，连 :pointerover 一起 ——
-      悬停给一层 TokenSurface3，让鼠标知道这儿能按；**Foreground 也要重新钉回 TokenInk**，
-      否则 Fluent 会在悬停时把它换成自己的强调色 —— 鼠标一掠过，并排那四样就不是一家人了。
+      要抹两处而不是一处：Fluent 的悬停 / 按下底色画在模板里那个 ContentPresenter 上，
+      只设 Button 自己的属性挡不住。Foreground 也要重新钉回 TokenInk，否则悬停时会被换成强调色。
     -->
     <Style Selector="Button.menubar">
       <Setter Property="Padding" Value="11,5" />
@@ -171,7 +143,7 @@
       <Setter Property="Padding" Value="13,5" />
     </Style>
 
-    <!-- 报错那一行。底色取 warn-soft，字取 warn —— 与 wireframe 的 .risk 同一套令牌 -->
+    <!-- 报错那一行 -->
     <Style Selector="Border.errorbox">
       <Setter Property="Background" Value="{DynamicResource TokenWarnSoft}" />
       <Setter Property="BorderBrush" Value="{DynamicResource TokenWarnLine}" />
@@ -185,8 +157,7 @@
       <Setter Property="FontSize" Value="11.5" />
     </Style>
 
-    <!-- 做成了那件事的回执。和 errorbox 同形不同色：这里取 accent（蓝），不取 warn（黄）——
-         颜色是「好 / 坏」的唯一区分，形状一样才不会让工具栏跳一下 -->
+    <!-- 做成了那件事的回执。和 errorbox 同形不同色：这里取 accent（蓝）而不是 warn（黄） -->
     <Style Selector="Border.noticebox">
       <Setter Property="Background" Value="{DynamicResource TokenAccentSoft}" />
       <Setter Property="BorderBrush" Value="{DynamicResource TokenAccentLine}" />
@@ -208,32 +179,16 @@
       <StackPanel Spacing="8">
         <Grid ColumnDefinitions="Auto,*">
           <!--
-            工具栏左边这一排四样，**平起平坐、间距一样（8px）、长相一样**：
-              文件 ▾ | 歌曲库 | 操作 ▾ | 演奏
+            工具栏左边这一排四样，平起平坐、间距一样（8px）、长相一样：文件 ▾ | 歌曲库 | 操作 ▾ | 演奏。
+            分组按的是这件事是什么：两组菜单一组进出盘、一组动谱面，新增的编辑动作往「操作」里加。
 
-            分组按的是**这件事是什么**，不是「谁常用」：两组菜单一组进出盘、一组动谱面，
-            以后新增的编辑类动作往「操作」里加，工具栏的宽度一分都不用再让。
-            中间那两颗**不是菜单**（按一下直接开一个窗口，没有下拉），所以是 Button 不是 MenuItem ——
-            但长相照抄菜单头（见 Window.Styles 里的 `Button.menubar`），
-            不然一排里混着两种字号两种内边距，看着像没对齐。
-
-            2026-09-20 这两处改动（40 号工单）：
-              · **歌曲库从左边那条常驻侧栏搬到了这儿**。用户原话是「增加一个与文件平齐的按钮」——
-                不是塞进「文件」的下拉里，是和「文件」并排。侧栏一撤，卷帘白得 212px。
-              · **右上的「演奏器…」挪到了「操作」旁边，并改名「演奏」**
-                （用户：「将「演奏器」与「文件操作」的表述形式统一」「放在「操作」旁边」）。
-                它从前是 `launch` 那颗蓝框按钮、靠右独占一列；现在和别的入口一样是素的 ——
-                这个代价是明码标价的：它不再「自己跳出来」了，变得和「歌曲库」一样需要找一下。
-                换来的是右边那一列 `*` 整个还给了「歌曲名」，名字框可以更长。
-
-            快捷键写在菜单项右边（InputGesture），不是 ToolTip：菜单的标准做法，
-            鼠标不用停下来等 ToolTip。注意它**只负责显示** —— 真按键是窗口级的
-            OnWindowKeyDown 接的（那一层还管着「焦点在输入框里就让开」）。
+            中间那两颗不是菜单（按一下直接开窗口，没有下拉），所以是 Button 而不是 MenuItem，
+            但长相照抄菜单头（见 Window.Styles 的 `Button.menubar`），不然一排里混着两种字号两种内边距。
           -->
           <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8">
           <Menu Classes="toolbar">
             <MenuItem Header="文件" Classes="toolbar">
-              <!-- 导入排第一：它本来就是打开这个程序第一件要做的事 -->
+              <!-- 导入排第一 -->
               <MenuItem x:Name="ImportMenuItem" Header="导入 MIDI…"
                         Click="OnImportClick"
                         ToolTip.Tip="选一个 .mid 装进这个窗口（也可以直接把文件拖进来）" />
@@ -252,25 +207,13 @@
             </MenuItem>
           </Menu>
 
-          <!--
-            歌曲库：按一下开一个窗口（SongLibraryWindow），挑一首打开、或者把不要的删掉。
-            没配曲库时置灰（组装点没给曲库，或者设计器里）—— 见 RefreshEditState。
-          -->
+          <!-- 歌曲库：按一下开一个窗口（SongLibraryWindow），挑一首打开、或者把不要的删掉。没配曲库时置灰。 -->
           <Button x:Name="LibraryButton" Classes="menubar" Content="歌曲库"
                   IsEnabled="False" Click="OnLibraryClick"
                   ToolTip.Tip="打开曲库窗口：双击一首打开，或者按右边的 × 把它删掉" />
 
           <Menu Classes="toolbar">
-            <!--
-              撤销 / 重做：栈空的时候置灰（没得撤就别让人点）。
-
-              **ToolTip 一个都不留**（26 号工单）。它们原本写着 `Ctrl+Z` / `Ctrl+Y 或 Ctrl+Shift+Z`，
-              而 23 把这两条按钮收进菜单时，已经把键位印在同一行的**右侧**（InputGesture）——
-              菜单项的快捷键就该长在那儿，鼠标不用停下来等 ToolTip 就能看见；
-              再挂一个说同一句话的 ToolTip，等于把一件小事说两遍，还多一处会和 InputGesture 对不上的地方。
-              （`Ctrl+Shift+Z` 这个别名跟着一起删掉了：它的第二个落点在提示行里也没写，
-              两处都不说 —— 按了照样管用，见 OnWindowKeyDown。这是删 ToolTip 明码标价的代价。）
-            -->
+            <!-- 撤销 / 重做：栈空的时候置灰。ToolTip 一个都不留 —— 键位已经印在菜单项右侧（InputGesture）。 -->
             <!-- Margin 不用写：外面的 StackPanel 用 Spacing 统一给间距 -->
             <MenuItem Header="操作" Classes="toolbar">
               <MenuItem x:Name="UndoMenuItem" Header="撤销" IsEnabled="False"
@@ -282,12 +225,7 @@
             </MenuItem>
           </Menu>
 
-          <!--
-            演奏：和「歌曲库」一样的素按钮，紧挨着「操作」右边（用户要的「放在「操作」旁边」）。
-            x:Name 照旧叫 `PerformerButton` —— 有一个测试按这个名字找它
-            （OverlaySurfaceTests.工具栏上的演奏入口是接上的），名字是那颗按钮和测试之间的契约，
-            改文案不该顺手把它一起改了。
-          -->
+          <!-- 演奏：和「歌曲库」一样的素按钮，紧挨着「操作」右边。x:Name 叫 `PerformerButton` —— 有测试按这个名字找它。 -->
           <Button x:Name="PerformerButton" Classes="menubar" Content="演奏"
                   Click="OnPerformerClick"
                   ToolTip.Tip="另开一个窗口，把选中的轨弹到别的程序里去" />
@@ -297,8 +235,7 @@
           <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" Margin="6,0,0,0">
             <TextBlock Classes="label" Text="歌曲名" />
             <!--
-              名字框就是曲名：改名 = 改曲库里的文件名（wireframe 脚注那句「改名就是改文件名」）。
-              还没进曲库的曲子（导入时取消了命名、或从没存过）回车就顺势存进去问个名字，
+              名字框就是曲名：改名 = 改曲库里的文件名。还没进曲库的曲子回车就顺势存进去问个名字，
               不然这一格会是个打完回车什么都没发生的死框。见 OnSongNameKeyDown。
             -->
             <TextBox x:Name="SongNameBox" Width="170" IsEnabled="False"
@@ -313,7 +250,7 @@
           <TextBlock x:Name="ErrorText" TextWrapping="Wrap" />
         </Border>
 
-        <!-- 做成了一件事的回报。导出成功要是只把报错行藏起来，用户没法知道盘上到底有没有东西 -->
+        <!-- 做成了一件事的回报：导出成功要是只把报错行藏起来，用户没法知道盘上到底有没有东西 -->
         <Border x:Name="NoticeBox" Classes="noticebox" IsVisible="False">
           <TextBlock x:Name="NoticeText" TextWrapping="Wrap" />
         </Border>
@@ -322,20 +259,15 @@
 
     <!-- ==================== 卷帘区 ==================== -->
     <!--
-      曲库原本是左边一条 212px 的常驻侧栏（wireframe 的 .split 左半），40 号工单把它
-      **整个撤了**，搬进「歌曲库」那颗按钮后面的独立窗口 —— 用户要的「一个与文件平齐的按钮」。
-      所以这一层从 Grid（212,*）变成了单列：卷帘自己吃满整幅宽，白得 212px。
-
-      留着一层单列 Grid 而不是把 ScrollViewer 直接摆进 Row 1：Row 1 那一格是 `*`，
-      直接摆也行，但这样「第 1 行 = 卷帘区」这句话还留着形状，
-      将来要在旁边加别的（比如一条侧栏）改的是这一个数字，不是把结构拆开重搭。
+      卷帘区：单列，卷帘自己吃满整幅宽。留着一层单列 Grid 而不是把 ScrollViewer 直接摆进 Row 1，
+      是为了「第 1 行 = 卷帘区」这句话还留着形状，将来要在旁边加别的只改这一个数字。
     -->
     <Grid Grid.Row="1" ColumnDefinitions="*">
       <ScrollViewer x:Name="LanesScroll"
                     HorizontalScrollBarVisibility="Disabled"
                     VerticalScrollBarVisibility="Auto">
         <Panel>
-          <!-- 可聚焦：速度框回车提交之后焦点要**从这里放开**，不然接着打字会改到刚提交的框里 -->
+          <!-- 可聚焦：速度框回车提交之后焦点要从这里放开，不然接着打字会改到刚提交的框里 -->
           <StackPanel x:Name="LanesHost" Focusable="True" />
           <TextBlock x:Name="EmptyHint"
                      Margin="24,60"
@@ -355,11 +287,9 @@
         <!-- 整曲密度缩略图。按小节吸附、拖动时喊 DragStarted / DragCompleted 给卷帘藏播放头 -->
         <views:RollNavStrip Grid.Column="1" x:Name="NavStrip" Height="30" />
         <!--
-          位置读数**从走带条搬到了这儿**，占的正是视图范围文字原先那一格。
-          视图范围（`第 1–4 小节 / 共 96`）那套文字**彻底不要了** ——
-          左边缩略图上那个视口框已经在视觉上说明「我在看哪一段」，文字是同一件事说第二遍。
-          位置读数留的是**播放头所在小节**（不是视口起始），因为右边紧挨着就是「跳到某小节」——
-          「我在哪 / 我要去哪」摆在一起才成对照。
+          位置读数留的是播放头所在小节（不是视口起始）—— 右边紧挨着就是「跳到某小节」，
+          「我在哪 / 我要去哪」摆在一起才成对照。视图范围那套文字不要了，左边缩略图的视口框
+          已经说明「我在看哪一段」。
         -->
         <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="5" Margin="12,0,0,0">
           <TextBlock Classes="label" Text="位置" />
@@ -379,14 +309,10 @@
     <Border Grid.Row="3" Classes="readoutbar">
       <Grid ColumnDefinitions="Auto,*">
         <!--
-          **一套读数，不是两套。** 从前这里左边是「悬停」那一套、右边是「选中」那一套，
-          同一个音在两处各显示一半，鼠标一移开左边变空、右边还留着 —— 看着像两台机器。
-          现在合成一套：**悬浮的音优先，没悬浮就用主选中的音**（见 RefreshReadout）。
-          两个都没有时整块连标签一起藏起来，但外头那一条的 MinHeight 不动
-          （Border.readoutbar 上的 31），否则鼠标一移开整窗会跳一下。
+          一套读数：悬浮的音优先，没悬浮就用主选中的音（见 RefreshReadout）。两个都没有时
+          整块连标签一起藏起来，但外头那一条的 MinHeight 不动（Border.readoutbar 上的 31），
+          否则鼠标一移开整窗会跳一下。初始就是藏的，和载入之后的那种状态是同一件事。
         -->
-        <!-- 初始就是藏的：还没载曲子的时候「没悬停也没选中」，和载入之后的那种状态是同一件事，
-             不该一个显示一排破折号、另一个整块消失 -->
         <StackPanel Grid.Column="0" x:Name="ReadoutDetail" Orientation="Horizontal" Spacing="16"
                     IsVisible="False">
           <StackPanel Orientation="Horizontal" Spacing="6">
@@ -411,26 +337,13 @@
           </StackPanel>
         </StackPanel>
         <!--
-          提示行：**单行 + 省略号**，不是换行。这两样看着像同一件事，其实是互斥的 ——
-          换行之后横向就不溢出了，`CharacterEllipsis` 永远不出现，窄窗只会把这条读数栏
-          撑成两行高（左边那套读数被顶得上下不齐，整窗跟着跳），也就是「变形」。
-          所以 `TextWrapping="NoWrap"` 是**这句提示成立的前提**，不是漏写的默认值
-          （谁要把它改回 Wrap，等于把下面那个 TextTrimming 变成一句空话）。
+          提示行：单行 + 省略号。`TextWrapping="NoWrap"` 是这句提示成立的前提 —— 换行之后横向就
+          不溢出，`CharacterEllipsis` 永远不出现，窄窗只会把这条读数栏撑成两行高。
 
-          **36 号起这一行分两层**：屏幕上显示的是「此刻该看的那一类」——
-          没选中音时是走带那一行（`Format.ReadoutHintPerforming`）、选中了是编辑那一行
-          （`Format.ReadoutHintEditing`），选哪一行由 `RefreshHint` 按**选中集的个数**定。
-          分层之前是一整行 148 字（自然宽 1959 物理 px），而装了曲子之后左边那套读数一在场，
-          提示行只剩 1486 物理 px —— 屏幕上会被省略号截掉约四分之一，而截掉哪几条
-          由**像素宽度**决定、不由重要程度决定。**分层之后两行都装得下**（37 号量的：
-          走带那一层 46 字 = 643 px，编辑那一层 90 字 = 1247 px，都在 1486 里，
-          左边还空着 237 px）。这一层要到多窄才见省略号也是算得出来的：提示行的框宽
-          ≈ 窗宽 − 848 px，所以编辑那一层要窗宽 ≥ 2095 物理 px（≈1048 逻辑 px）——
-          默认窗口是 1180 逻辑 px，装得下；`MinWidth`（720 逻辑 px）那一档框只剩 592 px，
-          那时两层都靠 ToolTip 看全。
-          **全文始终在 ToolTip 里**（两行合起来，见 `Format.ReadoutHintTooltip`），
-          它由 MainWindow.axaml.cs 构造函数那句 `ToolTip.SetTip` 设，不在这儿另抄一份：
-          抄一份就是两个会走散的真相源。
+          这一行分两层，屏幕上显示「此刻该看的那一类」：没选中音时是走带那一行
+          （`Format.ReadoutHintPerforming`），选中了是编辑那一行（`Format.ReadoutHintEditing`），
+          选哪一行由 `RefreshHint` 按选中集的个数定。全文始终在 ToolTip 里
+          （`Format.ReadoutHintTooltip`，由 MainWindow.axaml.cs 构造函数设，不在这儿另抄一份）。
         -->
         <TextBlock Grid.Column="1" x:Name="HintText" Classes="faint"
                    TextAlignment="Right" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"
@@ -442,37 +355,20 @@
     <Border Grid.Row="4" Classes="transportbar">
       <Grid ColumnDefinitions="Auto,Auto,Auto,*">
         <!--
-          这两颗**不进 Tab 序**（IsTabStop="False"）：空格整块被窗口级快捷键收了
-          （见 MainWindow.OnWindowKeyDown），而按钮的标准激活键正是空格 ——
-          留着 Tab 位就等于摆一个「Tab 得过去、按空格却没反应」的落点，
-          比一开始就不给这个落点更坏。鼠标、回车都照旧能按。
-        -->
-        <!--
-          走带条是**两颗**：左边一颗切换（▶ 播放 / ⏸ 暂停 / ▶ 继续，字在 RefreshTransport 里换），
+          这两颗不进 Tab 序（IsTabStop="False"）：空格整块被窗口级快捷键收了
+          （见 MainWindow.OnWindowKeyDown），而按钮的标准激活键正是空格，留着 Tab 位就是摆一个
+          「Tab 得过去、按空格却没反应」的落点。鼠标、回车都照旧能按。
+
+          走带条是两颗：左边一颗切换（▶ 播放 / ⏸ 暂停 / ▶ 继续，字在 RefreshTransport 里换），
           右边一颗 ↻ 重头播放。
-          从前右边是 ■ 停止 —— 33 号工单换掉了，理由写在那颗按钮上面。
-        -->
-        <!--
-          播放那颗的 ToolTip 说的是**它是一个切换键**（20 号工单）——
-          从前写「开始试听」，那时空格和它都只管开始；现在两头是「放」和「停在这」，
-          提示得跟着改口，否则用户以为再按一下等于重放。
         -->
         <Button Grid.Column="0" x:Name="PlayButton" Classes="primary transport"
                 Content="▶ 播放" IsEnabled="False" IsTabStop="False"
                 ToolTip.Tip="播放 / 暂停：从播放头当前位置开始，再按停在原地、再按从那儿接着放（空格键同效）"
                 Click="OnPlayClick" />
         <!--
-          这一颗 33 号工单换过：从前是 `■ 停止`（停下来 + 视野对齐小节线），现在是
-          **`↻ 重头播放`**（回开头 + 立刻放）。
-          换掉的理由：那颗按钮的两件事，「停在这」早已归暂停（空格）、
-          「我听完了」也能由「回开头顺带把视野送回第一小节」做掉 —— 而留着一颗语义和暂停
-          大半重叠的按钮，只会让人在「我到底该按哪个」上停一下。
-          `↻` 是字符（U+21BB），跟旁边的 `▶ ⏸` 一个做法，不引图标依赖。
-
-          那一句「急停是 F6」**跟着按钮一起没了**，不是丢了提示：F6 的提示本来就在
-          演奏器窗口（`PerformerWindow.axaml` 的「F6 急停」、悬浮层里两处），
-          而全局钩子只在演奏器窗口开着的时候才装着 —— 摆在编辑窗口这儿本来就是第二处，
-          还容易让人以为这个小窗口上也管着 F6。
+          ↻ 重头播放：回开头 + 立刻放。`↻` 是字符（U+21BB），跟旁边的 `▶ ⏸` 一个做法，
+          不引图标依赖。
         -->
         <Button Grid.Column="1" x:Name="RestartButton" Classes="transport"
                 Content="↻ 重头播放" IsEnabled="False" IsTabStop="False" Margin="12,0,0,0"
@@ -481,10 +377,7 @@
 
         <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="7" Margin="12,0,0,0">
           <TextBlock Classes="label" Text="速度" />
-          <!--
-            改速度就是改这一格：回车提交，写的是**具体的拍/分**，不是百分比也不是倍率。
-            没装曲子时置灰（在 RefreshEditState 里开）。
-          -->
+          <!-- 改速度就是改这一格：回车提交，写的是具体的拍/分，不是百分比也不是倍率。没装曲子时置灰。 -->
           <TextBox x:Name="BpmBox" Classes="numeric" Width="66" IsEnabled="False"
                    Text="120" VerticalAlignment="Center"
                    KeyDown="OnBpmKeyDown"
@@ -492,12 +385,6 @@
           <TextBlock Classes="faint" Text="拍/分" />
         </StackPanel>
 
-        <!--
-          这里从前还有「位置」和「时长」两栏，都搬走了：
-          「位置」上移到导航条（挨着「跳到」，见那儿）；「时长」整条删了。
-          时长原本是**改 BPM 唯一看得见的地方**（卷帘是 tick 轴，改速度不会让音符挪一个像素），
-          删掉之后「这一改动了什么」在界面上就只剩播放变快变慢 —— 这是知道代价的选择。
-        -->
         <TextBlock Grid.Column="3" Classes="faint" TextAlignment="Right"
                    HorizontalAlignment="Right" VerticalAlignment="Center">
           <Run Text="放完自动停止并松开所有按键" />

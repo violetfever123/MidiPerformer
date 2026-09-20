@@ -4,14 +4,9 @@ using NUnit.Framework;
 namespace MidiPerformer.Tests.Project;
 
 /// <summary>
-/// 曲库：硬盘上一个平铺的目录，文件名就是曲名。
-///
-/// **每一份测试用它自己的临时目录**，跑完就删 —— 曲库的默认位置是 exe 旁边的
-/// <c>.\songs\</c>，测试要是往那儿写，跑一次测试就会往仓库里塞一堆 .mproj。
-///
-/// 这里盯的是「目录操作」这一层：有哪些名字、名字对应哪个文件、改名/删除真的动了盘。
-/// 至于文件里装的 JSON 对不对，那是 <see cref="SongProjectFile"/> 的事，曲库不认识 JSON
-/// （<see cref="读回来的是原样的文本_哪怕它不是合法的工程"/> 就是钉这一条）。
+/// 曲库：硬盘上一个平铺的目录，文件名就是曲名。每份测试用它自己的临时目录，跑完就删。
+/// 盯的是目录操作这一层：有哪些名字、名字对应哪个文件、改名 / 删除真的动了盘；
+/// 文件里装的 JSON 对不对是 <see cref="SongProjectFile"/> 的事。
 /// </summary>
 public class SongLibraryTests
 {
@@ -35,7 +30,7 @@ public class SongLibraryTests
         }
         catch
         {
-            // 清理失败不该让测试红 —— 临时目录里的东西由系统去收拾
+            // 清理失败不该让测试红
         }
     }
 
@@ -76,10 +71,7 @@ public class SongLibraryTests
         });
     }
 
-    /// <summary>
-    /// 只认 .mproj。用户往这个文件夹里丢的说明文件、别的程序留下的东西都不该冒充成曲子 ——
-    /// 列表里多一行点不开的东西，比少一行难查。
-    /// </summary>
+    /// <summary>只认 .mproj：说明文件、备份文件、没后缀的都不算曲子。</summary>
     [Test]
     public void 不是mproj的文件不算曲子()
     {
@@ -91,7 +83,7 @@ public class SongLibraryTests
         Assert.That(_library.Names(), Is.EqualTo(new[] { "正经曲子" }));
     }
 
-    /// <summary>后缀大小写不敏感：MIDI 演奏器自己写的是小写，但 ".MPROJ" 不该被漏掉。</summary>
+    /// <summary>后缀大小写不敏感：自己写的是小写，但 ".MPROJ" 不该被漏掉。</summary>
     [Test]
     public void 后缀大小写不影响认出曲子()
     {
@@ -113,10 +105,8 @@ public class SongLibraryTests
     }
 
     /// <summary>
-    /// 曲库不认识 JSON：文件里装的是什么，读出来就是什么，好坏都照原样交出去。
-    ///
-    /// 这一条钉的是分层：「读不出来的工程怎么办」是 <see cref="SongProjectFile"/> 的判断，
-    /// 曲库在这里自己拦一道的话，同一个判断就有两份，早晚会不一致。
+    /// 曲库不认识 JSON：文件里装的是什么，读出来就是什么 ——
+    /// 「读不出来的工程怎么办」是 <see cref="SongProjectFile"/> 的判断。
     /// </summary>
     [Test]
     public void 读回来的是原样的文本_哪怕它不是合法的工程()
@@ -154,7 +144,7 @@ public class SongLibraryTests
         });
     }
 
-    /// <summary>同名再写一次**就是覆盖** —— 那是「保存」，不是撞名。</summary>
+    /// <summary>同名再写一次就是覆盖 —— 那是「保存」，不是撞名。</summary>
     [Test]
     public void 同名再写一次是覆盖()
     {
@@ -203,12 +193,7 @@ public class SongLibraryTests
         });
     }
 
-    /// <summary>
-    /// 删一个不存在的名字**报错，不是静默成功**。
-    ///
-    /// 静默成功会让「名字传错了」和「删掉了」长得一模一样，而删错曲子加上没删掉
-    /// 是两种都得让用户知道的事 —— 前者用户以为删了，后者用户以为没删。
-    /// </summary>
+    /// <summary>删一个不存在的名字报错，不是静默成功。</summary>
     [Test]
     public void 删不存在的曲子会报错()
     {
@@ -268,10 +253,7 @@ public class SongLibraryTests
     }
 
     /// <summary>
-    /// 改名撞名**报错，不覆盖** —— 和「写」正好相反。
-    ///
-    /// 写是「保存这首」（同名就是它自己），改名是「把 A 叫成 B」：B 已经有人叫了，
-    /// 顺手覆盖就等于把 B 那首悄悄删了，而用户以为自己只是改了个名字。
+    /// 改名撞名报错，不覆盖 —— 和「写」正好相反（写是同名即覆盖，改名顺手覆盖等于把对方那首删了）。
     /// </summary>
     [Test]
     public void 改名撞名会报错而且两首都在()
@@ -298,10 +280,7 @@ public class SongLibraryTests
         Assert.That(ex!.Message, Does.Contain("没有这首"));
     }
 
-    /// <summary>
-    /// 只改大小写不算撞名：Windows 上那本来就是同一个文件，
-    /// 当成撞名的话用户永远改不动一个「把歌名首字母大写」这种小事。
-    /// </summary>
+    /// <summary>只改大小写不算撞名：Windows 上那本来就是同一个文件。</summary>
     [Test]
     public void 只改大小写不算撞名()
     {
@@ -311,11 +290,8 @@ public class SongLibraryTests
 
         Assert.Multiple(() =>
         {
-            // **这一条才是这条用例的重点**：盘上那个名字的大小写真的变了。
-            // 只说「没多出一首」是不够的 —— Windows 不分大小写，`File.Exists("song.mproj")`
-            // 在改名**没生效**时照样是 true，`Read("SONG")` 也照样读得到，
-            // 于是一条「File.Move 对纯大小写改名其实是个空操作」的实现能把上面几条全骗过去。
-            // 用户点「改名」把 `song` 写成 `Song` 却什么也没发生，正是这条要拦的。
+            // 重点是盘上那个名字的大小写真的变了：Windows 不分大小写，
+            // File.Exists 与 Read("SONG") 在改名没生效时照样成立，光看那两条会被骗过去
             Assert.That(_library.Names(), Is.EqualTo(new[] { "SONG" }), "盘上的名字得真的变成新写法");
             Assert.That(_library.Read("SONG"), Is.EqualTo("内容"), "改的是名字，内容一个字节都不动");
             Assert.That(_library.Contains("song"), Is.True, "Windows 上这个名字就是那个文件");
@@ -324,7 +300,7 @@ public class SongLibraryTests
 
     // ==================== 曲名消毒 ====================
 
-    /// <summary>Windows 文件名里不能出现的那些字符会被去掉 —— 去掉了名字还能用，就不该拦着不让存。</summary>
+    /// <summary>Windows 文件名里不能出现的字符会被去掉（去掉了名字还能用）。</summary>
     [TestCase("a/b", "ab")]
     [TestCase("a\\b", "ab")]
     [TestCase("a:b", "ab")]
@@ -339,7 +315,7 @@ public class SongLibraryTests
         Assert.That(SongLibrary.Sanitize(written), Is.EqualTo(expected));
     }
 
-    /// <summary>去非法字符之后名字里剩下的东西不多了 —— 只剩空白的名字当不了文件名。</summary>
+    /// <summary>去掉非法字符之后只剩空白的名字当不了文件名。</summary>
     [TestCase("")]
     [TestCase("   ")]
     [TestCase("///")]
@@ -356,8 +332,7 @@ public class SongLibraryTests
     }
 
     /// <summary>
-    /// Windows 保留的设备名当不了文件名：这些名字带不带后缀都会被系统当成设备，
-    /// "CON.mproj" 根本建不出来。拦在消毒这一步，用户看到的是中文说明而不是一句系统报错。
+    /// Windows 保留的设备名当不了文件名：带后缀也一样会被当成设备，"CON.mproj" 建不出来。
     /// </summary>
     [TestCase("CON")]
     [TestCase("con")]
@@ -375,8 +350,7 @@ public class SongLibraryTests
     }
 
     /// <summary>
-    /// 消毒是**写和读都做**的：用带非法字符的名字写进去，用同一个名字读得回来
-    /// （两边消毒的结果一样，落在同一个文件上）。用户不必知道名字被改成了什么。
+    /// 消毒是写和读都做的：带非法字符的名字写得进也读得出（两边消毒结果一样，落在同一个文件上）。
     /// </summary>
     [Test]
     public void 带非法字符的名字写得进也读得出()
@@ -391,7 +365,7 @@ public class SongLibraryTests
         });
     }
 
-    /// <summary>能用的名字判断得和消毒一致 —— 界面拿它灰确定按钮，两处不能各有一套规矩。</summary>
+    /// <summary>能用的名字判断得和消毒一致 —— 界面拿它灰确定按钮。</summary>
     [TestCase("起风了", true)]
     [TestCase("a b c", true)]
     [TestCase("CON", false)]

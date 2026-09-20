@@ -3,15 +3,8 @@ using MidiPerformer.Core.Ports.Outbound;
 namespace MidiPerformer.Tests.Fakes;
 
 /// <summary>
-/// 假声卡：把 winmm 换成几个可以断言的计数器。
-///
-/// winmm 出声没法断言，所以缝开在 <see cref="IAudioSink"/> 上；但试听那条路上
-/// 真正容易错的是**时间积分**（<c>SongWalker</c>，与演奏器共用），
-/// 拿它测一次，两边都覆盖到。
-///
-/// 收的是整条 <see cref="PreviewNote"/>（含声道与音色），不是光秃秃一个音高：
-/// 「这条轨用哪个音色」正是 16 加进来的那一维，假声卡要是把它滤掉，
-/// 那条路就只能靠耳朵验了。
+/// 假声卡：把 winmm 换成几个可断言的计数器，记下最近一次 <see cref="Play"/> 收到的整条
+/// <see cref="PreviewNote"/>（含声道与音色）。
 /// </summary>
 public sealed class FakeAudioSink : IAudioSink
 {

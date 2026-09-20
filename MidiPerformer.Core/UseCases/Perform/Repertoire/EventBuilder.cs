@@ -1,24 +1,14 @@
 namespace MidiPerformer.Core.UseCases.Perform.Repertoire;
 
 /// <summary>
-/// 事件表构建器。
-///
-/// **逐字移植自 harmonica-auto-player@a14335c 的 <c>Engine/PlaybackEngine.cs</c>**：
-/// 只切出原 <c>BuildSchedule</c> 方法本体（改名 <see cref="Build"/>），外加
-/// <see cref="PhysicalEvent"/> · <see cref="ModState"/> · 四个 <c>K_*</c> 常量。
-/// **<c>PlaybackEngine</c> 本体没有搬**——它那套线程、暂停恢复、播放中实时移调是给
-/// 「设备实时输入」和「播放中换谱」用的，我们不需要；派发由我们自己的 Dispatcher 负责。
-///
-/// 方法本体与 <c>Probe</c> / <c>Timing</c> / <c>_physHeldKey</c> 三个成员逐行一致，
-/// 所以这里的字段名、局部变量名、注释都保持原样，不要"顺手整理"。
-/// 改这些文件是对拍立刻变红的信号，见 `MidiPerformer.Tests` 的移植保真度对拍。
+/// 事件表构建器：把音符序列压成物理输入事件时间表。
+/// 逐字移植自 harmonica-auto-player 的 <c>BuildSchedule</c>（此处改名 <see cref="Build"/>），
+/// 连同 <see cref="PhysicalEvent"/>、<see cref="ModState"/> 与四个 <c>K_*</c> 常量；
+/// 字段名、局部变量名与注释都保持原样，不要顺手整理。
 /// </summary>
 public sealed class EventBuilder
 {
-    /// <summary>
-    /// 一个待派发的物理输入事件。T 为**音乐时间**（秒，与速度无关）。
-    /// 用可变类而非 record，是为了在派发时回填"真正发出的时刻"，供时序诊断使用。
-    /// </summary>
+    /// <summary>一个待派发的物理输入事件，T 为音乐时间（秒）。可变类，派发时回填真正发出的时刻。</summary>
     public sealed class PhysicalEvent
     {
         public double T;
@@ -38,39 +28,28 @@ public sealed class EventBuilder
     public const int K_MouseRight = 2;
     public const int K_MouseMiddle = 3;
 
-    /// <summary>输入时序预算（物理毫秒）。构建前设置，构建时读取。</summary>
+    /// <summary>输入时序预算。构建前设置，构建时读取。</summary>
     public InputTiming Timing { get; set; } = InputTiming.Standard;
 
-    /// <summary>
-    /// 调度决策追踪输出口（null = 不追踪）。
-    /// 原版里这一行裹在 <c>#if HARP_TEST</c> 里；移植时去掉宏，让真机验证随时能开追踪。
-    /// </summary>
+    /// <summary>调度决策追踪输出口（null = 不追踪）。</summary>
     public static Action<string>? TraceSink;
 
-    /// <summary>本轮的输入时序诊断（构建时统计）。</summary>
+    /// <summary>本轮的输入时序诊断。</summary>
     public InputTimingProbe Probe { get; } = new();
 
-    /// <summary>修饰键的真实按下状态（避免"我以为按着"与游戏实际状态不一致）。</summary>
+    /// <summary>修饰键的真实按下状态。</summary>
     public readonly record struct ModState(bool L, bool R, bool M)
     {
         public static ModState None => new(false, false, false);
     }
 
-    /// <summary>音键当前是否真的处于按下状态（供停止/跳转后与游戏对表）。</summary>
+    /// <summary>音键当前是否真的处于按下状态。</summary>
     private char _physHeldKey = '\0';
 
     /// <summary>
-    /// 把一个主旋律音符序列压成物理键盘/鼠标事件时间表（音乐时间，秒，与速度无关）。
-    /// 旧实现把所有最小间隔写成 12ms / 8ms 这类远小于一帧的硬编码值，
-    /// 把"松开前音 + 八度键 + 中键 + 本音按下"全挤在 20ms 内，游戏按帧采样时整簇被折叠、
-    /// 排在末尾的音键被吃掉 → 漏音。本实现所有最小间隔改用 InputTiming 的**物理毫秒**：
-    /// 修饰键比音键早 ModLeadMs 且音键至少晚一帧；同键两次按下 ≥ RetriggerMs；
-    /// 每次按下至少按住一帧。
-    ///
-    /// 音符之间用**槽位**排开，而不是只靠"前音抬起 → 后音按下"的间隔：
-    /// 与前音重叠（含同刻起音）的音顺延到前音之后，时值不变。口琴是单音乐器，
-    /// 同刻起音本来只能吹响一个；靠"缩短前音"去腾位置，就会产生零时长按键 ——
-    /// 游戏按帧采样时一帧都读不到，整段音被吃掉。
+    /// 把音符序列压成物理键盘/鼠标事件时间表（音乐时间，秒）。
+    /// 最小间隔取 <see cref="Timing"/> 的物理毫秒：修饰键比音键早 ModLeadMs、同键重触发
+    /// ≥ RetriggerMs、每次按下至少按住一帧。重叠（含同刻起音）的音顺延到前音之后，时值不变。
     /// </summary>
     public (List<PhysicalEvent>, double) Build(
         IReadOnlyList<MappedNote> notes, ModState startMods)

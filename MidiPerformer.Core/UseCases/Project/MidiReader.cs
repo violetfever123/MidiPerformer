@@ -1,8 +1,7 @@
 using Melanchall.DryWetMidi.Core;
 using Melanchall.DryWetMidi.Interaction;
 using MidiPerformer.Core.Model;
-// DryWetMidi 自己也有 Note / TempoMap / TimeDivision。这几个别名是**故意**留着刺眼的：
-// 它们每出现一次，都在提醒读代码的人「这里正是内外两个世界握手的地方」。
+// DryWetMidi 也有同名的 Note / TempoMap / TimeDivision，用别名区分内外两个世界。
 using ModelNote = MidiPerformer.Core.Model.Note;
 using ModelTempoMap = MidiPerformer.Core.Model.TempoMap;
 using ModelTimeDivision = MidiPerformer.Core.Model.TimeDivision;
@@ -10,29 +9,20 @@ using ModelTimeDivision = MidiPerformer.Core.Model.TimeDivision;
 namespace MidiPerformer.Core.UseCases.Project;
 
 /// <summary>
-/// 标准 MIDI 文件 → <see cref="Song"/>。**S1 缝的读半边**（见 spec「Testing Decisions」）——
-/// 缝的写半边在 <see cref="MidiWriter"/>，工程文件那两条（存 / 读）在 <see cref="SongProjectFile"/>。
-/// 从前这四件事挤在同一个 <c>SongProject</c> 里，所以原来那句「缝的两半在同一个文件里」现在只能这么写。
+/// 标准 MIDI 文件 → <see cref="Song"/>。写半边在 <see cref="MidiWriter"/>，工程文件那两条（存 / 读）在 <see cref="SongProjectFile"/>。
 ///
-/// **DryWetMidi 只许出现在这个文件和 <see cref="MidiWriter"/> 里。** 这两个文件之外，
-/// 程序里任何地方都不许出现它的类型 —— <c>MidiPerformer.Tests</c> 里有一条反射测试盯着这件事。
-///
-/// 为什么 MIDI 解析不做成网关（即：为什么 DryWetMidi 在 Core 里而不是 Adapters 里）：
-/// 解析最容易错的地方正是 PPQ 换算和变速处理，把它放进网关等于把最该测的东西放进「明确不测」的筐里。
-/// DryWetMidi 是纯托管库，不碰 Win32、不碰 Avalonia，住进内层不破任何约束。
+/// DryWetMidi 只许出现在这个文件和 <see cref="MidiWriter"/> 里，别处出现它的类型会被反射测试逮到
+/// （<c>MidiPerformer.Tests</c>）。解析不做成网关：最容易错的 PPQ 换算和变速处理正该被测到。
 /// </summary>
 /// <remarks>
-/// 读取的容错策略是照 <c>harmonica-auto-player@a14335c</c> 的 <c>Midi/MidiLoader.cs</c> 来的 ——
-/// 它面对的是「用户从各种网站下载来的 MIDI」，那些文件的脏法是实测出来的：
-/// 0 字节的网盘占位文件、RIFF 包装的 .rmi、GBK 轨名、参数值越界的元事件、被截断的下载。
-/// 这些都不是假想，照搬比重新踩一遍便宜。
+/// 读取容错：用户从各种网站下载来的 MIDI 常见脏数据（0 字节占位文件、RIFF 包装的 .rmi、GBK 轨名、
+/// 参数值越界的事件、被截断的下载）一律就近纠正而不中断。
 /// </remarks>
 public static class MidiReader
 {
     static MidiReader()
     {
-        // 支持 GBK/GB2312 等旧编码（国内老 MIDI 的轨名常用）
-        // （写出那边一律 UTF-8，那是 BCL 自带的，用不着这个 provider —— 所以注册这件事跟着读取走。）
+        // 支持 GBK/GB2312 等旧编码（国内老 MIDI 的轨名常用）；写出那边一律 UTF-8，用不着这个 provider。
         try { System.Text.Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance); }
         catch { /* 注册失败不影响读取，轨名会退化成 Latin1 */ }
     }
@@ -83,11 +73,8 @@ public static class MidiReader
             // 落到下面的兜底
         }
 
-        // 两个信号都表示「这份文件没有完整可用的文件头」：
-        //   · 上面抛了异常
-        //   · 文件头只读了一半就断了 —— NotEnoughBytesPolicy.Ignore 会让 Read 正常返回，
-        //     只是 TimeDivision 是 null。这个必须自己查：放过去的话，后面 GetTempoMap()
-        //     会抛一句英文的 ArgumentNullException('timeDivision')，那不是给用户看的话。
+        // 两种信号都表示「这份文件没有完整可用的文件头」：上面抛了异常，或者文件头只读了一半就断了
+        //（NotEnoughBytesPolicy.Ignore 会让 Read 正常返回、TimeDivision 为 null，必须自己查，否则后面抛英文异常）。
         if (file?.TimeDivision is null)
         {
             // 兜底：裁掉「最后一个完整轨道之后」的残缺字节，再重新解析
@@ -113,8 +100,7 @@ public static class MidiReader
         "网站“免积分/试听”给的是残缺或非 MIDI 内容，请重新完整下载。");
 
     /// <summary>
-    /// 网上 MIDI 常带脏数据（调号、通道事件的参数值越界等），一律就近纠正而不中断。
-    /// 这些元事件对演奏没有任何影响，但会让整个文件读不进来。
+    /// 网上 MIDI 常带脏数据（调号、通道事件的参数值越界等），一律就近纠正而不中断：这些元事件对演奏没有影响，但会让整个文件读不进来。
     /// </summary>
     private static readonly ReadingSettings ReadingSettings = new()
     {
@@ -158,19 +144,12 @@ public static class MidiReader
         {
             string trackName = chunk.Events.OfType<SequenceTrackNameEvent>().FirstOrDefault()?.Text ?? "";
 
-            // 一个轨块可能装着多个声道（格式 0 的 MIDI 就是整首曲子一个轨块）。
-            // 按声道拆开 —— 每个声道才是一条声部、才有一个明确的音色。
-            // 分组用 GroupBy 的天然顺序（该声道第一次出音的先后），不按声道号排序：
-            // 原版就是这么排的，顺序一致，两边的轨列表可以直接逐条对着看。
+            // 一个轨块可能装着多个声道（格式 0 的 MIDI 整首曲子就是一个轨块），按声道拆开 ——
+            // 每个声道才是一条声部、才有一个明确的音色。分组用该声道第一次出音的先后，不按声道号排序。
             foreach (var group in chunk.GetNotes().GroupBy(n => (int)n.Channel))
             {
-                // 稳定排序：同一 tick 上的音保持 DryWetMidi 给出的相对顺序，
-                // 原版的合并逻辑依赖这个顺序，换了顺序对拍就红。
-                //
-                // 排好之后**就地发身份**（一轨一数、第几个音就是几号，见 NoteIdentity）：
-                // 身份只由这份文件的音符顺序决定，不掺随机数、不掺跨文件累加的计数器 ——
-                // 「同一次导入必须可重现」是全链对拍的前提，而身份要是每次读都不一样，
-                // 对拍红出来的样子会像是读取逻辑坏了。
+                // 稳定排序：同一 tick 上的音保持 DryWetMidi 给出的相对顺序。
+                // 排好之后就地在数组顺序上发身份（见 NoteIdentity）—— 不掺随机数，保证同一次导入可重现。
                 var notes = NoteIdentity.AssignInOrder(group
                     .OrderBy(n => n.Time)
                     .Select(n => new ModelNote(
@@ -202,26 +181,15 @@ public static class MidiReader
         string.IsNullOrWhiteSpace(trackName) ? DefaultTrackName(channel) : trackName.Trim();
 
     /// <summary>
-    /// 「文件里根本没写轨名」时那条轨该叫什么。
-    ///
-    /// 单独抽出来是为了导出端能用它**反推**：名字等于本位兜底名的轨，说明当初文件里就没有轨名，
-    /// 导出时就不该把兜底名当轨名写出去（见 <c>MidiWriter.BuildChunk</c>）。
-    ///
-    /// 它是 <c>internal</c> 而不是 <c>private</c>：导出端在另一个文件里。
-    /// 这是拆文件的代价，不是设计动作。
+    /// 「文件里根本没写轨名」时那条轨该叫什么。单独抽出来（<c>internal</c>，导出端在另一个文件里）
+    /// 是为了导出端能反推：名字等于本位兜底名的轨，说明当初文件里就没有轨名，不该把它当轨名写出去。
     /// </summary>
     internal static string DefaultTrackName(int channel) => channel == 9 ? "打击乐" : $"声道 {channel + 1}";
 
     /// <summary>
-    /// 每个声道在**整份文件**里第一次切换到的音色；没有出现过的声道不在表里（调用方按 0 号大钢琴处理）。
-    ///
-    /// 为什么是全文件扫、不是只看有音符的那个轨块：音色切换是**声道事件**，它和音符不必住在同一个轨块。
-    /// 实测语料 724 条轨里有 **101 条（14%）** 就是这个样子 —— 格式 1 常见把音色、速度这些
-    /// 集中放在第 0 个「指挥轨」里，音符在后面的轨块里。只看同一个轨块的话，
-    /// 这 14% 的音色全都会退化成 0 号大钢琴。
-    ///
-    /// 一条轨只有一个 <see cref="Track.Program"/>，所以中途换音色的曲子只能记第一个 ——
-    /// 这个字段只用来给编辑器试听定音色，不值得为它引入「音色随 tick 变化」的模型。
+    /// 每个声道在整份文件里第一次切换到的音色；没有出现过的声道不在表里（调用方按 0 号大钢琴处理）。
+    /// 全文件扫而不是只看有音符的轨块：音色切换是声道事件，格式 1 常见把它集中放在第 0 个轨块里。
+    /// 一条轨只有一个 <see cref="Track.Program"/>，中途换音色的曲子只能记第一个。
     /// </summary>
     private static Dictionary<int, int> FirstProgramPerChannel(MidiFile file)
     {
@@ -241,8 +209,8 @@ public static class MidiReader
     {
         var tempoMap = file.GetTempoMap();
 
-        // 分辨率是 0 的文件 DryWetMidi 照收不误，但我们模型的构造器会拒绝（除以零没有意义）。
-        // 在这里拦下来换成中文错误，而不是让一个英文的 ArgumentOutOfRangeException 冒到界面上。
+        // 分辨率是 0 的文件 DryWetMidi 照收不误，但模型的构造器会拒绝（除以零没有意义），
+        // 在这里拦下来换成中文错误，而不是让英文的 ArgumentOutOfRangeException 冒到界面上。
         ModelTimeDivision division;
         switch (file.TimeDivision)
         {
@@ -251,11 +219,7 @@ public static class MidiReader
                 break;
 
             case SmpteTimeDivision smpte when smpte.Resolution >= 1:
-                // SMPTE 的格式号 29 按标准是 29.97（drop-frame）。模型存的是整数帧率，表达不了 29.97，
-                // 这里就当 29 用，drop-frame 文件算出来的时间会偏长约 3.3%。
-                // 不去修的原因：SMPTE 的 MIDI 实际已经绝迹，而且 DryWetMidi 的换算器对 SMPTE 直接抛异常
-                // （原版根本打不开这种文件），所以既没有对拍参照、也没有语料，
-                // 能保证的只是「读到不崩、tick ⇄ 秒自洽」。
+                // SMPTE 的格式号 29 按标准是 29.97（drop-frame），模型存整数帧率，这里当 29 用（时间约偏长 3.3%）。
                 division = ModelTimeDivision.Smpte((int)smpte.Format, smpte.Resolution);
                 break;
 

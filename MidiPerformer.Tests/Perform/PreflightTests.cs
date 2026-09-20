@@ -10,17 +10,9 @@ using NUnit.Framework;
 namespace MidiPerformer.Tests.Perform;
 
 /// <summary>
-/// 预检 —— **按下开始之前该不该放行**。
-///
-/// 它是纯函数：两个环境事实（是不是管理员、输入法是不是中文）由界面问网关取好传进来，
-/// 这里只判断。所以这一组测试不需要窗口、不需要 Win32，连假时钟都不用。
-///
-/// 守两件事：
-/// <list type="number">
-/// <item>三种失败各回各的原因 —— 回错了，界面就会给人指错方向。</item>
-/// <item><b>判断的顺序</b>。三个条件同时不满足时先说哪一个，是有讲究的：
-///   权限不够是环境不对，这时候报「这条轨弹不了」会让人去换轨，换了还是不行。</item>
-/// </list>
+/// 预检 —— 按下开始之前该不该放行。
+/// 它是纯函数：两个环境事实（是不是管理员、输入法是不是中文）由界面问网关取好传进来，这里只判断。
+/// 守两件事：三种失败各回各的原因（回错了界面就给人指错方向）；三个条件同时不满足时先说哪一个。
 /// </summary>
 public class PreflightTests
 {
@@ -40,10 +32,7 @@ public class PreflightTests
         Assert.That(outcome, Is.EqualTo(PerformanceStartOutcome.ImeActive));
     }
 
-    /// <summary>
-    /// 「弹不了」的三种长相都要认出来，而且认的是 <c>TrackRanking.IsPlayable</c> 那一条判据
-    /// （有音 + 单声部 + 非打击乐），不是这里另立一套。
-    /// </summary>
+    /// <summary>「弹不了」的三种长相都认出来，判据取自 <c>TrackRanking.IsPlayable</c>。</summary>
     [Test]
     public void 轨弹不了就不放行()
     {
@@ -60,11 +49,8 @@ public class PreflightTests
 
     /// <summary>
     /// 一条音都没有的轨也弹不了。
-    ///
-    /// <b>这一条只能用 Core 对象摆，SMF 造不出来</b>：解析器是按轨块里的音分组生成轨的，
-    /// 没有音的轨块根本不会成轨（见 <c>MidiReader</c>）。空轨来自编辑器 —— 把一条轨的音删光，
-    /// 轨还在。漏了这一条，预检会放行、起跑、建出一张空事件表，用户看到的是
-    /// 「按了开始什么都没发生，也没有任何解释」，而预检存在的全部理由就是给那句解释。
+    /// 只能用 Core 对象摆，SMF 造不出来：解析器按轨块里的音分组生成轨，没有音的轨块不成轨；
+    /// 空轨来自编辑器（把一条轨的音删光，轨还在）。
     /// </summary>
     [Test]
     public void 空轨也不放行()
@@ -76,7 +62,7 @@ public class PreflightTests
     }
 
     /// <summary>
-    /// 顺序：权限 → 输入法 → 可弹轨。三个条件**同时**不满足时，先说的那一个必须是用户该先改的那一个。
+    /// 顺序：权限 → 输入法 → 可弹轨。同时不满足时，先说的那一个必须是用户该先改的那一个。
     /// </summary>
     [Test]
     public void 三个条件同时不满足时先说权限()
@@ -98,8 +84,6 @@ public class PreflightTests
         Assert.That(outcome, Is.EqualTo(PerformanceStartOutcome.Started));
     }
 
-    // ==================== 夹具 ====================
-
     private static PerformanceStartOutcome 检查(
         Song song, int trackIndex, bool elevated = true, bool imeInChinese = false)
         => PerformancePreflight.Check(
@@ -114,7 +98,7 @@ public class PreflightTests
             .Note(0, 240, 0, 60)
             .Note(480, 240, 0, 62)));
 
-    /// <summary>1 tick = 0.1ms。空轨那一例要自己摆 Core 对象，所以这份表也得自己给。</summary>
+    /// <summary>1 tick = 0.1ms 的表（空轨那一例要自己摆 Core 对象，所以也得自己给）。</summary>
     private static TempoMap Tempo() => new(
         TimeDivision.PulsesPerQuarter(5000),
         new[] { new TempoChange(0, 500_000) });

@@ -5,7 +5,7 @@
 
 .DESCRIPTION
     自检是纯逻辑用例（事件表 EventBuilder.Build 的 9 条边界语料 + 裁剪后钉住的程序集还在不在）。
-    程序走这条路时不建窗口、不注册热键、不碰按键与 MIDI 设备，所以可以在无人值守的机器上跑。
+    程序走这条路时不建窗口、不注册热键、不碰按键与 MIDI 设备，可以在无人值守的机器上跑，也不要求管理员权限。
 
     本脚本做五件事：
       1. 定位 exe（依次找发布目录、带开关的 Release 输出、开发构建）。
@@ -14,9 +14,7 @@
       4. 读回报告文件，统计 PASS / FAIL。
       5. 打印结果，用同样的退出码结束。
 
-    本脚本不写 bin 或 obj，不改仓库文件。报告只写到 %TEMP%。
-    本程序不要求管理员权限（清单里没有 requireAdministrator），所以这里没有
-    midikey-player 那份脚本里的 UAC 检查 —— 别把那段一起抄过来。
+    本脚本不写 bin 或 obj，不改仓库文件；报告只写到 %TEMP%。
 
 .PARAMETER ExePath
     exe 路径。默认按下面的候选顺序取第一个存在的。
@@ -56,11 +54,8 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 
 if ([string]::IsNullOrWhiteSpace($ExePath)) {
-    # 候选按"离交付物有多近"排序：
-    #   1. 发布目录 —— tools/publish.ps1 的产物，单文件 + 裁剪，这才是要守的那个产物；
-    #   2. 带开关的 Release 构建（publish 之前的那一步）；
-    #   3. 开发构建（不裁剪）—— 只想快速过一遍用例时用。
-    # 不按这个顺序查，就可能悄悄跑到一个旧的、没裁剪的 exe 上，白验一场。
+    # 按「离交付物有多近」排序：发布产物（单文件 + 裁剪）→ 带开关的 Release 构建 → 开发构建（不裁剪）。
+    # 顺序反了就可能跑到一个旧的、没裁剪的 exe 上。
     $candidates = @(
         (Join-Path $repoRoot 'MidiPerformer.App\bin\Release\net8.0\win-x64\publish\MidiPerformer.exe'),
         (Join-Path $repoRoot 'MidiPerformer.App\bin\Release\net8.0\win-x64\MidiPerformer.exe'),
@@ -79,9 +74,8 @@ if ([string]::IsNullOrWhiteSpace($ReportPath)) {
 $exe = [System.IO.Path]::GetFullPath($ExePath)
 $report = [System.IO.Path]::GetFullPath($ReportPath)
 
-# 报告不许落在仓库里：本脚本不改仓库文件。
-# 比到目录分隔符为止 —— 裸前缀会把 C:\...\MidiPerformer.logs\x.txt 这种仓库外路径也判进来，
-# 而需要显式 -ReportPath 的场合（CI 分目录留档、多份产物对比）恰好最容易撞上这种路径。
+# 报告不许落在仓库里：本脚本不改仓库文件。比到目录分隔符为止 ——
+# 裸前缀会把 C:\...\MidiPerformer.logs\x.txt 这种仓库外路径也判进来。
 $repoRootFull = [System.IO.Path]::GetFullPath($repoRoot).TrimEnd('\', '/')
 $sep = [System.IO.Path]::DirectorySeparatorChar
 if ($report -eq $repoRootFull -or
@@ -132,11 +126,8 @@ $code = $proc.ExitCode
 
 if (-not (Test-Path -LiteralPath $report -PathType Leaf)) {
     Write-Host "!! 自检没有写出报告文件。进程退出码：$code"
-    # 只放行 1（自检自己说「有用例失败」，那是文档里约定好的一条），别的非零码一律并成 3。
-    # 这里原先写的是 `exit $code`，等于把子进程的码原样漏出去 —— 而本脚本对外承诺的只有
-    # 0/1/2/3 四个，漏出来的 2 恰好撞上「找不到 exe」：exe 明明找到了、只是崩了，
-    # CI 看到 2 会朝反方向查。非零码已经不在这条分支的正常路径上了（自检只返回 0 或 1，
-    # 报告写不出去也照样返回），所以这里并成 3 不丢信息 —— 原始码就在上面那行里。
+    # 对外承诺的只有 0/1/2/3，所以别把子进程的码原样漏出去：漏出来的 2 会撞上「找不到 exe」。
+    # 只放行 1（自检自己说「有用例失败」），别的非零码并成 3；原始码就在上面那行里。
     if ($code -eq 1) { exit 1 }
     exit 3
 }
@@ -165,9 +156,7 @@ if ($failLines.Count -gt 0) {
 if ($code -ne 0) {
     Write-Host ''
     Write-Host "自检失败。退出码 $code。"
-    # 和「报告缺失」那条同一个道理：报告读得到、进程却是非零，就是「自检失败」——
-    # 并成 1，别把原始码原样漏出去（那会让「只吐 0/1/2/3」这句变成假话）。
-    # 原始码在上面那行里，没丢。
+    # 同「报告缺失」那条：报告读得到、进程却是非零，就是自检失败，并成 1（原始码在上面那行里）。
     exit 1
 }
 if ($failLines.Count -gt 0) {

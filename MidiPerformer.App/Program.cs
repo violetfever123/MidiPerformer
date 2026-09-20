@@ -9,10 +9,9 @@ internal static class Program
     [STAThread]
     public static void Main(string[] args)
     {
-        // 自检分支必须是**第一件事**：走这条路时不建窗口、不注册热键、不碰按键与 MIDI 设备，
-        // 只跑 Core 的纯函数，跑完直接 Environment.Exit，绝不落到 StartWithClassicDesktopLifetime。
-        // 发布产物的无人值守校验（tools/run-selftest.ps1）靠的就是这一点 —— 一旦先碰了 Avalonia，
-        // 校验机上没有桌面会话就会挂，裁剪有没有把逻辑改坏也就问不出来了。
+        // 自检分支必须是第一件事：这条路不建窗口、不注册热键、不碰按键与 MIDI 设备，
+        // 只跑 Core 的纯函数，跑完直接 Exit，绝不落到 StartWithClassicDesktopLifetime ——
+        // 发布产物的无人值守校验（tools/run-selftest.ps1）靠的就是这一点。
         if (PerformerSelfTest.Requested)
             Environment.Exit(PerformerSelfTest.Run());
 

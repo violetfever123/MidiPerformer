@@ -6,14 +6,8 @@ using NUnit.Framework;
 namespace MidiPerformer.Tests.Corpus;
 
 /// <summary>
-/// 真实 MIDI 语料 —— 用的是并排的 <c>drywetmidi</c> 仓库里那批 <c>Resources/MIDI files/Valid</c>。
-///
-/// 为什么借它：那批文件是 DryWetMidi 自己的测试语料，**格式 0 / 1 / 2 齐全、分辨率从 30 到 24576
-/// 都有、63 首里有 23 首带变速**，而且都是真歌（不是合成出来的规整样本）。
-/// 自己攒一份同样覆盖面的语料比借这份贵得多。
-///
-/// 依赖是**并排目录**，和 <c>PortFidelityTests</c> 依赖原版 <c>harmonica-auto-player</c> 是同一种做法：
-/// 找不到就直接红，不静默跳过 —— 一条永远绿的测试比没有测试更坏。
+/// 真实 MIDI 语料 —— 并排的 <c>drywetmidi</c> 仓库里那批 <c>Resources/MIDI files/Valid</c>。
+/// 目录找不到就直接红，不静默跳过。
 /// </summary>
 internal static class MidiCorpus
 {
@@ -46,7 +40,7 @@ internal static class MidiCorpus
             yield return new TestCaseData(f).SetName($"语料/{Path.GetFileName(f)}");
     }
 
-    /// <summary>语料目录缺失时，把话说明白。</summary>
+    /// <summary>语料目录缺失时直接报错。</summary>
     public static void AssertCorpusPresent()
     {
         Assert.That(Directory.Exists(ValidDir), Is.True,

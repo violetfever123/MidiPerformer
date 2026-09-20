@@ -9,16 +9,8 @@ using NUnit.Framework;
 namespace MidiPerformer.Tests.Editing;
 
 /// <summary>
-/// 编辑命令的**外部行为** —— S2 缝（见 spec「Testing Decisions」）。
-///
-/// 断言的都是「进去一份 Song，出来一份 Song」：断私有字段、查调用次数一概没有。
-/// 最要紧的两条是同一个意思的两面：
-/// <list type="bullet">
-/// <item>改 BPM 之后音符<b>一个字节都不动</b> —— 不是「值相等」，是同一个对象；</item>
-/// <item>改 BPM 之后卷帘上的位置也一动不动 —— 卷帘是 tick 轴，改速度改的是「一个 tick 有多长」。</item>
-/// </list>
-/// 第二条约等于「那改完 BPM 到底看得见什么」这个问题的一半答案：看得见的是总时长与播放快慢，
-/// 不是谱面（另一半在走带条的「时长」读数上，那条归人工看）。
+/// 编辑命令的对外行为：进去一份 Song，出来一份 Song。
+/// 改哪一格就只动哪一格，音符一律按同一份对象复用。
 /// </summary>
 public class SongEditorTests
 {
@@ -44,9 +36,9 @@ public class SongEditorTests
         {
             Assert.Multiple(() =>
             {
-                // Note 是值类型，逐字段比；这一条是「一个字节都没动」的**值**那一半
+                // 值那一半：逐字段相等
                 Assert.That(edited.Tracks[i].Notes, Is.EqualTo(song.Tracks[i].Notes), $"第 {i} 条轨的音符");
-                // 而这一条是**对象**那一半：不是「凑巧一样」，是同一份
+                // 对象那一半：同一份数组
                 Assert.That(edited.Tracks[i].Notes, Is.SameAs(song.Tracks[i].Notes), $"第 {i} 条轨拿的是同一份音符数组");
                 Assert.That(edited.Tracks[i], Is.SameAs(song.Tracks[i]), $"第 {i} 条轨本身也原样复用");
             });
@@ -56,7 +48,7 @@ public class SongEditorTests
     [Test]
     public void 改BPM只动速度表()
     {
-        // 400000 微秒/四分音符 = 150 BPM（不能拿 500000 当样本：那是默认值，构造器会把它丢掉）
+        // 400000 微秒/四分音符 = 150 BPM（500000 是默认值，构造器会把它丢掉）
         var song = SongOf(Map(480, new TempoChange(0, 400_000)), Melody(new Note(60, 0, 480, 100)));
 
         var edited = _editor.SetBpm(song, 76);
@@ -75,8 +67,8 @@ public class SongEditorTests
     }
 
     /// <summary>
-    /// 速度表里**没有** tick 0 事件时，基础速度住在 <c>TempoMap</c> 的默认值（= 120）里，
-    /// 光缩放现存事件是够不着它的 —— 必须补一条 tick 0 的事件。
+    /// 速度表里没有 tick 0 事件时，基础速度住在 <c>TempoMap</c> 的默认值（120）里，
+    /// 必须补一条 tick 0 事件才改得到。
     /// </summary>
     [Test]
     public void 速度表空着时补一条tick0的基础速度()
@@ -114,16 +106,11 @@ public class SongEditorTests
 
     // ==================== 改 BPM：变速曲目的快慢关系 ====================
 
-    /// <summary>
-    /// 变速曲目按**同一个比例**缩放每一条：段与段之间的快慢关系保住。
-    ///
-    /// 这条要是错了，表现得非常安静 —— 曲子还能放，只是中间那几段的速度比例变了，
-    /// 听上去「有点怪」而不会报错。
-    /// </summary>
+    /// <summary>变速曲目按同一个比例缩放每一条，段与段之间的快慢关系保住。</summary>
     [Test]
     public void 变速曲目按同一比例缩放快慢关系保住()
     {
-        // 400000 = 150 BPM，800000 = 75 BPM：第二段是第一段的一半
+        // 400000 = 150 BPM，800000 = 75 BPM：第二段是第一段的一半（tick 960 处）
         var song = SongOf(
             Map(480, new TempoChange(0, 400_000), new TempoChange(960, 800_000)),
             Melody(new Note(60, 0, 480, 100)));
@@ -156,9 +143,8 @@ public class SongEditorTests
         string file = Path.GetFileName(path);
         double head = song.TempoMap.BeatsPerMinuteAt(0);
 
-        // 比的是**原来的每一条还在不在原地、快慢是否被同一个倍数乘过** ——
-        // 不去比条数：开头那条要是正好等于默认速度，构造器会把它去掉，
-        // 于是「原来没有 tick 0 事件」的曲子会在开头**多**出一条来，条数本来就不一定相等。
+        // 只比原来的每一条还在不在原地、是否被同一个倍数乘过 ——
+        // 不比条数：等于默认速度的那条会被构造器去掉，「原来没有 tick 0 事件」的曲子会多出一条。
         foreach (var c in before)
         {
             Assert.That(byTick.ContainsKey(c.Tick), Is.True, $"{file}：tick {c.Tick} 的变速点不见了");
@@ -174,7 +160,7 @@ public class SongEditorTests
 
     // ==================== 改 BPM：秒数与卷帘刻度 ====================
 
-    /// <summary>整曲的秒数按「旧速度 : 新速度」缩放 —— 这就是改 BPM 在时间那一侧的可见结果。</summary>
+    /// <summary>整曲的秒数按「旧速度 : 新速度」缩放。</summary>
     [TestCase(75, 2.0)]     // 慢一半 → 秒数翻倍
     [TestCase(300, 0.5)]    // 快一倍 → 秒数减半
     public void 整曲秒数按新旧速度之比缩放(double bpm, double expectedRatio)
@@ -190,11 +176,7 @@ public class SongEditorTests
     }
 
     /// <summary>
-    /// <b>改 BPM 不会让音符在卷帘上移动一个像素。</b>
-    ///
-    /// 卷帘是 tick 轴（一屏固定 4 小节），音符的 tick 与小节刻度都不受速度影响 ——
-    /// 音符相对小节的位置本来就不该变，那也正是「音符数组一个字节都不动」的意思。
-    /// 谁哪天把这条当 bug 改了（比如「让音符跟着速度缩放」），这里立刻红。
+    /// 改 BPM 不让音符在卷帘上移动：卷帘是 tick 轴，音符的 tick 与小节刻度都不受速度影响。
     /// </summary>
     [Test]
     public void 改BPM不改变卷帘上的小节刻度与音符位置()
@@ -215,7 +197,7 @@ public class SongEditorTests
                 Is.EqualTo(PianoRollGeometry.BarTicks(song.TempoMap)));
         });
 
-        // 同一个 tick 在两个控制器眼里的横坐标完全相同：视口是从各自的控制器要来的
+        // 同一个 tick 在两个控制器里的横坐标完全相同（视口各自取自对应的控制器）
         var beforeView = before.ViewportOf(0, 800, 200);
         var afterView = after.ViewportOf(0, 800, 200);
         Assert.Multiple(() =>
@@ -267,7 +249,6 @@ public class SongEditorTests
         });
     }
 
-    /// <summary>移调是**绝对赋值**：设 -5 就是 -5，不是在原来的值上再挪 -5。</summary>
     [Test]
     public void 移调是绝对赋值不是增量()
     {
@@ -280,10 +261,7 @@ public class SongEditorTests
 
     // ==================== 音色 ====================
 
-    /// <summary>
-    /// 换音色只换轨上那一格，音符一个字节都不动（和移调同一条道理：音色是**听**的，
-    /// 不是谱面）。9 号声道的鼓轨也照改 —— 界面不给它画下拉框，命令不替界面挡。
-    /// </summary>
+    /// <summary>换音色只换轨上那一格，音符一个字节都不动；9 号声道的鼓轨也照改。</summary>
     [Test]
     public void 换音色只改轨的音色音符一点没动()
     {
@@ -319,7 +297,6 @@ public class SongEditorTests
         });
     }
 
-    /// <summary>音色号没变时返回同一份：装饰器拿引用相等当判据，多返回一份新的就多一格空账。</summary>
     [Test]
     public void 音色没变时返回同一份曲子()
     {
@@ -328,11 +305,7 @@ public class SongEditorTests
         Assert.That(_editor.SetProgram(song, 0, 24), Is.SameAs(song));
     }
 
-    /// <summary>
-    /// 越界**抛**，不是夹到 0..127。换音色是从一张 128 项的固定表里挑一个，
-    /// 200 是调用方写错了 —— 夹成 127 的话界面会静静地换成一个没人要的音色，
-    /// 而且不报错（和「拖过头了就贴着边」那种用户意图不是一回事）。
-    /// </summary>
+    /// <summary>越界抛异常，不夹到 0..127。</summary>
     [TestCase(-1)]
     [TestCase(128)]
     [TestCase(9999)]
@@ -367,10 +340,7 @@ public class SongEditorTests
 
     // ==================== 没改就还回来同一个 ====================
 
-    /// <summary>
-    /// 「改没改」= 引用是不是同一个。装饰器拿它当判据，所以**没改必须还回来原来那一个**：
-    /// 返回一个内容一样的新对象的话，撤销栈里会攒下一格按了没反应的记录。
-    /// </summary>
+    /// <summary>「改没改」看引用是不是同一个，所以没改必须还回来原来那一个。</summary>
     [TestCase(0)]
     [TestCase(12)]
     [TestCase(-12)]
@@ -391,8 +361,8 @@ public class SongEditorTests
     }
 
     /// <summary>
-    /// 速度表是空的（= 全曲 120）时把它设成 120：补出来的那条 tick 0 事件正好等于默认值，
-    /// <c>TempoMap</c> 的构造器会把它丢掉 —— 丢掉之后结果一样，所以这仍然是「没改」。
+    /// 空速度表（全曲 120）设成 120：补出来的 tick 0 事件正好等于默认值，会被
+    /// <c>TempoMap</c> 的构造器丢掉，结果一样，所以仍然算「没改」。
     /// </summary>
     [Test]
     public void 空速度表设成120也是没改()
@@ -443,12 +413,7 @@ public class SongEditorTests
 
     // ==================== 真实语料 ====================
 
-    /// <summary>
-    /// 63 份真实 MIDI 语料扫一遍：任何一首改完 BPM，音符都逐字段相等。
-    ///
-    /// 手写的用例只能覆盖想得到的形状，而这一条盯的是「想不到的那首里有没有被顺手改坏的东西」
-    /// —— 变速的、SMPTE 的、一个轨块塞好几个声道的，全都在语料里。
-    /// </summary>
+    /// <summary>整份真实语料扫一遍：任何一首改完 BPM，音符都逐字段相等。</summary>
     [Test]
     public void 每首语料改完BPM音符都逐字段相等()
     {
@@ -474,7 +439,7 @@ public class SongEditorTests
 
         Assert.Multiple(() =>
         {
-            // 逐条比对的测试对空壳曲子是**空转**的，「这条路真的被走过」得单独有一条盯着
+            // 防止逐条比对在空壳曲子上空转
             Assert.That(songs, Is.GreaterThan(50), "语料条数不对，检查 drywetmidi 仓库");
             Assert.That(notes, Is.GreaterThan(50_000), "扫过的音符太少，这条基本在空转");
         });

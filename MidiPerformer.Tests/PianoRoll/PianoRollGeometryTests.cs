@@ -5,13 +5,8 @@ using NUnit.Framework;
 namespace MidiPerformer.Tests.PianoRoll;
 
 /// <summary>
-/// <b>S4 缝</b>：卷帘的坐标换算（见 spec 的「Testing Decisions」）。
-///
-/// 这一块全是纯函数，所以能拿假视口一遍遍扫 —— 卷帘编辑器最容易出的 bug 就在这几个乘除里，
-/// 而只要它不是纯函数（往里塞一个 <c>Control</c>），这些用例一条都写不出来。
-///
-/// 两个方向互为逆运算，所以「往返恒等」一测就同时覆盖了两边：
-/// <c>Presenter 方向</c>（tick → 像素）与 <c>Controller 方向</c>（像素 → tick）。
+/// 卷帘的坐标换算：全是纯函数，能拿假视口一遍遍扫。
+/// 两个方向互为逆运算，「往返恒等」一测就同时覆盖 tick → 像素与像素 → tick。
 /// </summary>
 public class PianoRollGeometryTests
 {
@@ -50,7 +45,7 @@ public class PianoRollGeometryTests
                     PianoRollGeometry.XAtTick(view, view.ViewStartTick + Bar),
                     Is.EqualTo(width / 4).Within(1e-9),
                     $"宽 {width}：一小节该是屏幕的四分之一");
-                // 右边缘正好是第四小节的末尾 —— 可见范围就是这 4 小节，不多不少
+                // 右边缘正好是第四小节的末尾
                 Assert.That(
                     PianoRollGeometry.XAtTick(view, view.ViewStartTick + Bar * 4),
                     Is.EqualTo(width).Within(1e-9),
@@ -175,10 +170,10 @@ public class PianoRollGeometryTests
         {
             // 左边缘、上边缘算命中（含）
             Assert.That(PianoRollGeometry.HitTest(box, box.X, box.Y), Is.Not.EqualTo(PianoRollGeometry.RollHit.None));
-            // 右边缘、下边缘算不命中（不含）—— 相邻两个音不会同时被命中
+            // 右边缘、下边缘不命中（不含），相邻两个音不会同时被命中
             Assert.That(PianoRollGeometry.HitTest(box, box.Right, middle), Is.EqualTo(PianoRollGeometry.RollHit.None));
             Assert.That(PianoRollGeometry.HitTest(box, box.X + 1, box.Bottom), Is.EqualTo(PianoRollGeometry.RollHit.None));
-            // 上下各让出的那 0.8 像素也归「没命中」：那是音符块之间的缝
+            // 上下各让出的那 0.8 像素是音符块之间的缝，也归没命中
             Assert.That(PianoRollGeometry.HitTest(box, box.X + 1, box.Y - 0.5),
                 Is.EqualTo(PianoRollGeometry.RollHit.None));
         });
@@ -187,8 +182,7 @@ public class PianoRollGeometryTests
     [Test]
     public void 很短的音符还能点到身体()
     {
-        // 头尾各占 4px 的话，一个 6px 宽的短音上「身体」永远够不着 ——
-        // 将来 09 的拖动会变成只能拉时值、拖不动位置。所以窄带上限是宽度的三分之一。
+        // 窄带上限取宽度的三分之一：再宽的话短音上「身体」永远够不着
         var view = View(width: 200);
         var box = PianoRollGeometry.BoxOf(view, new NoteId(1), 0, 12, 60, true);
         double middle = box.Y + box.Height / 2;
@@ -226,7 +220,7 @@ public class PianoRollGeometryTests
 
         Assert.Multiple(() =>
         {
-            // 横向让 1px、上下各让 0.8px —— 和 RollPreviewStrip 一模一样，不这样相邻的音会糊成一块
+            // 横向让 1px、上下各让 0.8px，与 RollPreviewStrip 一致，不然相邻的音会糊成一块
             Assert.That(box.Right, Is.EqualTo(PianoRollGeometry.XAtTick(view, 480) - PianoRollGeometry.NoteGap)
                 .Within(1e-9));
             Assert.That(box.Y, Is.EqualTo(PianoRollGeometry.YAtPitch(view, 60) + PianoRollGeometry.NotePad)
@@ -235,12 +229,7 @@ public class PianoRollGeometryTests
         });
     }
 
-    /// <summary>
-    /// 块上带着**身份**（<see cref="NoteId"/>），不是下标。
-    ///
-    /// 这是块和模型之间唯一的桥：界面靠它认出「这个块是选中集里的那个音」，
-    /// 也靠它把点中的那个块说回给命令。换成下标的话，一次重排就能让高亮落在别的音上。
-    /// </summary>
+    /// <summary>块上带的是身份 <see cref="NoteId"/> 而不是下标 —— 换成下标，一次重排就能让高亮落在别的音上。</summary>
     [Test]
     public void 音符块带着身份()
     {
@@ -270,7 +259,7 @@ public class PianoRollGeometryTests
     {
         var view = View(width: 800);
 
-        // 不夹：曲子末尾之后就是没音符，硬夹回一个位置等于编一个不存在的落点出来
+        // 不夹：末尾之后就是没音符，硬夹回一个位置等于编一个不存在的落点出来
         Assert.That(PianoRollGeometry.TickAtX(view, 9999), Is.GreaterThan(view.ViewStartTick + Bar * 4));
     }
 
@@ -423,10 +412,10 @@ public class PianoRollGeometryTests
     {
         Assert.Multiple(() =>
         {
-            // 用户从样机上手选的：一格 = 十六分音符 = 四分音符的四分之一
+            // 一格 = 十六分音符 = 四分音符的四分之一
             Assert.That(PianoRollGeometry.GridTicks(Tempo(480, 4, 4)), Is.EqualTo(120), "480 PPQ");
             Assert.That(PianoRollGeometry.GridTicks(Tempo(960, 4, 4)), Is.EqualTo(240), "分辨率变了网格跟着变");
-            // 和拍号无关：十六分音符本来就是四分音符切四份，6/8 里的十六分不比 4/4 里小
+            // 与拍号无关：十六分音符在哪个拍号下都是四分音符切四份
             Assert.That(PianoRollGeometry.GridTicks(Tempo(480, 6, 8)), Is.EqualTo(120));
             Assert.That(PianoRollGeometry.GridTicks(Tempo(480, 3, 4)), Is.EqualTo(120));
         });
@@ -435,8 +424,7 @@ public class PianoRollGeometryTests
     [Test]
     public void 网格比一拍细()
     {
-        // 「抢拍」（比整拍早/晚一个十六分）是这类编辑器最常要修的一类错，
-        // 网格粗到一拍就吸不上它 —— 这条钉住「网格一定不是整拍」
+        // 网格粗到一拍就吸不上「抢拍」（比整拍早/晚一个十六分），这条钉住网格一定比一拍细
         long grid = PianoRollGeometry.GridTicks(Tempo(480, 4, 4));
 
         Assert.Multiple(() =>
@@ -449,8 +437,7 @@ public class PianoRollGeometryTests
     [Test]
     public void 分辨率极低时网格至少一个tick()
     {
-        // 每四分音符 2 tick 的话 `/4` 会算出 0，而 0 格意味着「不吸附」——
-        // 拖动会变成一像素一格地乱跑，比吸附不准糟得多
+        // 每四分音符 2 tick 时 /4 会算出 0，而 0 格意味着「不吸附」，拖动会一像素一格地乱跑
         Assert.Multiple(() =>
         {
             Assert.That(PianoRollGeometry.GridTicks(Tempo(2, 4, 4)), Is.EqualTo(1));
@@ -476,8 +463,7 @@ public class PianoRollGeometryTests
     public void 正好在两格正中时往远处取()
     {
         // AwayFromZero，不是银行家舍入：正中是常事（半格、半格的半格都是整数 tick），
-        // 银行家舍入会按末位奇偶跳，同一个位置往左拖和往右拖吸到不同的线上，
-        // 用户看到的就是「吸附有时不听话」
+        // 银行家舍入会按末位奇偶跳，同一个位置往左拖和往右拖吸到不同的线上
         Assert.Multiple(() =>
         {
             Assert.That(PianoRollGeometry.SnapToGrid(60, 120), Is.EqualTo(120), "0 和 120 的正中");
@@ -505,7 +491,7 @@ public class PianoRollGeometryTests
             Assert.That(PianoRollGeometry.SnapToGrid(double.NaN, 120), Is.EqualTo(0), "NaN 不该传下去");
             Assert.That(PianoRollGeometry.SnapToGrid(double.PositiveInfinity, 120), Is.EqualTo(0));
             Assert.That(PianoRollGeometry.SnapToGrid(double.NegativeInfinity, 120), Is.EqualTo(0));
-            // 0 / 负数格按 1 算：除零得到 Infinity，`(long)Math.Round(Infinity)` 是个未定义值
+            // 0 / 负数格按 1 算：除零得到 Infinity，(long)Math.Round(Infinity) 是个未定义值
             Assert.That(PianoRollGeometry.SnapToGrid(7.4, 0), Is.EqualTo(7));
             Assert.That(PianoRollGeometry.SnapToGrid(7.6, 0), Is.EqualTo(8));
             Assert.That(PianoRollGeometry.SnapToGrid(7.4, -5), Is.EqualTo(7));
@@ -515,11 +501,8 @@ public class PianoRollGeometryTests
     // ==================== 抽掉一段：拖出来的那一段 ====================
 
     /// <summary>
-    /// 「抽掉一段」那一段是**拖**出来的（38 号），这里钉的就是「拖出来的两头落在哪儿」。
-    ///
-    /// 两头都吸到**十六分格**上，和拖音符用的是同一个格：两处各用一套格的话，
-    /// 用户把音拖到某条线上、再想整段抽掉，拖出来的边界会和那条线差一点点 ——
-    /// 剪完之后的音就不在拍上了。
+    /// 抽掉的那一段是拖出来的：两头都吸到十六分格上，与拖音符用的是同一个格，
+    /// 两处各用一套格的话拖出来的边界会和音符落的那条线差一点点。
     /// </summary>
     [Test]
     public void 抽掉那一段两头都吸到格线上()
@@ -535,7 +518,7 @@ public class PianoRollGeometryTests
         });
     }
 
-    /// <summary>往左拖：起止是反的，出来的一律是**有序**的那一对（命令收到反的会抛）。</summary>
+    /// <summary>往左拖（起止反着）出来的一律是有序的那一对，命令收到反的会抛。</summary>
     [Test]
     public void 抽掉那一段往左拖也是有序的()
     {
@@ -543,12 +526,7 @@ public class PianoRollGeometryTests
             "和往右拖同一段，结果一模一样");
     }
 
-    /// <summary>
-    /// 两头吸到**同一条线上**就是「没划出东西来」—— 返回 null，不是一对相等的数。
-    ///
-    /// 这一条挡的是「手一抖就抽掉一小段」：按下没动、或者只挪了不到半格，
-    /// 那一段是空的，界面上「抽掉」得灰着（命令收到零长度会原样还回来一份同样的曲子）。
-    /// </summary>
+    /// <summary>两头吸到同一条线上就是「没划出东西来」：返回 null，不是一对相等的数。</summary>
     [Test]
     public void 没挪过半格就不算划出东西来()
     {
@@ -576,8 +554,7 @@ public class PianoRollGeometryTests
 
     [Test]
     public void 小节吸附就是拿小节当格的网格吸附()
-    {        // SnapToBar 转发给 SnapToGrid，于是舍入、NaN、负数夹取只有一份实现。
-        // 这条直接对着两个函数比 —— 日后谁把它们拆回两份，这里先红
+    {        // SnapToBar 转发给 SnapToGrid，舍入、NaN、负数夹取只有一份实现
         foreach (double tick in new[] { -100, -0.5, 0, 1, 959, 960, 961, 2879, 2880, 12345.6, double.NaN })
         {
             Assert.That(PianoRollGeometry.SnapToBar(tick, Bar),
@@ -672,13 +649,7 @@ public class PianoRollGeometryTests
 
     // ==================== 拖动的像素门槛 ====================
 
-    /// <summary>
-    /// 手没挪够的那几下全都不算拖。
-    ///
-    /// 这一条管着两件事，都是「点一下」时被 1px 手抖毁掉的：
-    /// 抢拍的音会被吸回格线（位移是相对音符自己的起点算的），
-    /// 空白处则凭空多出几个 tick 的框选区间 —— 那个区间删的是「里面的所有音」，不分音高。
-    /// </summary>
+    /// <summary>手没挪够门槛的那几下不算拖：否则抢拍的音会被吸回格线，空白处会凭空多出一段框选区间。</summary>
     [Test]
     public void 手没挪够门槛就不算拖动()
     {
@@ -703,10 +674,7 @@ public class PianoRollGeometryTests
         });
     }
 
-    /// <summary>
-    /// 门槛量的是**真实距离**，不是逐个轴分别比 —— 斜着挪 3px + 3px（约 4.24px）
-    /// 就算拖开了，尽管单独哪一个轴都没到 4。
-    /// </summary>
+    /// <summary>门槛量的是真实距离，不是逐个轴比：斜着 3px + 3px（约 4.24px）就算拖开了。</summary>
     [Test]
     public void 门槛量的是真实距离不是逐个轴()
     {
@@ -720,7 +688,7 @@ public class PianoRollGeometryTests
     [Test]
     public void 坐标坏掉时当没在拖()
     {
-        // 唯一安全的答案：宁可少改一次，不可乱改一次
+        // 宁可少改一次，不可乱改一次
         Assert.Multiple(() =>
         {
             Assert.That(PianoRollGeometry.ExceedsDragThreshold(double.NaN, 0), Is.False);

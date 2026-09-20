@@ -4,14 +4,9 @@ using NUnit.Framework;
 namespace MidiPerformer.Tests.Project;
 
 /// <summary>
-/// S1 缝的逐字段比较帮手 —— MIDI 那半（<see cref="SongProjectWriteTests"/>）和
-/// .mproj 那半（<see cref="SongProjectFileTests"/>）共用一份。
-///
-/// 为什么不写 <c>song1 == song2</c>：<see cref="Song"/> 刻意只有引用相等
-/// （撤销装饰器拿它当「这条命令改没改」的判据），要比内容就只能自己比。
-/// <see cref="Track"/> 有值相等（音符**逐个**比），直接用；比不到的只剩速度表那一摊。
-///
-/// 比较一律**精确**：tick 是整数，不给容差 —— 这是 S1 缝的原话。
+/// 逐字段比较两份 <see cref="Song"/> 的帮手。
+/// <see cref="Song"/> 只有引用相等，比内容只能自己比；<see cref="Track"/> 有值相等，直接用。
+/// 比较一律精确，不给容差。
 /// </summary>
 internal static class SongAssert
 {
@@ -21,10 +16,8 @@ internal static class SongAssert
 
         for (int i = 0; i < expected.Tracks.Count; i++)
         {
-            // Track 的值相等会把轨块序号 / 声道 / 轨名 / 音色 / 移调 / 每个音的那四个内容字段全部比掉，
-            // 而 tick 是整数，比的就是精确值，没有容差。
-            // **身份（Note.Id）不在里面**，那是故意的：它不是内容（见 Note.Equals 的说明）。
-            // 要比身份的地方自己比（SongProjectFileTests.AssertSameIds）—— 这里比的始终是「同一份谱面」。
+            // Track 的值相等会连轨块序号 / 声道 / 轨名 / 音色 / 移调 / 每个音的内容字段一起比掉，tick 比的是精确值。
+            // 身份（Note.Id）不在里面，要比身份的地方自己比。
             Assert.That(actual.Tracks[i], Is.EqualTo(expected.Tracks[i]),
                 $"{because}：第 {i} 条轨（{expected.Tracks[i].Name}）");
         }

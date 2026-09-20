@@ -9,26 +9,18 @@ using NUnit.Framework;
 namespace MidiPerformer.Tests.Perform;
 
 /// <summary>
-/// 派发器 —— **什么时候发**。
-///
-/// 这条缝是整块演奏路径上唯一能用假时钟验的部分：真跑起来它把按键发进游戏，
-/// 只能盯着看对不对。所以这里断言的都是「事件表 + 时钟」进去、「什么时候发了什么」出来，
-/// 不碰任何私有成员。
-///
-/// <b>假时钟必须开 <see cref="FakeClock.AutoStepSeconds"/></b>：派发器的等待循环靠**读时钟**
-/// 往前走，手动模式下时钟不动，自旋那一段会一直转下去，测试挂死。
-///
-/// <b>容差为什么是两步</b>：假时钟只在被读的时候前进，且返回的是**步进之前**的值。
-/// 判到「到点了」是一次读，<c>Send</c> 记发出时刻又是一次读（RecordingEventSink 记的是它自己读到的时刻），
-/// 中间必然跨过一步，所以实际发出时刻落在目标的 [一步, 两步) 之后。
-/// 小于一步的偏差在假时钟上根本表达不出来 —— 那是时钟的分辨率，不是实现的问题。
+/// 派发器 —— 什么时候发。断言的是「事件表 + 时钟」进去、「什么时候发了什么」出来。
+/// 假时钟必须开 <see cref="FakeClock.AutoStepSeconds"/>：等待循环靠读时钟往前走，
+/// 手动模式下时钟不动，自旋那一段会一直转下去。
+/// 容差是两步：假时钟只在被读时前进、且返回步进之前的值，
+/// 「判到点了」一读、<c>Send</c> 记账又一读，中间必然跨过一步。
 /// </summary>
 public class DispatcherTests
 {
     /// <summary>假时钟每被读一次前进的秒数，也是这组测试的容差基准。</summary>
     private const double Step = 0.005;
 
-    /// <summary>两步步长再加一点余量，覆盖「自旋判到」与「Send 记账」之间的两次读。</summary>
+    /// <summary>两步步长加一点余量，覆盖「自旋判到」与「Send 记账」之间的两次读。</summary>
     private const double Tol = 2 * Step + 0.001;
 
     // ==================== 时间戳 ====================
@@ -52,15 +44,15 @@ public class DispatcherTests
 
             Assert.Multiple(() =>
             {
-                // 顺序：发出去的顺序必须是事件表的顺序，时间戳也必须单调不减
+                // 顺序：发出顺序必须是事件表顺序，时间戳单调不减
                 Assert.That(sent[i].Code, Is.EqualTo(events[i].Code), $"第 {i} 个事件发错了");
                 Assert.That(sent[i].Down, Is.EqualTo(events[i].Down));
 
-                // 不许提前：LeadMs 是给游戏采样留的提前量，提前发出去等于把这个余量吃掉
+                // 不许提前：LeadMs 是给游戏采样留的提前量
                 Assert.That(sent[i].At, Is.GreaterThanOrEqualTo(target - 0.0005),
                     $"第 {i} 个事件比目标时刻早发了，目标的提前量就不够了");
 
-                // 也不许迟到太多：迟到同样在吃那个余量
+                // 也不许迟到太多：迟到同样吃掉那个余量
                 Assert.That(sent[i].At, Is.EqualTo(target).Within(Tol),
                     $"第 {i} 个事件晚了 {sent[i].At - target:F4}s");
             });
@@ -71,8 +63,7 @@ public class DispatcherTests
     }
 
     /// <summary>
-    /// 三档时序各跑一遍，每一档都必须落在**它自己那个** LeadMs 算出来的目标上。
-    /// 这一条拦的是「换了档位但代码里还留着另一个数」。
+    /// 三档时序各跑一遍，每一档落在它自己那个 LeadMs 算出的目标上（拦「换了档却还留着另一个数」）。
     /// </summary>
     [TestCase(0.104)]   // 稳健
     [TestCase(0.057)]   // 标准
@@ -94,9 +85,8 @@ public class DispatcherTests
     }
 
     /// <summary>
-    /// 同一条事件表，换档位**必须**整体平移，位移量正好是两档 LeadMs 之差。
-    /// 只验「各自落在自己的目标上」还不够：万一实现是拿整首曲子的第一个时刻当基准
-    /// 一次性算偏移，也能过上面那条。
+    /// 同一条事件表换档位后整体平移，位移量正好是两档 LeadMs 之差
+    /// （只看「各自落在自己的目标上」的话，拿整曲第一个时刻一次性算偏移的实现也能过）。
     /// </summary>
     [Test]
     public void 换档位时提前量整体平移()
@@ -109,7 +99,7 @@ public class DispatcherTests
         var (clockB, sinkB, walkerB) = 开工();
         new Dispatcher(clockB, sinkB).Run(events, walkerB, InputTiming.Safe);
 
-        // 提前量越大，发得越早 —— 所以位移是**负**的：稳健档比标准档早 47ms 发出去。
+        // 提前量越大发得越早，所以位移是负的：稳健档比标准档早 47ms
         double expected = (InputTiming.Standard.LeadMs - InputTiming.Safe.LeadMs) / 1000.0;
         Assert.That(expected, Is.LessThan(0), "稳健档的提前量本来就比标准档大，所以它该发得更早");
 
@@ -150,11 +140,8 @@ public class DispatcherTests
     // ==================== 急停 ====================
 
     /// <summary>
-    /// 急停必须**立刻**生效：不能等当前那一觉睡完。
-    ///
-    /// 手法是让第二个事件落在 30 秒之外 —— 如果实现是裸 <c>Thread.Sleep</c>，
-    /// 按了急停它还要睡满这 30 秒；能中断的等待则是一叫就醒。
-    /// 时钟刻意用手动模式：这样「时间有没有走」是测试说了算，不是墙上的钟说了算。
+    /// 急停立刻生效，不等当前那一觉睡完：让第二个事件落在 30 秒之外，
+    /// 裸 <c>Thread.Sleep</c> 会睡满，能中断的等待则一叫就醒（时钟用手动模式）。
     /// </summary>
     [Test]
     public void 急停立刻生效不用等当前那次等待睡完()
@@ -162,8 +149,8 @@ public class DispatcherTests
         var clock = new FakeClock { Seconds = 1.0 };      // 手动模式
         var sink = new RecordingEventSink(clock);
         var walker = 走子();
-        // 时钟从 1.0 秒起，所以前两个事件（目标 0.143 / 0.173）已经在过去，会被立刻发出；
-        // 第三个的目标在 30 秒外，那才是「正在被子等待」的那个。
+        // 时钟从 1.0 秒起，前两个事件（目标 0.143 / 0.173）已经在过去、会被立刻发出；
+        // 第三个的目标在 30 秒外，那才是正被子等待的那个
         var events = 音键表(0.20, 30.0);
 
         var dispatcher = new Dispatcher(clock, sink);
@@ -209,9 +196,8 @@ public class DispatcherTests
     // ==================== 夹具 ====================
 
     /// <summary>
-    /// 一副能跑的夹具：自动步进的假时钟（派发器的等待循环靠它往前走）+ 记录型 sink
-    /// + 锚点定在物理 0 秒的走子。既然锚点是 0、倍速是 1，物理时刻就等于音乐时刻
-    /// —— 断言里可以心算。
+    /// 一副能跑的夹具：自动步进的假时钟 + 记录型 sink + 锚点定在物理 0 秒的走子
+    /// （锚点 0、倍速 1，物理时刻 = 音乐时刻）。
     /// </summary>
     private static (FakeClock Clock, RecordingEventSink Sink, SongWalker Walker) 开工()
     {
@@ -222,8 +208,7 @@ public class DispatcherTests
 
     private static SongWalker 走子()
     {
-        // 派发只用到 SongWalker 的 PhysicalAt，而它是一段与曲子内容无关的仿射变换，
-        // 所以这里给一首空曲子就够了 —— 要事件表就另外造，见 音键表。
+        // 派发只用到 SongWalker.PhysicalAt，那是一段与曲子内容无关的仿射变换，空曲子就够（事件表另造）
         var song = new Song(Array.Empty<Track>(), new TempoMap(TimeDivision.PulsesPerQuarter(480)));
         var walker = new SongWalker(song);
         walker.Start(0.0);
@@ -231,10 +216,8 @@ public class DispatcherTests
     }
 
     /// <summary>
-    /// 手搓一张事件表：每个音乐时刻一个按下，30ms 之后抬起。
-    ///
-    /// 刻意不经过 <c>EventBuilder</c>：这里被测的是「给定事件表怎么发」，
-    /// 拿真实谱面生成反而看不清每个事件的目标时刻是多少。键位在 z..m 上轮着来。
+    /// 手搓一张事件表：每个音乐时刻一个按下，30ms 之后抬起，键位在 z..m 上轮着来
+    /// （不经过 <c>EventBuilder</c>，每个事件的目标时刻一眼看得清）。
     /// </summary>
     private static List<EventBuilder.PhysicalEvent> 音键表(params double[] musicTimes)
     {

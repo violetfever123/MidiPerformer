@@ -6,11 +6,9 @@ using NUnit.Framework;
 namespace MidiPerformer.Tests.PianoRoll;
 
 /// <summary>
-/// 卷帘的 <b>tick → 像素</b> 方向：一屏要画的东西算得对不对。
-///
-/// 这里测的是「画什么」，不是「画在哪」—— 落笔的位置全部来自 S4 缝，那边已经扫过一遍了。
-/// 产出是纯数据（<see cref="PianoRollPresenter.LaneScene"/> / <see cref="PianoRollPresenter.NavScene"/>），
-/// 所以不用起窗口就能一条条比。
+/// 卷帘 tick → 像素 方向：一屏要画什么。
+/// 落笔位置全部来自坐标换算那边，这里的产出是纯数据
+/// （<see cref="PianoRollPresenter.LaneScene"/> / <see cref="PianoRollPresenter.NavScene"/>），不用起窗口。
 /// </summary>
 public class PianoRollPresenterTests
 {
@@ -19,12 +17,7 @@ public class PianoRollPresenterTests
 
     private static Track Lane(params Note[] notes) => new(0, 0, "主旋律", 24, Numbered(notes));
 
-    /// <summary>
-    /// 给没写身份的音按数组顺序发 1..N 号（<c>NoteIdentity.AssignInOrder</c> 在测试里的替身）。
-    ///
-    /// 场景里装的是**身份**（<see cref="NoteId"/>），一个没号的音谁都认不出来 ——
-    /// 不编号的话下面这些用例量的就是「认不出来」那套行为，而不是本来要测的那件事。
-    /// </summary>
+    /// <summary>给没写身份的音按数组顺序发 1..N 号（场景里装的是身份，没号就谁都认不出来）。</summary>
     private static Note[] Numbered(Note[] notes)
     {
         var numbered = new Note[notes.Length];
@@ -34,12 +27,7 @@ public class PianoRollPresenterTests
         return numbered;
     }
 
-    /// <summary>
-    /// 第 <paramref name="index"/> 个音（数组序，0 起）的**号**。
-    ///
-    /// 用例里说的是「第几个音」，模型里存的是号，两边靠这条近路对上 ——
-    /// 近路只活在测试里：真实代码手里的号一律来自模型（<c>Note.Id</c>）。
-    /// </summary>
+    /// <summary>第 <paramref name="index"/> 个音（数组序，0 起）的号；用例说的是「第几个音」，模型存的是号。</summary>
     private static NoteId IdOf(int index) => new(index + 1);
 
     private static PianoRollGeometry.Viewport View(
@@ -67,7 +55,7 @@ public class PianoRollPresenterTests
         var track = Lane(
             new Note(60, 0, 240, 100),          // 屏幕里
             new Note(62, Bar * 2, 240, 100),    // 屏幕里
-            new Note(64, Bar * 4, 240, 100),    // 正好从右边缘起 —— 屏幕外
+            new Note(64, Bar * 4, 240, 100),    // 正好从右边缘起，屏幕外
             new Note(65, Bar * 10, 240, 100));  // 远在屏幕外
 
         var scene = Build(track, View());
@@ -108,7 +96,7 @@ public class PianoRollPresenterTests
     [Test]
     public void 音符块画的是移调之后的音高()
     {
-        // 卷帘上看到的音高 = 听到的音高 = 游戏里按的那个音高，三处必须是同一个数
+        // 卷帘上看到的音高 = 听到的音高 = 游戏里按的那个，三处必须是同一个数
         var track = new Track(0, 0, "主旋律", 24, new[] { new Note(60, 0, 240, 100) }, Transpose: -12);
 
         var scene = Build(track, View(low: 40, high: 60));
@@ -140,7 +128,7 @@ public class PianoRollPresenterTests
     [Test]
     public void 标灰标记缺了就当在范围内()
     {
-        // 这一格只影响画法。数组短了一格就画成正常音，不该连累得画都画不出来
+        // 这一格只影响画法：数组短了一格就画成正常音，不该连累得画都画不出来
         var track = Lane(new Note(60, 0, 240, 100));
 
         var scene = Build(track, View(), inRange: Array.Empty<bool>());
@@ -153,7 +141,7 @@ public class PianoRollPresenterTests
     [Test]
     public void 播放头不画的时候给一个NaN()
     {
-        // 拖导航条时整个卷帘都不画红线（wireframe 标注 3）
+        // 拖导航条时整个卷帘都不画红线
         var scene = Build(Lane(new Note(60, 0, 240, 100)), View(), playhead: Bar, playheadVisible: false);
 
         Assert.That(double.IsNaN(scene.PlayheadX), Is.True,
@@ -183,8 +171,7 @@ public class PianoRollPresenterTests
     [Test]
     public void 一屏画四小节的小节线()
     {
-        // 起点 0、一屏 4 小节：小节线落在 0/1/2/3/4 小节上。
-        // 多出来那两条（第 5、6 小节）在屏幕外，画了也看不见，但没有理由为它们加一个判断
+        // 起点 0、一屏 4 小节：小节线落在 0/1/2/3/4 小节上；多出来那两条在屏幕外，画了也看不见
         var scene = Build(Lane(new Note(60, 0, 240, 100)), View(width: 800), barCount: 8);
 
         // 乘出来的浮点数会有末位噪声，比到小数点后六位就够了
@@ -221,7 +208,7 @@ public class PianoRollPresenterTests
     [Test]
     public void 拍线按拍号切()
     {
-        // 4/4 一小节 4 拍：每小节 3 条拍线（不含小节线本身），一屏 4 小节共 12 条落在屏幕里
+        // 4/4 每小节 3 条拍线（不含小节线本身），一屏 4 小节共 12 条落在屏幕里
         var scene = Build(Lane(new Note(60, 0, 240, 100)), View(width: 800), barCount: 8);
         double beatWidth = 800.0 / (Bar * 4) * TicksPerQuarter;
 
@@ -236,9 +223,8 @@ public class PianoRollPresenterTests
     [Test]
     public void 曲子之外不画小节线()
     {
-        // 整曲才 2 小节，一屏 4 小节的窗口右半边是空白谱面。
-        // 只有「存在的那几小节」才有线：最后那个小节的起始线照画，
-        // 它之后（曲子已经完了）一条都不画 —— 空着的半边正是「这里没谱了」的样子
+        // 整曲才 2 小节，一屏 4 小节的窗口右半边是空白谱面：只有存在的那几小节才有线，
+        // 最后那个小节的起始线照画，它之后一条都不画
         var scene = Build(Lane(new Note(60, 0, 240, 100)), View(width: 800), barCount: 2);
 
         Assert.That(scene.BarLines.Select(x => Math.Round(x, 6)), Is.EqualTo(new[] { 0.0, 200.0 }));
@@ -246,9 +232,7 @@ public class PianoRollPresenterTests
 
     // ==================== 导航条 ====================
 
-    /// <summary>
-    /// 建一张导航条场景。默认是 1000px 宽、30px 高（就是窗口里那条的实际高度）、4 小节的曲子。
-    /// </summary>
+    /// <summary>建一张导航条场景。默认 1000px 宽、4 小节的曲子。</summary>
     private static PianoRollPresenter.NavScene Nav(
         Track? track,
         (int Low, int High)? pitchRange = null,
@@ -288,8 +272,7 @@ public class PianoRollPresenterTests
     [Test]
     public void 导航条换一条轨就换一份音符()
     {
-        // 缩略图跟的是**焦点轨**，不是「所有轨加在一起」——
-        // 换了焦点轨，同一段 tick 上画出来的东西必须换成那条轨自己的音
+        // 缩略图跟的是焦点轨，不是「所有轨加在一起」：换了焦点轨，同一段 tick 上画的就得换成那条轨的音
         var melody = Lane(new Note(60, 0, Bar / 2, 100));
         var bass = new Track(0, 1, "贝斯", 32, new[] { new Note(48, Bar, Bar / 2, 100) });
 
@@ -309,7 +292,7 @@ public class PianoRollPresenterTests
     [Test]
     public void 导航条纵向用这条轨自己的音域铺开()
     {
-        // 同一条轨的音：音域越窄，纵向拉得越开 —— 缩略图的纵向分辨率全给这条轨用到的音
+        // 音域越窄纵向拉得越开：缩略图的纵向分辨率全给这条轨用到的音
         var track = Lane(new Note(60, 0, Bar / 2, 100), new Note(62, Bar, Bar / 2, 100));
 
         var narrow = Nav(track, pitchRange: (60, 62), height: 30);
@@ -327,8 +310,7 @@ public class PianoRollPresenterTests
     [Test]
     public void 导航条音高越界的音贴在边行不丢()
     {
-        // 音域贴到 MIDI 两端被 FitPitchRange 夹过之后，某个音会落在音域之外。
-        // 卷帘那边是直接不画，缩略图**不能** —— 少一个音看着就是「这段没谱」
+        // 音域被 FitPitchRange 夹过之后某个音会落在音域之外：卷帘那边直接不画，缩略图不能 —— 少一个音看着就是「这段没谱」
         var track = Lane(new Note(60, 0, Bar / 2, 100), new Note(80, Bar, Bar / 2, 100));
 
         var scene = Nav(track, pitchRange: (60, 72), height: 26);
@@ -345,8 +327,7 @@ public class PianoRollPresenterTests
     [Test]
     public void 导航条上的短音也有一笔可看()
     {
-        // 长曲子里整曲铺进一条几百像素的带子：一个十六分音符只剩零点几个像素 ——
-        // 不给最小宽度，快的段落整段消失
+        // 长曲子铺进一条几百像素的带子：一个十六分音符只剩零点几个像素，不给最小宽度，快的段落整段消失
         var scene = Nav(
             Lane(new Note(60, 0, TicksPerQuarter / 4, 100)),
             barCount: 400, totalTicks: Bar * 400);
@@ -371,8 +352,7 @@ public class PianoRollPresenterTests
     [Test]
     public void 没有这条轨时导航条是一张空的()
     {
-        // 轨被删光的那一帧，窗口手上没有轨对象可给（控制器把越界的下标当「没这条轨」）。
-        // 那一帧要的是一条空缩略图，不是一场崩溃
+        // 轨被删光的那一帧手上没有轨对象可给（控制器把越界下标当「没这条轨」），要的是一条空缩略图，不是崩溃
         var scene = Nav(track: null);
 
         Assert.Multiple(() =>
@@ -417,7 +397,7 @@ public class PianoRollPresenterTests
 
     // ==================== 拖动预览（幽灵块）与框选 ====================
 
-    /// <summary>建一张带拖动预览 / 框选 / 划段 / 多选的场景。位移是**增量**，和命令收的是同一个说法。</summary>
+    /// <summary>建一张带拖动预览 / 框选 / 划段 / 多选的场景。位移是增量，和命令收的是同一个说法。</summary>
     private static PianoRollPresenter.LaneScene BuildDragging(
         Track track,
         PianoRollGeometry.Viewport view,
@@ -462,11 +442,8 @@ public class PianoRollPresenterTests
     }
 
     /// <summary>
-    /// 这条是幽灵块存在的全部理由：预览要是不等于落点，用户就是照着一幅假象在拖。
-    ///
-    /// 拿一个**窄到被 <c>MinNoteWidth</c> 托住**的极短音来试，两种写法在这儿会分道扬镳：
-    /// 「真块宽度 + 位移像素」算出来是一截偏宽的，而「拿新 tick 重算一遍」和落点严丝合缝。
-    /// 末一条断言盯的就是这一点 —— 落点得真的宽过下限，不然这个用例量的是下限、两种写法都能过。
+    /// 幽灵块要和这个音改完之后真画出来的块一模一样 —— 预览不等于落点，用户就是照着一幅假象在拖。
+    /// 拿一个窄到被 <c>MinNoteWidth</c> 托住的极短音来试，末一条断言保证落点真的宽过下限。
     /// </summary>
     [Test]
     public void 幽灵块和这个音改完之后真画出来的块一模一样()
@@ -504,7 +481,7 @@ public class PianoRollPresenterTests
     [Test]
     public void 框选那把带子往左拖也是正的宽()
     {
-        // 起止是反的（从右往左拖）—— 谁算像素谁负责归一
+        // 起止是反的（从右往左拖），谁算像素谁负责归一
         var view = View();
         var rect = BuildDragging(Lane(new Note(60, 0, 240, 100)), view,
             marquee: new PianoRollPresenter.MarqueeRange(Bar, 0)).Marquee!.Value;
@@ -519,8 +496,7 @@ public class PianoRollPresenterTests
     [Test]
     public void 框选那把带子铺满标尺以下的整条轨()
     {
-        // 框的纵向不参与判定（删的是「这段区间里的所有音」，与音高无关），
-        // 所以画矮了就是在撒谎：只盖住两行、结果删了三行的音
+        // 框的纵向不参与判定（删的是这段区间里的所有音，与音高无关），画矮了就是在撒谎
         var view = View();
         var rect = BuildDragging(Lane(new Note(60, 0, 240, 100)), view,
             marquee: new PianoRollPresenter.MarqueeRange(0, Bar)).Marquee!.Value;
@@ -536,11 +512,7 @@ public class PianoRollPresenterTests
     public void 没在划段时没有红带子()
         => Assert.That(Build(Lane(new Note(60, 0, 240, 100)), View()).CutBand, Is.Null);
 
-    /// <summary>
-    /// 红带子和蓝带子铺的是同一份几何 —— 这条和下面那条本来就在量
-    /// <see cref="PianoRollGeometry"/> 的那两行，写在这儿是为了钉住
-    /// 「红带子复用蓝带子的算法」这件事，而不是各算各的。
-    /// </summary>
+    /// <summary>红带子和蓝带子铺的是同一份 <see cref="PianoRollGeometry"/> 几何：红带子复用蓝带子的算法，不各算各的。</summary>
     [Test]
     public void 划段那把红带子往左拖也是正的宽()
     {
@@ -558,7 +530,7 @@ public class PianoRollPresenterTests
     [Test]
     public void 划段那把红带子铺满标尺以下的整条轨()
     {
-        // 和框选同理：抽掉的是「这段时间里的所有音」，与音高无关
+        // 和框选同理：抽掉的是这段时间里的所有音，与音高无关
         var view = View();
         var rect = BuildDragging(Lane(new Note(60, 0, 240, 100)), view,
             cut: new PianoRollPresenter.MarqueeRange(0, Bar)).CutBand!.Value;
@@ -602,20 +574,15 @@ public class PianoRollPresenterTests
     }
 
     /// <summary>
-    /// 选中集**按加进来的先后**留着，不被排成升序。
-    ///
-    /// 这条挡的是「顺手把它排一下」：<see cref="PianoRollPresenter.LaneScene.SelectedNote"/>
-    /// 取的是尾巴，排成升序就等于把手上的「主选中」换成了**号最大的那个** ——
-    /// 而号是发的不是排的（见 <c>NoteIdentity</c>），跟时间顺序没关系。
-    /// 用户先点 5 号、再按住 Shift 点 2 号，主选中会从 2 号跳回 5 号。
-    /// 顺序在这条链上是有含义的数据，不是随手排的容器。
+    /// 选中集按加进来的先后留着，不被排成升序：
+    /// <see cref="PianoRollPresenter.LaneScene.SelectedNote"/> 取的是尾巴，排成升序主选中就成了号最大的那个。
     /// </summary>
     [Test]
     public void 选中集的顺序是加进来的先后不是升序()
     {
         var track = Lane(new Note(60, 0, 240, 100), new Note(62, 480, 240, 100));
 
-        // 先点后面那个，再 Shift 点前面那个 —— 说的就是「先 9 号后 8 号」
+        // 先点后面那个，再 Shift 点前面那个：先 9 号后 8 号
         var scene = BuildDragging(track, View(), selected: new[] { new NoteId(9), new NoteId(8) });
 
         Assert.Multiple(() =>
@@ -628,8 +595,7 @@ public class PianoRollPresenterTests
     [Test]
     public void 场景自己留一份选中集不跟着调用方的缓冲变()
     {
-        // 卷帘那边复用同一个缓冲，下一帧就清掉重填，而场景要活到下一次 SetScene ——
-        // 留着引用的话，这一帧刚画到一半选中集就被改了
+        // 卷帘那边复用同一个缓冲，下一帧就清掉重填；留着引用的话，这一帧刚画到一半选中集就被改了
         var buffer = new List<NoteId> { IdOf(0), IdOf(1) };
         var track = Lane(new Note(60, 0, 240, 100), new Note(62, 480, 240, 100));
 

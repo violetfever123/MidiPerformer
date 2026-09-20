@@ -2,35 +2,23 @@
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
   <!--
-    视觉令牌 —— **全程序唯一的外观来源**。
-    别的 .axaml 和自绘代码里一律不许出现字面颜色值，只能引用这里的键。
-
-    准绳是 docs/wireframe.html 的 :root，逐条对应，明暗各一套（走 ThemeVariant）。
-    wireframe 里 29 条，减掉 annot / annot-soft / annot-line 三条 ——
-    那三条是紫色圆形标注点专用的，属于线框说明层，不进软件。
-    剩下的 26 条就是下面 ThemeDictionaries 里的全部内容，一条不多一条不少。
-
+    视觉令牌 —— 全程序唯一的外观来源。别的 .axaml 和自绘代码里一律不许出现字面颜色值。
+    明暗各一套，走 ThemeVariant；准绳是 docs/wireframe.html 的 :root 里那 26 条颜色 / 阴影。
     自绘那一层（卷帘、悬浮层）拿不到 DynamicResource，走 Theme/TokenPalette + TokenSource。
-
-    对账由 Tests/Visual/TokenParityTests 强制：键名、明暗两套的值都和 wireframe 逐条比。
+    对账由 Tests/Visual/TokenParityTests 强制。
   -->
 
   <!--
-    令牌声明成 Color 而不是 SolidColorBrush，是有原因的，别改回去：
-    给控件当 Background / Foreground 用，Avalonia 会把 Color 自动转成画刷，两种写法都行；
-    但反过来不行 —— 画刷塞不进 SolidColorBrush 的 Color 属性。
-    而 Fluent 有几处把颜色**内联写在模板子元素上**（滑块圆点、滚动条滑块，见 Controls.axaml），
-    只能靠覆盖它引用的**资源键**去改，那些键的值必须是 Color 才拼得出来。
+    令牌声明成 Color 而不是 SolidColorBrush：给控件当 Background / Foreground 用，Avalonia 会把
+    Color 自动转成画刷，反过来不行。Fluent 有几处把颜色内联写在模板子元素上（滑块圆点、滚动条
+    滑块，见 Controls.axaml），只能靠覆盖它引用的资源键去改，那些键的值必须是 Color 才拼得出来。
   -->
 
-  <!--
-    字体、圆角不随主题变，放在 ThemeDictionaries 外面 —— 这样 ThemeDictionaries 里
-    正好就是那 26 个颜色/阴影令牌，对账时不用再挑拣。
-  -->
+  <!-- 字体、圆角不随主题变，放在 ThemeDictionaries 外面，里面正好就是那 26 个颜色 / 阴影令牌。 -->
   <FontFamily x:Key="TokenFontUi">Segoe UI, Microsoft YaHei, PingFang SC</FontFamily>
   <FontFamily x:Key="TokenFontMono">Cascadia Mono, Consolas</FontFamily>
 
-  <!-- wireframe 里出现过 3 / 4 / 5 / 6 / 8 五种圆角，按用途命名而不是按数字 -->
+  <!-- 五种圆角，按用途命名而不是按数字 -->
   <CornerRadius x:Key="TokenRadiusSmall">3</CornerRadius>
   <CornerRadius x:Key="TokenRadiusControl">4</CornerRadius>
   <CornerRadius x:Key="TokenRadiusButton">5</CornerRadius>

@@ -10,18 +10,13 @@ using NUnit.Framework;
 namespace MidiPerformer.Tests.Perform;
 
 /// <summary>
-/// 起一场演奏 —— 这一组的重点是**盲倒计时那几秒**：它是用户切到游戏窗口的窗口期，
-/// 期间一个音都不能发出去（发了就是弹给桌面听，而且用户还没到游戏里）。
-///
-/// 全部用假时钟 + <see cref="RecordingEventSink"/>，**不等真时间**：
-/// 时钟每被读一次自己前进 5ms（<c>FakeClock.AutoStepSeconds</c>），
-/// 等待循环就是靠读时钟推进的（见 <c>StartPerformance.WaitCountdown</c> 的说明）。
-/// 只有「倒计时里空转一会儿」那一处要一点真实时间 —— 那是留给一个不等倒计时的实现
-/// 去犯错的机会，不留它这一条就拦不住人。
+/// 起一场演奏 —— 重点是盲倒计时那几秒：那是用户切到游戏窗口的窗口期，期间一个音都不能发出去。
+/// 全部用假时钟 + <see cref="RecordingEventSink"/>，不等真时间（时钟每被读一次自己前进 5ms）；
+/// 只有「倒计时里空转一会儿」那一处要一点真实时间，留给一个不等倒计时的实现去犯错的机会。
 /// </summary>
 public class StartPerformanceTests
 {
-    /// <summary>假时钟每被读一次前进的秒数 —— 和 DispatcherTests 取同一个值。</summary>
+    /// <summary>假时钟每被读一次前进的秒数。</summary>
     private const double Step = 0.005;
 
     [Test]
@@ -40,19 +35,15 @@ public class StartPerformanceTests
             Assert.That(performance.CountdownSecondsLeft, Is.EqualTo(0), "没起跑却报着倒计时剩余秒数");
         });
 
-        // 不放行的那条路上根本没有线程，所以这里等的是「本来就不该发生的事」。
-        // 不等也能过，但等一会儿才拦得住「偷偷起了一条线程」的那种实现。
+        // 不放行的那条路上没有线程；等一会儿才拦得住偷偷起了一条线程的实现
         Thread.Sleep(50);
         Assert.That(sink.Sent, Is.Empty, "预检没放行，却发了按键");
     }
 
     /// <summary>
-    /// 倒计时没走完，一个音都不能发 —— <b>这是这一块最要紧的那条</b>。
-    ///
-    /// 假时钟每读一次走 0.1 秒，走到 1 秒就停住（<c>AutoStopAtSeconds</c>），
-    /// 而倒计时的终点在 3 秒 —— 于是它卡在等待里空转，读数稳定地停在「还剩 2 秒」。
-    /// 曲子刻意把第一个音摆在**音乐 0 秒**：一个不等倒计时的实现会当场把它发出去，
-    /// 摆在 0.25 秒的话它反而「还没来得及发」，这一条就白测了。
+    /// 倒计时没走完，一个音都不能发。
+    /// 假时钟每读一次走 0.1 秒、走到 1 秒就停住，而倒计时的终点在 3 秒 —— 它卡在等待里空转，
+    /// 读数稳定地停在「还剩 2 秒」。曲子把第一个音摆在音乐 0 秒，不等倒计时的实现会当场把它发出去。
     /// </summary>
     [Test]
     public void 倒计时没走完一个音都不发()
@@ -64,7 +55,7 @@ public class StartPerformanceTests
         var outcome = performance.Start(请求(倒计时秒: 3), elevated: true, imeInChinese: false);
         Assert.That(outcome, Is.EqualTo(PerformanceStartOutcome.Started));
 
-        Thread.Sleep(120);                  // 留给「不等倒计时」的实现一个犯错的机会
+        Thread.Sleep(120);                  // 留给不等倒计时的实现一个犯错的机会
 
         Assert.Multiple(() =>
         {
@@ -72,8 +63,7 @@ public class StartPerformanceTests
             Assert.That(sink.ReleaseAllCount, Is.EqualTo(0), "倒计时期间不该碰键盘");
             Assert.That(performance.Running, Is.True, "还在倒计时，却已经算收场了");
 
-            // 悬浮层那个大数字：3 秒的倒计时走到还剩 2 秒。等于 3 说明它没在走，
-            // 等于 0 说明它已经当成倒计时结束了 —— 两种都是用户看得见的错。
+            // 悬浮层的大数字：3 秒的倒计时走到还剩 2 秒；等于 3 说明没在走，等于 0 说明已当成结束
             Assert.That(performance.CountdownSecondsLeft, Is.EqualTo(2), "悬浮层的大数字不对");
         });
 
@@ -81,11 +71,8 @@ public class StartPerformanceTests
     }
 
     /// <summary>
-    /// 倒计时走完，第一个音**真的**发出去，而且不早于倒计时终点。
-    ///
-    /// 倒计时取 0.02 秒而不是 3 秒：等待是分片的，每片最多 5ms 真实时间，
-    /// 3 秒的倒计时就要真等 3 秒。0.02 秒照样走完「等到终点才起跑」这条路径，
-    /// 却只要等四五个分片 —— 断言的是同一条规则。
+    /// 倒计时走完，第一个音真的发出去，而且不早于倒计时终点。
+    /// 倒计时取 0.02 秒而不是 3 秒：等待是分片的，每片最多 5ms 真实时间。
     /// </summary>
     [Test]
     public void 倒计时走完就发出第一个音()
@@ -96,7 +83,7 @@ public class StartPerformanceTests
         var sink = new RecordingEventSink(clock);
         var performance = new StartPerformance(clock, sink);
 
-        // 先挂上再起跑：Finished 是在派发线程上触发的，起跑之后再挂有错过它的可能。
+        // 先挂上再起跑：Finished 在派发线程上触发，起跑之后再挂有可能错过它
         using var finished = new ManualResetEventSlim(false);
         performance.Finished += () => finished.Set();
 
@@ -113,17 +100,15 @@ public class StartPerformanceTests
             Assert.That(performance.Error, Is.Null);
             Assert.That(performance.Running, Is.False);
 
-            // 进度条的分母取自整曲时长，分子是「距锚点过了多久」。分子不追着分母跑到头：
-            // 最后一个事件本来就在曲尾之前（提前量），收场比它更早 —— 进度条停在九成多
-            // 然后切到「已停止」那一态，用户看不到那个差。
+            // 进度条的分母是整曲时长，分子是「距锚点过了多久」——收场比最后一个事件还早
             Assert.That(performance.TotalSeconds, Is.EqualTo(0.125).Within(1e-9), "进度条的分母不对");
             Assert.That(performance.MusicNow, Is.GreaterThan(0), "进度一直没走");
         });
     }
 
     /// <summary>
-    /// 倒计时期间急停 = 取消：派发器还没出生，喊停的只有那个取消信号。
-    /// 这里用手动假时钟（时间不自己走），所以等待循环原地打转 —— 唯一能解开它的是 <see cref="StartPerformance.Stop"/>。
+    /// 倒计时期间急停 = 取消：派发器还没出生，能解开等待循环的只有 <see cref="StartPerformance.Stop"/>。
+    /// 手动假时钟，时间不自己走。
     /// </summary>
     [Test]
     public void 倒计时期间急停就取消整场()
@@ -148,28 +133,10 @@ public class StartPerformanceTests
     }
 
     /// <summary>
-    /// 三档倒计时（3 / 5 / 10 秒）都**按用户选的那个秒数**等满才发第一个音。
-    ///
-    /// 只测一个 3 秒是不够的：一个把倒计时写死成 3 秒的实现能过掉上面任何一条 ——
-    /// 而「10 秒」恰恰是用户切到游戏窗口要用的那一档，写成 3 秒等于在他还没切过去的时候就开弹。
-    /// 所以三个值各跑一遍，断言的是同一条不变量：第一个音不早于所选秒数。
-    ///
-    /// 上界是**松的**，而且**按假时钟的步长给**（<c>TierStepSeconds × 8</c>），不给死数：
-    /// 它只拦「等得离谱」的那种（比如 3 秒档按 10 秒等），量级错了一定拦得住
-    /// （3 秒档若真按 10 秒等，第一个音落在 10 秒外，比 3 + 2 秒大得多）。
-    ///
-    /// <b>为什么不能给「+1 秒」：</b>假时钟是**读一次走一步**的共享时钟，而倒计时结束到
-    /// 第一个音之间，另外两条线程的等待循环也在读它（<c>Dispatcher</c> 的
-    /// <c>targetPhysical - NowSeconds()</c>、<c>Watchdog</c> 的 <c>DeadlineSeconds - NowSeconds()</c>）。
-    /// 那几毫秒真实开销在假时间轴上被算成好几步 —— <b>实测 3~4 步</b>，步长 0.25 秒，
-    /// 于是「+1 秒」正好等于 4 步，卡在刀口上：3 秒那一档反复红
-    /// （修之前单跑 5 次红了 5 次，其中一次连 5 秒档也一起红）。
-    /// 换句话说，<c>按下[0].At</c> 量的是「发出去那一刻的假时刻」，
-    /// 它包含别的线程读掉的步数，不是「倒计时等了多久」的精确读数 ——
-    /// 真正卡死「等没等够」的是下面那条**下界**，上界只负责拦量级错误。
-    ///
-    /// 假时钟每读一次走一个 <see cref="TierStepSeconds"/>，所以连 10 秒档也只要几十次
-    /// 真正的分片等待、一百多毫秒就跑完 —— 一等真时间，这条测试就得跑 18 秒。
+    /// 三档倒计时（3 / 5 / 10 秒）都按用户选的秒数等满才发第一个音，第一个音不早于所选秒数。
+    /// 上界按假时钟的步长给（<c>TierStepSeconds × 8</c>）而不是死数：假时钟是共享的，
+    /// 别的线程的等待循环也在读它，所以 <c>按下[0].At</c> 不是「倒计时等了多久」的精确读数；
+    /// 卡死「等没等够」的是下界，上界只拦量级错误。
     /// </summary>
     [TestCase(3.0)]
     [TestCase(5.0)]
@@ -188,8 +155,7 @@ public class StartPerformanceTests
 
         Assert.That(finished.Wait(TimeSpan.FromSeconds(20)), Is.True, "一场短曲子放不完");
 
-        // 只取音键：修饰键（鼠标）在倒计时终点之前就有，拿它算会误判成「发早了」。
-        // 这一首的样本音是 C4、基准八度自动选到 4，本来也压不出修饰键来。
+        // 只取音键：修饰键（鼠标）在倒计时终点之前就有，拿它算会误判成发早了
         var 按下 = sink.KeyEvents.Where(e => e.Down).ToList();
 
         Assert.Multiple(() =>
@@ -202,10 +168,8 @@ public class StartPerformanceTests
     }
 
     /// <summary>
-    /// 悬浮层那个大数字的第一帧就是**用户选的那一档**。
-    ///
-    /// 用手动时钟（时间不走）读一次，避开线程启动那几毫秒的竞争：
-    /// 它错了用户会看到「选了 10 秒、数字从 3 开始数」—— 那是他唯一能核对倒计时的东西。
+    /// 悬浮层那个大数字的第一帧就是用户选的那一档。
+    /// 用手动时钟读一次，避开线程启动那几毫秒的竞争。
     /// </summary>
     [TestCase(3.0)]
     [TestCase(5.0)]
@@ -222,18 +186,15 @@ public class StartPerformanceTests
         performance.Stop();                                // 把那条还在等的线程收掉
     }
 
-    // ==================== 夹具 ====================
-
-    /// <summary>三档倒计时那几条用的假时钟步长（秒）：够大到几十步就跨过 10 秒。</summary>
+    /// <summary>三档倒计时那几条用的假时钟步长（秒）。</summary>
     private const double TierStepSeconds = 0.25;
 
     private static StartPerformanceRequest 请求(double 倒计时秒)
         => new(短曲(), TrackIndex: 0, BaseOctave: null, InputTiming.Standard, 倒计时秒);
 
     /// <summary>
-    /// 240BPM、480 tick/四分音符 → 480 tick = 0.25 秒。一个音摆在 tick 0：
-    /// 它映射出来的事件目标时刻就在起跑点上，所以「有没有等倒计时」一看便知（见上面那条测试）。
-    /// 整曲 0.125 秒，放完不用等真时间。
+    /// 240BPM、480 tick/四分音符 → 480 tick = 0.25 秒，整曲 0.125 秒。
+    /// 一个音摆在 tick 0，映射出来的事件目标时刻就在起跑点上，「有没有等倒计时」一看便知。
     /// </summary>
     private static Song 短曲() => MidiReader.ReadBytes(SmfWriter.Build(1, 480,
         SmfTrack.Named("旋律")

@@ -7,20 +7,16 @@ using MidiPerformer.Core.UseCases.Timeline;
 namespace MidiPerformer.App.Views;
 
 /// <summary>
-/// 试听播放：把「现在播到哪儿了」一帧一帧地推给界面，同时把声音交给 <see cref="IAudioSink"/>。
-///
-/// **时间积分一行都不自己算**：走的是演奏器同源的 <see cref="SongWalker"/> ——
-/// 变速、跳转、曲子自己的速度表都在它里面。这里只做三件事：
-/// 每一帧把墙上钟喂给它、把光标位置报出去、走到曲尾就停。
-///
+/// 试听播放：把「现在播到哪儿了」一帧一帧推给界面，同时把声音交给 <see cref="IAudioSink"/>。
+/// 时间积分不自己算，走的是演奏器同源的 <see cref="SongWalker"/>（变速、跳转、曲子的速度表
+/// 都在它里面），这里只做三件事：每帧把墙上钟喂给它、把光标位置报出去、走到曲尾就停。
 /// 两条时间线并排跑：声音在 <c>WinmmPreview</c> 自己的线程上按音乐时间发 NoteOn / NoteOff，
-/// 界面这一条用 <c>DispatcherTimer</c> 每 1/30 秒推进一次。两边的音乐时间是同一个数
-/// （起播时用 <c>Seek</c> 对齐），差的是线程调度那几毫秒 —— 试听够用，
-/// 真要逐毫秒对齐得让声音那头反过来驱动界面，那是演奏器（06）的事。
+/// 界面这条用 <c>DispatcherTimer</c> 每 1/30 秒推进一次；两边音乐时间是同一个数
+/// （起播时用 <c>Seek</c> 对齐），差的只是线程调度那几毫秒。
 /// </summary>
 public sealed class PreviewPlayback : IDisposable
 {
-    /// <summary>界面这一条时间线多久推一次。30Hz 足够让播放头看着是滑的。</summary>
+    /// <summary>界面这条时间线多久推一次，30Hz 足够让播放头看着是滑的。</summary>
     private const double FrameSeconds = 1.0 / 30;
 
     private readonly IAudioSink _sink;
@@ -30,10 +26,7 @@ public sealed class PreviewPlayback : IDisposable
     private SongWalker? _walker;
     private IReadOnlyList<PreviewNote> _notes = Array.Empty<PreviewNote>();
 
-    /// <summary>
-    /// 手上这份谱面。**只为了重摊那张表**（<see cref="SetMutedTracks"/>）：
-    /// 静音名单变了要按同一份曲子重摊一遍，而曲子是 <see cref="Load"/> 给的。
-    /// </summary>
+    /// <summary>手上这份谱面，只为了静音名单变了时按同一份曲子重摊那张表。</summary>
     private Song? _song;
 
     public PreviewPlayback(IAudioSink sink, IClock clock)
@@ -49,14 +42,13 @@ public sealed class PreviewPlayback : IDisposable
 
     /// <summary>
     /// 停在半路（<see cref="Pause"/> 过，还没接着放也没停）。
-    ///
-    /// 和「没在放」不是一回事：<see cref="Stop"/> 之后也是「没在放」，但那一路是
-    /// 「这段听完了」，界面跟着把视野拉回小节线；暂停是「我就停在这，等下接着听」，
-    /// 视野一个像素都不许动。按钮上的 `▶ 继续` 和 `▶ 播放` 也靠这个分开。
+    /// 和「没在放」不是一回事：<see cref="Stop"/> 之后也是「没在放」，但那一路是「这段听完了」，
+    /// 界面跟着把视野拉回小节线；暂停是「停在这，等下接着听」，视野一个像素都不许动。
+    /// 按钮上的 `▶ 继续` 和 `▶ 播放` 也靠这个分开。
     /// </summary>
     public bool IsPaused { get; private set; }
 
-    /// <summary>装好曲子了没有。没装的时候「播放」按钮该是灰的。</summary>
+    /// <summary>装好曲子了没有，没装的时候「播放」按钮该是灰的。</summary>
     public bool HasSong => _walker is not null;
 
     /// <summary>播放头在哪（tick）。没装曲子是 0。</summary>
@@ -75,39 +67,31 @@ public sealed class PreviewPlayback : IDisposable
     public event EventHandler? Finished;
 
     /// <summary>
-    /// 换一首曲子。会先把正在响的音停掉。
-    ///
-    /// 出声那张表（**每个音带哪个声道、哪个音色**）在用例层摊好，这儿只管拿 ——
-    /// 摊法本身有它自己的测试（<c>PreviewMixer</c>），视图这一层不重算一遍。
+    /// 换一首曲子，会先把正在响的音停掉。
+    /// 出声那张表（每个音带哪个声道、哪个音色）在用例层摊好，这儿只管拿。
     /// </summary>
     /// <param name="mutedTracks">
-    /// 不发声的轨（收起来的那几条），按 <c>(轨块号, 声道)</c> 给。
-    /// **换曲子这一路是空的**：折叠是用户对某一条轨的标记，不该跨曲子漏过去（见 <c>MainWindow.SyncLanes</c>）。
+    /// 不发声的轨（收起来的那几条），按 <c>(轨块号, 声道)</c> 给。换曲子这一路是空的：
+    /// 折叠是用户对某一条轨的标记，不该跨曲子漏过去（见 <c>MainWindow.SyncLanes</c>）。
     /// </param>
     public void Load(Song song, IReadOnlySet<(int TrackIndex, int Channel)> mutedTracks)
     {
         Stop();
         _song = song;
         _walker = new SongWalker(song);
-        // 长度也要跟着这份名单走 —— 收起来的轨不出声，它多出来的那几小节就不该继续空转
-        // （见 AudibleLength）。两处用的是同一份名单，别只改一处。
+        // 长度也跟这份名单走：收起来的轨不出声，它多出来的小节不该继续空转（见 AudibleLength）
         _walker.SetEndTick(AudibleLength.EndTick(song, mutedTracks));
         _notes = PreviewMixer.Mix(song, mutedTracks);
     }
 
     /// <summary>
-    /// 只换那份**「哪几条轨不发声」**的名单，曲子不动。折叠 / 展开一条轨走这条。
-    ///
-    /// 正在播的话**接着放**：从此刻的音乐时间把新那张表重新排一遍。这一步不能省 ——
-    /// 光换掉 <c>_notes</c> 的话，出声那头手上还是上一批音，被静音的那条轨会一直响到它自己结束。
-    /// 先 <c>Stop</c>（松开所有正在响的音）再 <c>Seek</c> + <c>Play</c>，和起播那条路同一个次序。
-    ///
-    /// 为什么不像换谱面那样干脆停下来：折叠一条正在听的轨，用户要的是「这条别响了」，
-    /// 不是「整遍重放」。换谱面（<see cref="Load"/>）另一回事 —— 那儿连曲子都换了。
-    ///
-    /// <b>曲尾也跟着这份名单重算</b>：收起来的那条轨要是本来就比别的长，长度当场变短，
-    /// 于是「剩下的小节里一条轨都不出声」这件事立刻生效 —— 正在播的话下一次
-    /// <c>OnTimerTick</c> 就会看见 <see cref="SongWalker.Finished"/>、停钟、报 <see cref="Finished"/>；
+    /// 只换那份「哪几条轨不发声」的名单，曲子不动；折叠 / 展开一条轨走这条。
+    /// 正在播的话接着放，从此刻的音乐时间把新那张表重排一遍：先 <c>Stop</c>（松开正在响的音）
+    /// 再 <c>Seek</c> + <c>Play</c>，和起播那条路同一个次序 —— 光换掉 <c>_notes</c> 的话，
+    /// 出声那头手上还是上一批音，被静音的轨会一直响到它自己结束。
+    /// 曲尾也跟着这份名单重算：收起来的轨要是本来就比别的长，长度当场变短，
+    /// 「剩下的小节里一条轨都不出声」于是立刻生效 —— 正在播的话下一次 <c>OnTimerTick</c>
+    /// 就会看见 <see cref="SongWalker.Finished"/>、停钟、报 <see cref="Finished"/>；
     /// 暂停中则停在原地（把播放头拉回范围内是窗口的事，见 <c>MainWindow.OnLaneCollapseChanged</c>）。
     /// </summary>
     public void SetMutedTracks(IReadOnlySet<(int TrackIndex, int Channel)> mutedTracks)
@@ -119,8 +103,7 @@ public sealed class PreviewPlayback : IDisposable
 
         if (!IsPlaying) return;
 
-        // 先把积分推到此刻：不推的话声音会从上一帧（最多 33ms 之前）接着排，
-        // 听感上是这一下之后的一小段又重了一遍
+        // 先把积分推到此刻：不推的话声音会从上一帧（最多 33ms 前）接着排，听着像重放了一小段
         walker.AdvanceTo(_clock.NowSeconds());
         _sink.Stop();
         _sink.Seek(walker.MusicNow);
@@ -128,14 +111,9 @@ public sealed class PreviewPlayback : IDisposable
     }
 
     /// <summary>
-    /// 从当前位置开始播。
-    ///
-    /// 三种情况走的是同一句 <c>Seek(MusicNow)</c>：从头开始、<see cref="Pause"/> 之后接着放、
-    /// <see cref="Stop"/> 之后再放。它们只在**当前位置在哪**上有区别 —— 所以这里不需要
-    /// 知道上一状态是什么，多一个分支就多一处会和 <see cref="IsPaused"/> 对不上的地方。
-    ///
-    /// 已经播到（或停在）曲尾时**从头再来** —— 否则按下去什么也不会发生，
-    /// 而「按了没反应」比「从头再放一遍」难懂得多。
+    /// 从当前位置开始播。从头开始、<see cref="Pause"/> 之后接着放、<see cref="Stop"/> 之后再放，
+    /// 三种情况走的是同一句 <c>Seek(MusicNow)</c>，只在「当前位置在哪」上有区别。
+    /// 已经播到（或停在）曲尾时从头再来 —— 否则按下去什么也不会发生。
     /// </summary>
     public void Play()
     {
@@ -154,16 +132,11 @@ public sealed class PreviewPlayback : IDisposable
     }
 
     /// <summary>
-    /// 停在原地。声音松开，播放头**一个 tick 都不动** —— 再 <see cref="Play"/> 就从这儿接着放。
-    ///
-    /// 为什么「从这儿接着放」不用在这儿记位置：积分器的位置本来就一直在 <c>_walker</c> 身上，
-    /// 而 <see cref="Play"/> 走的是 <c>Seek(MusicNow)</c> + 重新落锚 —— 也就是「从当前位置起播」。
-    /// 换句话说这条路的正确性靠的是 <see cref="Play"/> 本来就不重置位置，
-    /// 这里**不要**去写什么「保存的暂停点」，那会多出第二个真相源。
-    ///
-    /// 为什么先 <c>AdvanceTo</c> 再停：积分是每帧喂一次墙上钟的，最后一次喂是上一帧的事
-    /// （最多 33ms 之前）。不补这一下的话，恢复时会从 33ms 前接上 —— 听感上是暂停前那一小段
-    /// 又被放了一遍。改静音名单（<see cref="SetMutedTracks"/>）那儿是同一个道理、同一步。
+    /// 停在原地。声音松开，播放头一个 tick 都不动 —— 再 <see cref="Play"/> 就从这儿接着放
+    /// （位置一直在 <c>_walker</c> 身上，不用在这儿另存一个暂停点，那会多出第二个真相源）。
+    /// 先 <c>AdvanceTo</c> 再停：积分是每帧喂一次墙上钟的，最后一次喂在上一帧（最多 33ms 前），
+    /// 不补这一下恢复时会从 33ms 前接上，听着像暂停前那一小段又被放了一遍。
+    /// 改静音名单（<see cref="SetMutedTracks"/>）那儿是同一个道理、同一步。
     /// </summary>
     public void Pause()
     {
@@ -178,18 +151,14 @@ public sealed class PreviewPlayback : IDisposable
         Frame?.Invoke(this, EventArgs.Empty);
     }
 
-    /// <summary>停止并松开所有正在响的音。**无循环**：放完走的也是这里。</summary>
+    /// <summary>停止并松开所有正在响的音。无循环：放完走的也是这里。</summary>
     public void Stop()
     {
         _timer.Stop();
         _sink.Stop();
         IsPlaying = false;
-        // 停是「这段听完了」，不是「停在这」—— 暂停态一并清掉，
+        // 停是「这段听完了」，不是「停在这」，所以暂停态一并清掉：
         // 否则放完自动停之后再按空格会显示「继续」，而那一路的语义已经变了
-        //（Stop 保留播放头位置是它一直以来的行为；变的是按钮上的字和视野）
-        //
-        // 33 号之前这句话写的是「按完 ■ 再按空格」：走带条那颗 ■ 停止 已经换成了 ↻ 重头播放，
-        // 但 Stop() 本身还在 —— 放完自动停（OnTimerTick 里 Finished 那一支）走的就是这条路。
         IsPaused = false;
     }
 
@@ -207,9 +176,7 @@ public sealed class PreviewPlayback : IDisposable
         Stop();
     }
 
-    /// <summary>
-    /// 每一帧：把墙上钟喂给积分器，走到曲尾就自动停下来。
-    /// </summary>
+    /// <summary>每一帧：把墙上钟喂给积分器，走到曲尾就自动停下来。</summary>
     private void OnTimerTick(object? sender, EventArgs e)
     {
         if (_walker is null) return;
@@ -218,8 +185,7 @@ public sealed class PreviewPlayback : IDisposable
 
         if (_walker.Finished)
         {
-            // 放完自动停止 + 松开所有按键（IAudioSink 的约定）。光标**留在原地**，
-            // 别自己跳回开头：人看着曲子放完，光标就应该停在末尾。
+            // 放完自动停止 + 松开所有按键（IAudioSink 的约定）；光标留在原地，别自己跳回开头
             Stop();
             Finished?.Invoke(this, EventArgs.Empty);
         }

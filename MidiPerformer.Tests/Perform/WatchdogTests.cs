@@ -10,13 +10,8 @@ using NUnit.Framework;
 namespace MidiPerformer.Tests.Perform;
 
 /// <summary>
-/// 看门狗 —— **放不停怎么办**。
-///
-/// 它是个兜底，所以最要紧的两条是「到点一定会开火」和「没到点绝不开火」：
-/// 前者漏了等于没有兜底，后者漏了会把一首正放着的曲子拦腰砍断。
-///
-/// 这里用**手动**假时钟（与 DispatcherTests 相反）：看门狗等的是「时钟过没过截止点」，
-/// 时间点由测试直接摆过去，不用等它自己走到。
+/// 看门狗 —— 放不停怎么办：到点一定会开火，没到点绝不开火。
+/// 用手动假时钟，时间点由测试直接摆过去。
 /// </summary>
 public class WatchdogTests
 {
@@ -30,8 +25,8 @@ public class WatchdogTests
 
         var watchdog = Watchdog.For(events, walker, clock, sink, () => { });
 
-        // 走子的锚点在物理 0 秒、倍速 1.0，所以物理时刻 = 音乐时刻。
-        // 事件表里最后一个是 0.30 的抬键，末尾那个 0.33 的抬键才是最大的时间戳。
+        // 锚点在物理 0 秒、倍速 1.0，所以物理时刻 = 音乐时刻；
+        // 0.30 那个音在 0.33 抬键，最大的时间戳是 0.33。
         Assert.That(watchdog.DeadlineSeconds, Is.EqualTo(0.33 + Watchdog.GraceSeconds).Within(1e-9));
     }
 
@@ -57,8 +52,8 @@ public class WatchdogTests
 
         watchdog.Start();
 
-        // 先推到截止前一瞬：这时还不能开火。等一会儿是为了给守着的线程一个开火的机会
-        // —— 它等的是时钟，时钟没到点它就一直在睡，所以这段真实时间不会让它误开火。
+        // 推到截止前一瞬：这时还不能开火。等一会儿是给守着的线程一个开火的机会
+        // —— 它等的是时钟，没到点就一直在睡，这段真实时间不会让它误开火。
         clock.Seconds = watchdog.DeadlineSeconds - 0.001;
         Thread.Sleep(50);
 
@@ -108,13 +103,8 @@ public class WatchdogTests
 
     /// <summary>
     /// 派发器卡在等待里时，看门狗真的能把它收掉。
-    ///
-    /// 这是这一对东西存在的理由：曲子放到一半遇上预料之外的情况（派发线程被系统冻住、
-    /// 时钟被拨过），它会一直等下去 —— 只有看门狗能收场。
-    ///
-    /// 这里**刻意用显式截止点**而不是 <see cref="Watchdog.For"/>：<c>For</c> 算出来的截止点
-    /// 总在最后一个事件之后 5 秒，跳表跳不出「事件还没放完、看门狗已经到点」这个局面，
-    /// 而那正是要测的那个局面。
+    /// 用显式截止点而不是 <see cref="Watchdog.For"/>：<c>For</c> 算出来的截止点总在最后一个事件之后 5 秒，
+    /// 跳表跳不出「事件还没放完、看门狗已经到点」这个局面。
     /// </summary>
     [Test]
     public void 派发器卡住时看门狗能收场()
@@ -148,8 +138,6 @@ public class WatchdogTests
         watchdog.Dispose();
     }
 
-    // ==================== 夹具 ====================
-
     private static SongWalker 走子()
     {
         var song = new Song(Array.Empty<Track>(), new TempoMap(TimeDivision.PulsesPerQuarter(480)));
@@ -158,7 +146,7 @@ public class WatchdogTests
         return walker;
     }
 
-    /// <summary>每个音乐时刻一个按下，30ms 后抬起 —— 与 DispatcherTests 里那张表同一形状。</summary>
+    /// <summary>每个音乐时刻一个按下，30ms 后抬起。</summary>
     private static List<EventBuilder.PhysicalEvent> 音键表(params double[] musicTimes)
     {
         var list = new List<EventBuilder.PhysicalEvent>(musicTimes.Length * 2);

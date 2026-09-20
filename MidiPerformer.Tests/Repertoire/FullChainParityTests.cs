@@ -10,22 +10,10 @@ namespace MidiPerformer.Tests.Repertoire;
 
 /// <summary>
 /// 全链对拍 —— 同一个 <c>.mid</c> 文件进两边，事件表逐条相等。
-///
-/// 原版（<c>harmonica-auto-player@a14335c</c>，ProjectReference 引工程本体，跑的不是副本）：
-/// <code>
-///   MidiLoader.Parse → 自己的 DryWetMidi 读取 → 自己的 tick→秒 → NoteMapper.Map → BuildSchedulePreview
-/// </code>
-/// 我们：
-/// <code>
-///   MidiReader.Read → tick 模型 → TempoMap → RepertoireToSeconds → NoteMapper.Map → EventBuilder.Build
-/// </code>
-///
-/// **后半段（映射 + 建表）两边是各跑各的，没有一行共用** —— 01 已经把这两段对拍过，
-/// 证明它们逐字等价。所以这一条新盖住的是**前半段**：PPQ 读错、变速算错、声道挑错、
-/// 该按秒还是按 tick 弄反 —— 这些错都会让事件时间整体偏掉，在这里立刻现形。
-///
-/// 时间比的是**音乐时间**（speed=1.0），与曲子自己的 BPM 无关，也不含播放倍速。
-/// 全程不发任何按键：两边调的都是纯建表入口。
+/// 原版：MidiLoader.Parse → DryWetMidi 读取 → tick→秒 → NoteMapper.Map → BuildSchedulePreview；
+/// 我们：MidiReader.Read → tick 模型 → TempoMap → RepertoireToSeconds → NoteMapper.Map → EventBuilder.Build。
+/// 后半段（映射 + 建表）两边各跑各的，这里盖住的是前半段：PPQ 读错、变速算错、声道挑错。
+/// 时间比的是音乐时间（speed=1.0），不含播放倍速；两边调的都是纯建表入口，不发按键。
 /// </summary>
 public class FullChainParityTests
 {
@@ -39,8 +27,6 @@ public class FullChainParityTests
         (0, 5),
         (7, 4),
     };
-
-    // ============================ 核心断言 ============================
 
     [TestCaseSource(typeof(MidiCorpus), nameof(MidiCorpus.TestFiles))]
     public void 全链对拍_每条轨的事件表逐条相等(string path)
@@ -70,7 +56,7 @@ public class FullChainParityTests
         string path, OriginalMidi.MidiCandidate candidate, Track track, Song song,
         int transpose, int? baseOctave, bool allTimings)
     {
-        // 配对凭据：轨块序号 + 声道。两边都必须一致，否则比的根本不是同一条轨。
+        // 配对凭据：轨块序号 + 声道，两边都必须一致，否则比的根本不是同一条轨
         Assert.Multiple(() =>
         {
             Assert.That(track.TrackIndex, Is.EqualTo(candidate.TrackIndex), "轨块序号对不上，配对无效");
@@ -98,7 +84,7 @@ public class FullChainParityTests
             var (ourEvents, _) = builder.Build(FilterInRange(ourMapping.Notes), Ported.EventBuilder.ModState.None);
             var actual = ourEvents.Select(e => (e.T, KindName(e.Kind), e.Code, e.Down)).ToArray();
 
-            // 防假绿：有可演奏的音却建出空表，说明语料或过滤出了问题，"两边都空"不算通过
+            // 防假绿：有可演奏的音却建出空表不算通过
             if (originalMapping.InRangeCount > 0)
                 Assert.That(expected, Is.Not.Empty, $"{where} [{timingName}]：原版建出了空事件表");
 
@@ -107,12 +93,7 @@ public class FullChainParityTests
         }
     }
 
-    // ============================ 语料覆盖面 ============================
-
-    /// <summary>
-    /// 对拍要有意义，语料就得真的踩到那几条难路。逐条把「踩到了没有」数出来，
-    /// 否则「语料覆盖了升半音与跨八度」只是一句没有证据的话。
-    /// </summary>
+    /// <summary>逐条数出语料真的踩到了升半音 / 跨八度 / 变速 / 多轨 / 格式 0、1、2。</summary>
     [Test]
     public void 全链对拍语料覆盖了升半音与跨八度与变速与多轨()
     {
@@ -127,7 +108,7 @@ public class FullChainParityTests
             if (song.Tracks.Count > 1) multiTrackFiles++;
             if (song.TempoMap.TempoChanges.Count > 0) variableTempoFiles++;
 
-            // 升半音 = 鼠标中键；跨八度 = 鼠标左/右键。扫几种移调，保证能踩到。
+            // 升半音 = 鼠标中键，跨八度 = 鼠标左/右键；扫几种移调保证能踩到
             foreach (var (transpose, baseOctave) in MapSettings)
             {
                 foreach (var track in song.Tracks)
@@ -175,9 +156,7 @@ public class FullChainParityTests
         });
     }
 
-    // ============================ 帮手 ============================
-
-    /// <summary>原版 <c>BuildSchedulePreview</c> 内部就是这一行，我们这边跟着做同一件事。</summary>
+    /// <summary>原版 <c>BuildSchedulePreview</c> 内部就是这一行。</summary>
     private static List<Ported.MappedNote> FilterInRange(IReadOnlyList<Ported.MappedNote> notes)
         => notes.Where(n => n.InRange).ToList();
 

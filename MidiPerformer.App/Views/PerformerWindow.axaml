@@ -11,23 +11,12 @@
   <!--
     窗口二 · 演奏器（docs/wireframe.html 里那一块）。
 
-    和编辑器的窗口是两件事：这个窗口**置顶**，因为演奏时要切到游戏里去，
-    切回来只是为了急停 —— 置顶能让它一直露在游戏画面上面。
-
-    窗口本身就是 wireframe 里的 .perf 那张卡片（surface 底 + 细边 + 圆角 + 阴影），
+    这个窗口置顶：演奏时要切到游戏里去，切回来只是为了急停，置顶能让它一直露在游戏画面上面。
+    窗口本身就是 wireframe 的 .perf 那张卡片（surface 底 + 细边 + 圆角 + 阴影），
     所以这里只设窗口底色，外面不再套一层 Border。
 
-    从前这儿还有一块**常驻风险提示**（`Border.risk`：虚拟输入违反游戏规则、可能导致封号、风险自负），
-    27 号工单把它删了 —— **有意接受的代价**：它是自用工具上唯一一句风险提示，
-    不影响任何功能，但以后给别人用就没这句话了。
-    留下的那条「为什么没开始」的通道是**状态行**（见下面 StatusText 那一段，文案在
-    `Format.PreflightRefusal`）：它说的是**这一按为什么没生效、下一步去改什么**，
-    那块横幅说的是**用这个程序的后果**，两件事 —— 删的是后者。
-
-    05 补上的是「演奏轨」那一行的筛选（只列单声部轨），以及一条可弹的都没有时的空状态块；
-    06 补上的是倒计时与基准八度两行、预检失败的中文提示，以及按下开始之后那块
-    **浮在游戏画面上**的悬浮层 —— 悬浮层是另一个窗口，见 PerformerOverlayWindow。
-    「目标窗口」那一行要等 13 的实机验证，现在摆一个选了也不生效的下拉框比不摆更坏。
+    按下开始之后那块浮在游戏画面上的悬浮层是另一个窗口，见 PerformerOverlayWindow。
+    「目标窗口」那一行要等实机验证，摆一个选了也不生效的下拉框比不摆更坏。
   -->
 
   <Window.Styles>
@@ -68,9 +57,8 @@
     </Style>
 
     <!--
-      下面每一条都写了 Button 自己和它的 ContentPresenter 两层：
-      hover / pressed / disabled 是 Fluent 直接设在模板里的 ContentPresenter 上的，
-      只设 Button 的属性盖不住（Controls.axaml 的开头解释了这件事）。
+      下面每一条都写了 Button 自己和它的 ContentPresenter 两层：hover / pressed / disabled
+      是 Fluent 直接设在模板里的 ContentPresenter 上的，只设 Button 的属性盖不住。
     -->
     <Style Selector="Button.big-start">
       <Setter Property="Background" Value="{DynamicResource TokenAccent}" />
@@ -110,9 +98,9 @@
     </Style>
 
     <!--
-      禁用态排在**每一条**按钮类规则之后：同优先级的 setter 谁后写谁赢，
-      排在前面就会被 .big-start 的 setter 盖回去，没有曲子的时候「开始」看着还能点。
-      （Controls.axaml 里那条管不到这里 —— 窗口自己的样式优先级更高。）
+      禁用态排在每一条按钮类规则之后：同优先级的 setter 谁后写谁赢，排在前面就会被 .big-start
+      盖回去，没有曲子的时候「开始」看着还能点。（Controls.axaml 里那条管不到这里 ——
+      窗口自己的样式优先级更高。）
     -->
     <Style Selector="Button.big:disabled /template/ ContentPresenter#PART_ContentPresenter">
       <Setter Property="Background" Value="{DynamicResource TokenLine}" />
@@ -143,8 +131,8 @@
 
     <!-- ==================== 小按钮 ==================== -->
     <!--
-      wireframe 的 .mini-btn：比普通按钮小一号、字色淡一档，
-      用在「值」那一行和下面那块空状态说明里 —— 它是陪衬，不该跟「开始演奏」抢眼睛。
+      wireframe 的 .mini-btn：比普通按钮小一号、字色淡一档，用在「值」那一行和空状态说明里 ——
+      它是陪衬，不该跟「开始演奏」抢眼睛。
     -->
     <Style Selector="Button.mini">
       <Setter Property="FontSize" Value="11.5" />
@@ -155,9 +143,7 @@
     <!-- ==================== 空状态 ==================== -->
     <!--
       wireframe 的 .emptybox：一条能弹的轨都没有时顶上提示行的那块说明。
-
-      用**警告**色系而不是报错的红：用户没做错什么，只是这首曲子不适合口琴。
-      红色会让人以为程序坏了，而这里要说的是「换一首或者去删声部」。
+      用警告色系而不是报错的红 —— 用户没做错什么，只是这首曲子不适合口琴。
     -->
     <Style Selector="Border.emptybox">
       <Setter Property="Background" Value="{DynamicResource TokenWarnSoft}" />
@@ -171,7 +157,7 @@
       <Setter Property="Foreground" Value="{DynamicResource TokenInkMuted}" />
       <Setter Property="TextWrapping" Value="Wrap" />
     </Style>
-    <!-- 结论那句要比解释显眼：用户扫一眼就该知道发生了什么（这一条排在通用规则之后） -->
+    <!-- 结论那句要比解释显眼（这一条排在通用规则之后） -->
     <Style Selector="Border.emptybox TextBlock.title">
       <Setter Property="FontSize" Value="12.5" />
       <Setter Property="FontWeight" Value="Bold" />
@@ -196,17 +182,15 @@
                 PlaceholderText="先打开一首 MIDI" IsEnabled="False" />
     </Grid>
     <!--
-      提示行：wireframe 的「只列出单声部轨 · 4 条轨里 2 条可演奏」。
-      两个数取自两个地方 —— N 是这首曲子一共几条轨（song.Tracks.Count），
-      M 是其中能弹的（TrackRanking.Of 的结果条数）。不另算一遍「可弹数」：
-      那样下拉框里几条、提示里几个数就有了两个真相源，迟早对不上。
+      提示行：wireframe 的「只列出单声部轨 · 4 条轨里 2 条可演奏」。两个数取自两个地方 ——
+      N 是这首曲子一共几条轨（song.Tracks.Count），M 是其中能弹的（TrackRanking.Of 的结果条数）。
+      不另算一遍「可弹数」，那样下拉框里几条、提示里几个数就有了两个真相源。
     -->
     <TextBlock Classes="hint" x:Name="TrackHint" Text="只列出单声部轨。" />
 
     <!--
-      空状态：一条能弹的都没有。这一块**顶掉**上面那行提示（意思是一回事，
-      没必要两行都说），并把下拉框锁死、开始按钮变灰 —— 能按的都按不动，
-      比让用户按下去了再听漏音好。wireframe 的空状态卡片里正是这个摆法。
+      空状态：一条能弹的都没有。这一块顶掉上面那行提示（意思是一回事），并把下拉框锁死、
+      开始按钮变灰 —— 能按的都按不动，比让用户按下去了再听漏音好。
     -->
     <Border Classes="emptybox" x:Name="EmptyBox" IsVisible="False">
       <StackPanel Spacing="7">
@@ -230,8 +214,8 @@
 
     <!-- ============ 基准八度 ============ -->
     <!--
-      口琴只有三个八度：基准八度、上下各一个，外加最高两个音。基准选错，
-      超出去的音会被整段跳过（卷帘上标灰），所以「自动」是按音域选的那个。
+      口琴只有三个八度（基准八度、上下各一个，外加最高两个音）。基准选错，超出去的音会被
+      整段跳过（卷帘上标灰），所以「自动」是按音域选的那个。
     -->
     <Grid ColumnDefinitions="74,*" ColumnSpacing="10">
       <TextBlock Grid.Column="0" Classes="row-label" Text="基准八度" />
@@ -265,10 +249,8 @@
 
     <!-- ============ 状态 ============ -->
     <!--
-      **这一行是「为什么没开始」的唯一通道。** 预检不放行时它说的是三种失败里具体哪一种、
+      这一行是「为什么没开始」的唯一通道：预检不放行时它说的是三种失败里具体哪一种、
       下一步去改什么（文案在 Format.PreflightRefusal，不在这个文件里）。
-      从前它下面还有一块常驻风险横幅，27 号工单删掉了 —— 两件事不一样：
-      横幅说的是用这个程序的后果，这一行说的是这一按为什么没生效。
     -->
     <Border Classes="status">
       <StackPanel Orientation="Horizontal" Spacing="8">

@@ -17,37 +17,26 @@ namespace MidiPerformer.App.Views;
 
 /// <summary>
 /// 窗口一：编辑器外壳（卷帘 + 导航条 + 读数条 + 走带条）。
-///
-/// **只管布置与转发**：换算在 <see cref="PianoRollController"/>，画什么在
+/// 只管布置与转发：换算在 <see cref="PianoRollController"/>，画什么在
 /// <see cref="PianoRollPresenter"/>，出声在 <see cref="PreviewPlayback"/>，
-/// 改谱面在 <see cref="SongEditor"/>（外面罩着 <see cref="UndoableSongEditor"/> 记账）。
-/// 所以这里没有 ViewModel 类 —— 那会是个只做转发的空壳（见 spec 的「Controller」那节）。
+/// 改谱面在 <see cref="SongEditor"/>（外面罩着 <see cref="UndoableSongEditor"/> 记账），
+/// 演奏器走组装点给的工厂。
 ///
-/// 它持着**当前这一份曲子**（<c>_song</c>），因为「换一份曲子」要把好几处一起翻新：
-/// 控制器与所有轨重建、试听换谱、播放头按新的速度表换回同一个 tick、撤销按钮亮灭。
-/// 那一整套在 <see cref="ApplySong"/> 里，是本切片的脊柱。
+/// 它持着当前这一份曲子（<c>_song</c>）：换一份曲子要把控制器与所有轨重建、试听换谱、
+/// 播放头按新的速度表换回同一个 tick、撤销按钮亮灭，那一整套在 <see cref="ApplySong"/> 里。
+/// 谱面的每一处改动都经 <c>_editor</c> 落成一份新的 <see cref="Song"/>，再交给它装上。
 ///
-/// 能改谱面的入口只有三处，都从这里出去：速度框（回车）、移调步进器、撤销 / 重做。
-///
-/// **曲库（10）的活也在这儿收口。** 曲库列表自己**不动盘**，只把「点了哪一首 / 要删掉」喊上来
-/// （面板 → <see cref="SongLibraryWindow"/> → 本窗口，两级二传），读写文件的是本窗口 ——
-/// 因为那两件事都会反过来影响窗口手上的状态（删掉的正好是当前这首怎么办？），
-/// 而列表和那个窗口都不知道本窗口手上有什么。
-/// （**改名不在那条路上**：32 号把曲库列表里的改名整条拆了，它现在只有
-/// <see cref="OnSongNameKeyDown"/> 这一个入口 —— 顶栏那格「歌曲名」框，改当前开着的那首。）
-///
-/// **40 号工单之后，曲库不再是一个常驻子控件**：它是工具栏上一颗按钮开出来的模态窗口
-/// （<see cref="OnLibraryClick"/>）。从前那句「谁动了盘谁负责推一把刷新」的四处调用
-/// 因此全没了 —— 模态期间本窗口动不了，那份列表不会过期。
-///
-/// 演奏器那条走组装点给的工厂，本窗口不 new 那个窗。
+/// 曲库的读写文件也在这里收口：列表自己不动盘，只把「点了哪一首 / 要删掉」报上来
+/// （<see cref="SongLibraryWindow"/> 是工具栏上一颗按钮开出来的模态窗口，见
+/// <see cref="OnLibraryClick"/>），因为只有本窗口知道手上正开着什么；改名不在那边，
+/// 唯一入口是顶栏那格「歌曲名」框（<see cref="OnSongNameKeyDown"/>）。
 /// </summary>
 public partial class MainWindow : Window
 {
-    /// <summary>播放时把播放头放在屏幕的哪个位置：偏左约三分之一，右边留出前瞻（wireframe 标注 4）。</summary>
+    /// <summary>播放时把播放头放在屏幕的哪个位置：偏左约三分之一，右边留出前瞻。</summary>
     private const double FollowFraction = 0.32;
 
-    /// <summary>认得出的文件类型。midi 和 mid 都收 —— 导入导出两侧共用同一份，免得只改一边。</summary>
+    /// <summary>认得出的文件类型：midi 和 mid 都收，导入导出两侧共用同一份。</summary>
     private static readonly FilePickerFileType MidiFileType = new("MIDI 文件")
     {
         Patterns = new[] { "*.mid", "*.midi" }
@@ -59,18 +48,7 @@ public partial class MainWindow : Window
     private readonly SongLibrary? _library;
     private readonly List<TrackLaneView> _lanes = new();
 
-    // 曲库面板**不再是本窗口的一个常驻子控件**（40 号工单）：它住在 SongLibraryWindow 里，
-    // 而那个窗口是模态的、按一下「歌曲库」才存在一会儿。所以本窗口手上一个面板引用都不用留 ——
-    // 从前那个 _libraryPanel 字段连带它的四处「推一把刷新」一起没了，见 OnLibraryClick。
-
-    /// <summary>
-    /// 编辑脊柱。撤销是装饰器加的能力，界面拿到的就是装饰器 ——
-    /// 命令本身（<see cref="SongEditor"/>）一行都不知道有撤销这回事。
-    ///
-    /// 为什么在这儿 new：08 立脊柱的时候组装点还没把编辑命令递下来（那要动 App.axaml.cs，
-    /// 是主协调者的合并点），而它俩都没有外部依赖、建起来是纯的。
-    /// 它和 <see cref="PreviewPlayback"/> 一样是这一层的内部件，不是网关。
-    /// </summary>
+    /// <summary>编辑脊柱。撤销是装饰器加的能力，界面拿到的就是装饰器，命令本身（<see cref="SongEditor"/>）不知道有撤销这回事。</summary>
     private readonly UndoableSongEditor _editor = new(new SongEditor());
 
     private PianoRollController? _controller;
@@ -78,34 +56,19 @@ public partial class MainWindow : Window
     /// <summary>当前这一份谱面。每次编辑换一份新的（不可变），换完走 <see cref="ApplySong"/>。</summary>
     private Song? _song;
 
-    /// <summary>
-    /// 手上这份在曲库里叫什么（= 文件名）。<c>null</c> = 还没进曲库
-    /// （导入时取消了命名，或者从没存过）—— 那时候「保存」会先问一个名字。
-    /// </summary>
+    /// <summary>手上这份在曲库里叫什么（= 文件名）。<c>null</c> = 还没进曲库，那时「保存」会先问一个名字。</summary>
     private string? _currentName;
 
-    /// <summary>
-    /// 曲名框里那个名字，也是「这首叫什么」的**显示**来源。
-    ///
-    /// 和 <see cref="_currentName"/> 分开，是因为有一类曲子只在手上、不在曲库里
-    /// （导入时取消了命名）：它有名字可显示（就是导入的那个文件名），却没有曲库里的位置。
-    /// 把两者合成一个的话，「名字框该显示什么」和「保存该写哪儿」就分不开了。
-    /// </summary>
+    /// <summary>曲名框里那个名字，也是「这首叫什么」的显示来源。和 <see cref="_currentName"/> 分开：有一类曲子只在手上、不在曲库里（导入时取消了命名），它有名字可显示却没有曲库里的位置。</summary>
     private string _title = "";
 
     /// <summary>这份是从哪个 .mid 导入的，写进工程文件头。合并成一首、或从曲库打开的都可能是 null。</summary>
     private string? _importedFrom;
 
-    /// <summary>
-    /// 这份工程「动过没有」，跟着文件头走。
-    ///
-    /// <b>它是粘的</b>：一旦编辑过就永远是 true，撤销回初始状态也不会变回 false，存盘也不清。
-    /// 它回答的是「这首我动过」，不是「有没有没保存的改动」—— 后者要靠 diff 才说得清，
-    /// 而这个标记只要一个 bool（见 <see cref="ProjectHeader.Edited"/>）。
-    /// </summary>
+    /// <summary>这份工程「动过没有」，跟着文件头走。它是粘的：一旦编辑过就永远是 true，撤销回初始状态、存盘都不清（见 <see cref="ProjectHeader.Edited"/>）。</summary>
     private bool _edited;
 
-    /// <summary>正在拖导航条 —— 这期间卷帘上的播放头红线要藏起来（wireframe 标注 3）。</summary>
+    /// <summary>正在拖导航条 —— 这期间卷帘上的播放头红线要藏起来。</summary>
     private bool _draggingNav;
 
     /// <summary>给可视化设计器用的空构造。真跑起来走下面那个。</summary>
@@ -115,13 +78,12 @@ public partial class MainWindow : Window
     /// <param name="clock">墙上钟，喂给试听的时间积分。</param>
     /// <param name="sink">出声的出口（winmm）。</param>
     /// <param name="performerFactory">
-    /// 工具栏上「演奏」按下时去要那个独立窗口。给的是工厂不是现成的窗口：
-    /// 演奏器一建出来就装低层键盘钩子，所以它必须到用户真要用的那一刻才存在。
-    /// 复用与单例都在组装点里管，本窗口只管要、然后 Show。
+    /// 工具栏上「演奏」按下时去要那个独立窗口。给工厂不给现成的窗口：演奏器一建出来就装
+    /// 低层键盘钩子，必须到用户真要用的那一刻才存在。复用与单例在组装点里管。
     /// </param>
     /// <param name="library">
-    /// 曲库。**目录由组装点拼好**（默认是 exe 旁边的 .\songs\）—— 曲库自己不猜自己在哪。
-    /// 给 null 就整条曲库都不出现（保存 / 另存为也不亮）。
+    /// 曲库，目录由组装点拼好（默认是 exe 旁边的 .\songs\）。给 null 就整条曲库都不出现
+    /// （保存 / 另存为也不亮）。
     /// </param>
     public MainWindow(
         TokenSource tokens, IClock clock, IAudioSink sink,
@@ -152,15 +114,8 @@ public partial class MainWindow : Window
         _playback.Frame += (_, _) => RefreshView();
         _playback.Finished += OnPlaybackFinished;
 
-        // 提示语住在 Format 里，一处改处处改。**同一句喂两处**：显示的那一行窄了会被
-        // CharacterEllipsis 从右边截掉（见 axaml 上那处 TextTrimming），悬停看全的 ToolTip
-        // 就是同一个常量 —— 两边各抄一份的话，改一处漏一处，屏幕上会同时挂着新的半行和旧的全文，
-        // 那比只说一句更坏。（ToolTip 只在代码里设，XAML 那边一个字节都不写：
-        // 两处都能设，谁赢要看加载顺序，那种「哪份生效」的问题不该出现在文案上。）
-        //
-        // 36 号起这一行**分两层**：屏幕上是「此刻该看的那一类」（没选中音 = 走带那一行、
-        // 选中了 = 编辑那一行），ToolTip 始终是两行合起来的全文。选哪一行由 RefreshHint 定，
-        // 起手这一下只是把「还没载曲子、什么都没选中」那个初始状态摆对。
+        // 提示语住在 Format 里，同一句同时喂给显示那一行和 ToolTip（ToolTip 只在代码里设）；
+        // 起手这一下只把「还没载曲子、什么都没选中」那个初始状态摆对（哪一层由 RefreshHint 定）。
         HintText.Text = Format.ReadoutHintPerforming;
         ToolTip.SetTip(HintText, Format.ReadoutHintTooltip);
 
@@ -199,12 +154,7 @@ public partial class MainWindow : Window
         await ImportFile(path);
     }
 
-    /// <summary>
-    /// 把窗口变成一个能接收拖放的落点。
-    ///
-    /// 拖进来的东西**不一定是文件**（可能是选中的一段文字），所以 DragOver 要把
-    /// 「收不收」先说清楚：不说的话光标一直是个禁止符号，用户以为这窗口不吃拖放。
-    /// </summary>
+    /// <summary>把窗口变成一个能接收拖放的落点。拖进来的不一定是文件，所以 DragOver 要把「收不收」先说清楚：不说的话光标一直是个禁止符号，用户以为这窗口不吃拖放。</summary>
     private void AllowImportByDrop()
     {
         DragDrop.SetAllowDrop(this, true);
@@ -221,16 +171,10 @@ public partial class MainWindow : Window
         });
     }
 
-    /// <summary>
-    /// 拖进来的东西里，第一个本机认得出的 MIDI 文件路径；没有就是 <c>null</c>。
-    ///
-    /// 只要一个：一次拖一整个文件夹那种不在这一条的射程里。
-    /// 云盘 / 网络位置上的文件拿不到本机路径（<c>TryGetLocalPath</c> 返回 null），
-    /// 那种也当作没有 —— 一律拒收，比收下来再报一句「读不到」干净。
-    /// </summary>
+    /// <summary>拖进来的东西里，第一个本机认得出的 MIDI 文件路径；没有就是 <c>null</c>。只要一个。云盘 / 网络位置上的文件拿不到本机路径，那种也当作没有。</summary>
     private static string? FirstMidiPath(IDataTransfer data)
     {
-        // TryGetFiles 在没有文件时给 null（不是空数组），所以要自己兜一下
+        // TryGetFiles 没有文件时给 null 而不是空数组
         foreach (var item in data.TryGetFiles() ?? Array.Empty<IStorageItem>())
         {
             if (item is not IStorageFile file) continue;
@@ -245,16 +189,7 @@ public partial class MainWindow : Window
         return null;
     }
 
-    /// <summary>
-    /// 导入一个 .mid：读 → 命名 → 存进曲库 → 显示。
-    ///
-    /// 菜单和拖放走的是同一个它 —— 两条路各写一遍的话，早晚出现「拖进来的没进曲库」
-    /// 这种只有一条路才有的毛病。
-    ///
-    /// 命名那一步**取消不等于失败**：曲子照样装上、照样能编辑导出，只是没进曲库
-    /// （<see cref="_currentName"/> 保持 null，之后按保存会再问一次）。用户已经挑好文件了，
-    /// 为一个可选的步骤把整件事丢掉不合理。
-    /// </summary>
+    /// <summary>导入一个 .mid：读 → 命名 → 存进曲库 → 显示。菜单和拖放走的是同一个它。命名那一步取消不等于失败：曲子照样装上，只是没进曲库（<see cref="_currentName"/> 保持 null）。</summary>
     private async Task ImportFile(string path)
     {
         Song song;
@@ -265,16 +200,13 @@ public partial class MainWindow : Window
         catch (Exception ex) when (ex is IOException or InvalidDataException
             or UnauthorizedAccessException or NotSupportedException or InvalidOperationException)
         {
-            // MidiReader 抛的就是中文消息，原样报出来 —— 编一句更笼统的话只会把线索弄丢
+            // MidiReader 抛的就是中文消息，原样报出来
             ShowError(ex.Message);
             return;
         }
 
         LoadSong(song, Path.GetFileNameWithoutExtension(path));
-        // 刚 LoadSong 完，_edited 已经是 false、曲名还是空 —— 补上来路，剩下的交给 SaveTo。
-        // 从前这里自己写了一遍文件、自己摆了一遍状态，和 SaveTo 是两份几乎一样的代码：
-        // 结果就是这份少写了 _title（导入时起的名没同步过去，之后曲名框一回车会拿
-        // MIDI 文件名去改曲库里的名字）。写两遍的东西早晚会不一样，所以直接走同一条路。
+        // 刚 LoadSong 完，_edited 已经是 false、曲名还是空，补上来路，剩下的交给 SaveTo
         _importedFrom = path;
 
         if (_library is not { } library) return;
@@ -290,19 +222,8 @@ public partial class MainWindow : Window
     /// <summary>装一首曲子：重建卷帘、把事件表交给试听、把界面复位。</summary>
     private void LoadSong(Song song, string title)
     {
-        // **先验 tick 装不装得下，再动任何状态。**
-        //
-        // 卷帘是 tick 轴，多长的 tick 都画得出来；但试听要把它换成秒，而 TempoMap.SecondsAt
-        // 在 tick 换算出的微秒数超过 long 的十分之一时会抛「时间跨度太大」。tick 一旦到这个量级
-        // （480 PPQ 下约 8.85e14，一个几十 MB 的 .mid 就够），_playback.Load 会当场抛。
-        //
-        // 为什么卡在这儿而不是各调用方各 catch 一遍：这是每首曲子进窗口的**唯一**入口
-        // （打开文件 / 拖放 / 从曲库点开）。从前导入那条路把 LoadSong 包在 try 里挡着，
-        // 拆出 ImportFile 之后那层就没了 —— 而「从曲库点开」这条路从来没挡过。
-        // 一处挡下，三条路一起安全，也不会**装到一半**：卷帘已经换成新的、试听还是旧的，
-        // 那种半截状态比压根不装更糟。
-        //
-        // 判据是 Song.TryMeasure（见那边的注释：为什么不直接读 TotalSeconds）。
+        // 先验 tick 装不装得下，再动任何状态：TempoMap.SecondsAt 在 tick 换算出的微秒数
+        // 超过 long 的十分之一时会抛「时间跨度太大」，而这是每首曲子进窗口的唯一入口。
         if (!song.TryMeasure(out _, out string? reason))
         {
             // 中文原因来自 TempoMap，原样报出来
@@ -312,79 +233,56 @@ public partial class MainWindow : Window
 
         HideMessages();
 
-        // 换一首曲子就得把撤销栈清掉：栈里装的是上一首曲子的 Song 引用，
-        // 不清的话接着按撤销会把人送到另一首曲子的历史里去
+        // 换一首曲子就得把撤销栈清掉：栈里装的是上一首曲子的 Song 引用
         _editor.Reset();
 
         _song = song;
-        // 「这份是哪来的、叫什么、动过没有」三件都随曲子一起换掉。调用方在这之后
-        // 按自己的来路覆盖：导入的会补 _importedFrom 与 _edited=false，从曲库打开的会补三者。
+        // 「这份是哪来的、叫什么、动过没有」三件都随曲子一起换掉，调用方在这之后按自己的来路覆盖
         _currentName = null;
         _importedFrom = null;
         _edited = false;
         _title = title;
 
-        // 换曲子一律重建轨控件：轨数碰巧一样时「就地重挂」看着也能用，但那是**另一首曲子的轨**
-        // 接着用上一首的控件 —— 折叠、改名框这些控件上的状态会跨曲子漏过去。
-        // 编辑那条路才是「同一首曲子的新一份」，两者不是一回事
+        // 换曲子一律重建轨控件：轨数碰巧一样时「就地重挂」是拿另一首曲子的轨接着用上一首的控件，
+        // 折叠、改名框这些控件上的状态会跨曲子漏过去。编辑那条路才是「同一首曲子的新一份」
         SyncLanes(rebuildAll: true);
-        // 换曲子这一路折叠一律是空的（SyncLanes 那条 rebuildAll 的分支刚说过为什么），
-        // 照旧现问一次：哪天那条规矩变了，这里不会悄悄漏掉
+        // 换曲子这一路折叠一律是空的，照旧现问一次
         _playback.Load(song, MutedTracks());
 
         SongNameBox.Text = title;
         EmptyHint.IsVisible = false;
         JumpBox.Text = "1";
 
-        // 走带条跟着新曲子回位。**就这一处规矩**（RefreshTransport），
-        // 手写 PlayButton/RestartButton 那两行的地方从前有三处，改一处漏两处
+        // 走带条跟着新曲子回位，规矩只此一处（RefreshTransport）
         RefreshTransport();
         JumpBox.IsEnabled = true;
-        // 有谱面就写得出，哪怕一个音都没有 —— 速度表和分辨率也值得留下来，
-        // 所以这条的判据是「装上了曲子」，不是「有轨」
+        // 判据是「装上了曲子」而不是「有轨」：速度表和分辨率也值得写出去，哪怕一个音都没有
         ExportMenuItem.IsEnabled = true;
 
         // 换曲子了：悬停那个音说的是上一份谱面，清掉。清完读数自己回落到选中（多半也是空的）
         ShowHover(null);
         RefreshEditState();
 
-        // 这一趟多半算不出场景（控件刚建出来，宽度还是 0），但位置读数、导航条这些要它。
-        // 卷帘自己会在尺寸落定那一帧补上 —— 那条线挂在 TrackLaneView 的 Roll.SizeChanged 上
+        // 这一趟多半算不出场景（控件刚建出来、宽度还是 0），但位置读数、导航条这些要它；
+        // 卷帘自己会在尺寸落定那一帧补上（挂在 TrackLaneView 的 Roll.SizeChanged 上）
         RefreshView();
     }
 
     /// <summary>
-    /// 照着当前这份曲子把控制器和所有轨**同步**一遍。
-    ///
-    /// <b>控制器每次都得换新的</b>，不能就地改：它是按曲子建出来的一次性对象
-    /// （音域、灰显标记、每小节音符数都算好缓存着了），移调会同时改掉音域和灰显，
-    /// 没有哪一处能「顺手更新一下」。
-    ///
-    /// <b>但控件树不必跟着拆。</b>轨数没变就地重挂（<see cref="TrackLaneView.Rebind"/>）——
-    /// 从前的做法是无条件 <c>Children.Clear()</c> + 全部新建，代价是用户直接看得见的：
-    /// 内容高度掉到 0 的那一瞬间 <c>ScrollViewer</c> 把滚动位置夹回顶部（编辑一下就被弹回第 1 小节），
-    /// 新控件的卷帘当帧量不出宽度、算不出场景，要等一次谁也不知道什么时候会来的
-    /// <c>LanesHost.SizeChanged</c> 才画得出来 —— 轨数不变时那一趟根本不会来，
-    /// 于是「编辑一下，音轨就消失了」。就地重挂这两样都没有：控件还是那些控件，
-    /// 滚动位置、焦点、改名框、删轨那一问全都还在。
-    ///
-    /// 轨数变了（删了一条、或者撤销把它拿回来）只能重建 —— 控件和数据是一对一的，
-    /// 多一条少一条没有「就地」可言。那一路由 <see cref="TrackLaneView"/> 自己挂在
-    /// 卷帘尺寸上的重画兜住：布局一落定就补一帧，不会再空着。
+    /// 照着当前这份曲子把控制器和所有轨同步一遍。控制器每次都得换新的
+    /// （按曲子建出来的一次性对象，音域、灰显标记、每小节音符数都缓存着了）；
+    /// 轨数没变就地重挂（<see cref="TrackLaneView.Rebind"/>），免得更重建时滚动位置被夹回顶部、
+    /// 新控件当帧算不出场景（症状是「编辑一下，音轨就消失了」）；轨数变了只能重建。
     /// </summary>
     /// <param name="rebuildAll">
-    /// 强制全部重建。换一首曲子时用 —— 轨数碰巧一样时「就地重挂」是拿**另一首曲子的轨**
-    /// 接着用上一首的控件，控件上的那些状态（折叠、开着没提交的改名框）会跨曲子漏过去。
-    /// 「同一首曲子的新一份」（编辑、撤销）才走就地重挂那一支。
+    /// 强制全部重建。换一首曲子时用 —— 控件上的状态（折叠、开着没提交的改名框）属于上一首的轨。
     /// </param>
     private void SyncLanes(bool rebuildAll = false)
     {
         if (_song is not { } song) return;
 
-        // 聚焦轨跟**那条轨**走，不跟下标走 —— 和折叠是同一条理由，而且是同一个坑：
-        // 删掉第 0 条之后下标整体前移，按下标带会把高亮挪到别人身上。
-        // 必须在换控制器之前抄下来：控制器一换，旧下标当场作废。
-        // 换一首曲子（rebuildAll）一律从头发 —— 控件上的状态说的是**这一首**里的那一条轨。
+        // 聚焦轨跟那条轨走，不跟下标走：删掉第 0 条之后下标整体前移，按下标带会把高亮挪到别人身上。
+        // 必须在换控制器之前抄下来（控制器一换，旧下标当场作废），换一首曲子一律从头发。
         var focused = rebuildAll ? null : FocusedIdentity();
 
         _controller = new PianoRollController(song, rebuildAll ? null : MutedTracks());
@@ -392,21 +290,13 @@ public partial class MainWindow : Window
         if (!rebuildAll && _lanes.Count == song.Tracks.Count)
         {
             for (int i = 0; i < _lanes.Count; i++) _lanes[i].Rebind(_controller, i);
-            // 轨数一样就是那几条轨、同一个次序，身份换算回来还是同一个下标；
-            // 放回去这一步不能省 —— 新控制器自己的聚焦是 0
+            // 轨数一样就是那几条轨、同一个次序，身份换算回来还是同一个下标，放回去不能省（新控制器聚焦是 0）
             _controller.SetFocusedTrack(FocusIndex(focused));
             return;
         }
 
-        // 轨数变了只能重建控件，但**折叠是用户对某条轨的标记，不该被一次删轨顺手抹掉**
-        // （撤销把那条轨拿回来时尤其明显：收起来的那几条自己全弹开了）。
-        // 按轨的身份记，不按下标 —— 删掉第 0 条之后下标整体前移，按下标带会把折叠挪到别人身上。
-        // 必须在 Clear 之前抄下来：下面那一刻 _lanes 就空了。
-        //
-        // **换一首曲子（rebuildAll）一律不带。** 折叠现在不只是「先不看它」，收起来的轨
-        // 在试听里是不出声的（见 MutedTracks）。两首曲子的轨撞上同一个 (轨块, 声道) 是常事，
-        // 带过去就成了「打开一首新曲子，某条轨莫名其妙是哑的」—— 这正是 rebuildAll 存在的理由：
-        // 控件上的状态说的是**这一首**里的那一条轨，换一首就该从头开始。
+        // 折叠是用户对某条轨的标记，不该被一次删轨顺手抹掉；按轨的身份记，不按下标，
+        // 必须在 Clear 之前抄下来。换一首曲子一律不带：收起来的轨在试听里不出声（见 MutedTracks）。
         var collapsed = new HashSet<(int, int)>();
         if (!rebuildAll)
             foreach (var lane in _lanes)
@@ -436,12 +326,7 @@ public partial class MainWindow : Window
         _controller.SetFocusedTrack(FocusIndex(focused));
     }
 
-    /// <summary>
-    /// 此刻聚焦的那条轨的**身份**。还没建控制器、或者下标已经越界时给 null（= 从头发）。
-    ///
-    /// 必须在 <c>_controller</c> 换成新的之前调：它读的是**旧**控制器手里那份曲子
-    /// （所以删轨之后旧下标仍然读得通，读出来的是删之前那条轨的身份）。
-    /// </summary>
+    /// <summary>此刻聚焦的那条轨的身份。还没建控制器、或者下标已经越界时给 null（= 从头发）。必须在 <c>_controller</c> 换成新的之前调：它读的是旧控制器手里那份曲子。</summary>
     private (int Chunk, int Channel)? FocusedIdentity()
     {
         if (_controller is not { } controller) return null;
@@ -450,12 +335,7 @@ public partial class MainWindow : Window
         return index >= 0 && index < _lanes.Count ? _lanes[index].Identity : null;
     }
 
-    /// <summary>
-    /// 身份 → 它**现在**在第几号。找不到（那条轨被删了、撤销还没把它拿回来）就落到
-    /// 第一条没收起来的轨上 —— 高亮总得落在某一条上。
-    ///
-    /// 必须在轨控件重建**之后**调：它读的是新的 <c>_lanes</c>。
-    /// </summary>
+    /// <summary>身份 → 它现在在第几号。找不到（那条轨被删了）就落到第一条没收起来的轨上 —— 高亮总得落在某一条上。必须在轨控件重建之后调：它读的是新的 <c>_lanes</c>。</summary>
     private int FocusIndex((int Chunk, int Channel)? identity)
     {
         if (identity is { } wanted)
@@ -465,10 +345,7 @@ public partial class MainWindow : Window
         return PianoRollController.FirstExpanded(CollapsedFlags());
     }
 
-    /// <summary>
-    /// 每条轨收没收起，按**下标**排一张表（控制器要的正是这个形状）。
-    /// 和 <see cref="MutedTracks"/> 一样**每次现问一次控件**，不在窗口里另存一份折叠状态。
-    /// </summary>
+    /// <summary>每条轨收没收起，按下标排一张表（控制器要的正是这个形状）。和 <see cref="MutedTracks"/> 一样每次现问一次控件，不在窗口里另存一份折叠状态。</summary>
     private bool[] CollapsedFlags()
     {
         var flags = new bool[_lanes.Count];
@@ -476,15 +353,7 @@ public partial class MainWindow : Window
         return flags;
     }
 
-    /// <summary>
-    /// 此刻哪几条轨在试听里不发声：**收起来的那几条**。
-    ///
-    /// 认轨用的是 <see cref="TrackLaneView.Identity"/> 那一对 <c>(轨块, 声道)</c>，不是下标 ——
-    /// 和重建时把折叠带过去取的是同一套：删掉第 0 条之后下标整体前移，按下标算会静音到别人头上。
-    ///
-    /// 每次**现问一次**控件（不在窗口里另存一份折叠状态）：状态只有控件那一处，
-    /// 抄一份出来就有两处要跟着一起改，而它们迟早会不一致。问一趟是十来条轨的循环，不心疼。
-    /// </summary>
+    /// <summary>此刻哪几条轨在试听里不发声：收起来的那几条。认轨用的是 <see cref="TrackLaneView.Identity"/> 那一对 <c>(轨块, 声道)</c>，不是下标。每次现问一次控件。</summary>
     private IReadOnlySet<(int TrackIndex, int Channel)> MutedTracks()
     {
         var muted = new HashSet<(int, int)>();
@@ -494,20 +363,10 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// 某条轨收 / 放了。两件事跟着走，用的是**同一份名单**：
-    /// <list type="bullet">
-    /// <item><b>试听</b> —— 那条轨不出声了，整曲时长也跟着重算（见 <see cref="PreviewPlayback.SetMutedTracks"/>）。</item>
-    /// <item><b>卷帘</b> —— 整曲多少小节也只按听得见的轨算（见 <c>AudibleLength</c>）：
-    /// 收起来的那条要是本来就比别的长，卷帘右侧那截现在直接消失，而不是留一片画得出来、放不出声的地方。</item>
-    /// </list>
-    ///
-    /// 正在播的话是**接着放**，只有那一条不响 —— 折叠一条正在听的轨不该把整遍听下来打断。
-    /// 但曲子变短之后演奏可能**当场就到底了**：下一次定时器那一帧就会看见
-    /// <c>Finished</c>、停钟、把视图对齐回小节线，这一路不用在这儿抢先处理。
-    ///
-    /// **暂停 / 停止中**要在这儿补一下：播放头停在曲子外面时没人会去动它（积分器只在帧里走），
-    /// 读数就会一直显示「位置 20 / 12」这种句子。把它拉回新的曲尾 —— 播放头落在曲子外面
-    /// 本来就不是一个说得通的状态，而「拉回末尾」是它唯一说得通的落点。
+    /// 某条轨收 / 放了。试听与卷帘跟着走，用的是同一份名单：那条轨不出声，
+    /// 整曲时长与「多少小节」（<c>AudibleLength</c>）只按听得见的轨算
+    /// （见 <see cref="PreviewPlayback.SetMutedTracks"/>）。正在播的话是接着放；
+    /// 暂停 / 停止中则要在这儿把播放头拉回新的曲尾，否则读数会一直显示「位置 20 / 12」。
     /// </summary>
     private void OnLaneCollapseChanged(object? sender, EventArgs e)
     {
@@ -524,20 +383,10 @@ public partial class MainWindow : Window
     // ==================== 曲库 ====================
 
     /// <summary>
-    /// 「歌曲库」那颗按钮：开曲库窗口（模态）。
-    ///
-    /// 从前曲库是左边一条常驻侧栏，本窗口在启动时把它建出来、之后四处「推一把刷新」
-    /// （导入完、存完、改完名、删完）。40 号工单把入口挪到工具栏上之后，那套推法
-    /// **整条都不需要了** —— 模态窗口摆着的期间主窗口动不了，列表因此不会过期，
-    /// 开窗那一刻现列一遍就够。这也是这一趟改动里唯一真正的简化。
-    ///
-    /// 两件会改盘的事（打开、删除）落在**本窗口**，因为只有本窗口知道
-    /// 「正开着的是哪一首、曲名框里写着什么、提示行上那句话要不要换」——
-    /// 曲库窗口手上只有一份列表。
-    ///
-    /// 打开那一支要**先关窗再装曲子**：装曲子会走一遍 <see cref="LoadSong"/>（重建全部控件、
-    /// 重算场景），而模态框还压在头上时去做这件事，用户看到的是一个卡住的对话框。
-    /// 关掉之后底下那个窗口才现出来，正好赶上它变样。
+    /// 「歌曲库」那颗按钮：开曲库窗口（模态）。开窗那一刻现列一遍列表就够 ——
+    /// 模态期间主窗口动不了，列表不会过期。两件会改盘的事（打开、删除）落在本窗口。
+    /// 打开那一支要先关窗再装曲子：<see cref="LoadSong"/> 会重建全部控件、重算场景，
+    /// 模态框还压在头上时做这件事，用户看到的是一个卡住的对话框。
     /// </summary>
     private async void OnLibraryClick(object? sender, RoutedEventArgs e)
     {
@@ -549,8 +398,7 @@ public partial class MainWindow : Window
         {
             if (s is not SongLibraryWindow window) return;
 
-            // 读不出来：那句话写进**窗口的**页脚、窗口留着 —— 它压在头上，主窗口提示行看不见。
-            // 装上了才关窗（关掉之后底下那个窗口现出来，正好赶上它变样）
+            // 读不出来就写进窗口的页脚、窗口留着（它压在头上，主窗口提示行看不见）；装上了才关窗
             if (TryOpenLibrarySong(name) is { } error) window.ShowMessage(error);
             else window.Close();
         };
@@ -561,15 +409,9 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// 曲库里某一首确认要删（判据：面板已经问过一句了，这里收到就是真的要删）。
-    ///
-    /// 删掉的要是**当前正开着的那一首**，手上这份**留着**：它还在内存里、可能还有没存过的编辑。
-    /// 把它一起清掉，等于让「删掉列表里那一行」顺手动用户正在编辑的东西 ——
-    /// 那比留着更让人措手不及。留着的代价只是跟曲库脱了钩，按保存会重新问个名字。
-    ///
-    /// <paramref name="sender"/> 就是那个曲库窗口（事件是它转出来的），
-    /// 回话因此走**它**的页脚，不是主窗口那条提示行 —— 模态框压在头上时，
-    /// 主窗口上写什么都看不见。
+    /// 曲库里某一首确认要删（面板已经问过一句了）。删掉的要是当前正开着的那一首，
+    /// 手上这份留着 —— 它还在内存里、可能还有没存过的编辑，按保存会重新问个名字。
+    /// 回话走那个曲库窗口的页脚（<paramref name="sender"/>），不是主窗口那条提示行。
     /// </summary>
     private void OnLibraryDeleteRequested(object? sender, string name)
     {
@@ -596,18 +438,14 @@ public partial class MainWindow : Window
             dialog.ShowMessage($"「{name}」已从曲库删掉。");
         }
 
-        // 那一行得当场消失。没删成的那一支在上头已经 return 了，不会走到这儿
+        // 那一行得当场消失
         dialog.RefreshLibrary(_currentName);
     }
 
     /// <summary>
     /// 曲库窗口里双击了某一首：把工程读出来装上。
-    ///
-    /// **装上了返回 null，没装上返回那句要报的中文。** 报错不在这儿写进提示行，
-    /// 是因为这一趟十有八九是模态框底下那次点击引起来的 —— 提示行写了也看不见。
-    /// 交给调用方，它知道该往哪块屏幕上放（现在是曲库窗口的页脚），
-    /// 也顺手回答了「窗口关不关」：读不出来就留着，不然用户只看见窗口一闪。
-    /// （从前侧栏那一版没有这个问题：面板一直摆着，报错写主窗口的提示行就行。）
+    /// 装上了返回 null，没装上返回那句要报的中文 —— 报错写哪儿交给调用方（这一趟是模态框
+    /// 底下那次点击引起来的，提示行写了也看不见），也顺手回答了「窗口关不关」。
     /// </summary>
     private string? TryOpenLibrarySong(string name)
     {
@@ -624,8 +462,7 @@ public partial class MainWindow : Window
             _importedFrom = header.ImportedFrom;
             _edited = header.Edited;
 
-            // 不用去挪列表的高亮：这一支成功就走到底，调用方紧接着把窗口关了。
-            // （从前那句 MarkCurrent 是因为侧栏一直摆着才需要的。）
+            // 不用去挪列表的高亮：这一支成功就走到底，调用方紧接着把窗口关了
             return null;
         }
         catch (InvalidDataException ex)
@@ -637,18 +474,13 @@ public partial class MainWindow : Window
 
     /// <summary>
     /// 「保存」：已经有曲名就写回那一首，还没有（导入时没命名、或者刚从曲库删掉）就先问一个。
-    ///
-    /// 本体在 <see cref="SaveAsync"/>：菜单项和 <c>Ctrl+S</c> 走的是同一件事，
-    /// 两处各写一遍的话迟早有一天只改一处。这里只负责把那件事接上菜单项的 <c>Click</c>。
+    /// 本体在 <see cref="SaveAsync"/>，菜单项和 <c>Ctrl+S</c> 走的是同一件事。
     /// </summary>
     private async void OnSaveClick(object? sender, RoutedEventArgs e) => await SaveAsync();
 
     /// <summary>
-    /// 「保存」和 <c>Ctrl+S</c> 共用的入口。
-    ///
-    /// 返回 <see cref="Task"/> 而不是 <c>async void</c>：键盘那一路（<see cref="OnWindowKeyDown"/>）
-    /// 不是 async 的，只能把它丢掉（<c>_ =</c>）—— 问名字那一步要开模态框，是这条路上唯一
-    /// 真会等的地方，等的是用户，不是 IO。
+    /// 「保存」和 <c>Ctrl+S</c> 共用的入口。返回 <see cref="Task"/> 而不是 <c>async void</c>：
+    /// 键盘那一路（<see cref="OnWindowKeyDown"/>）不是 async 的，只能把它丢掉（<c>_ =</c>）。
     /// </summary>
     private async Task SaveAsync()
     {
@@ -663,7 +495,7 @@ public partial class MainWindow : Window
         SaveTo(library, name);
     }
 
-    /// <summary>「另存为…」：问一个新名字存进去。<b>不动原来那一首</b> —— 那正是「另存为一首」的意思。</summary>
+    /// <summary>「另存为…」：问一个新名字存进去，不动原来那一首。</summary>
     private async void OnSaveAsClick(object? sender, RoutedEventArgs e)
     {
         if (_library is not { } library) return;
@@ -679,18 +511,9 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// 问一个要写进曲库的名字，**撞名时先问一句**。
-    ///
-    /// <c>SongLibrary.Write</c> 是覆盖语义 —— 那正是「保存」的意思。但「保存」和「另存为 / 导入时起名」
-    /// 不是一回事：后两者里手一滑打出一个已有的名字，就会拿手上这份把**另一首**曲子悄悄换掉，
-    /// 而且是覆盖写，撤不回来。「改名」那条路是拦着的（<c>Rename</c> 撞名直接报错），
-    /// 没道理「另存为」反而更松。
-    ///
-    /// 放行的两种：名字就是**当前这首**（那是保存自己，用户按「保存」要的就是它），
-    /// 或者曲库里没这个名字。
-    ///
-    /// 用户说「不覆盖」就带着刚打的名字再问一次，而不是把他退回工具栏 ——
-    /// 他本来就在做「起个名字」这件事，让他接着改一个字就行。
+    /// 问一个要写进曲库的名字，撞名时先问一句 —— <c>SongLibrary.Write</c> 是覆盖语义，
+    /// 手滑打出一个已有的名字就会拿手上这份把另一首曲子悄悄换掉，撤不回来。
+    /// 放行的两种：名字就是当前这首，或者曲库里没这个名字；用户说不覆盖就带着刚打的名字再问一次。
     /// </summary>
     /// <returns>可以写的名字；用户取消 = <c>null</c>。</returns>
     private async Task<string?> AskNameForSaveAsync(SongLibrary library, string title, string initial)
@@ -715,10 +538,8 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// 把手上这份写进曲库的某个名字。
-    ///
-    /// 写出去的是**此刻手上的那一份**（含刚做完、还没撤销的编辑），不是屏幕：
-    /// <c>Track.Transpose</c>、卷帘视口、播放头都不进文件。
+    /// 把手上这份写进曲库的某个名字。写出去的是此刻手上的那一份（含刚做完、还没撤销的编辑），
+    /// 不是屏幕：<c>Track.Transpose</c>、卷帘视口、播放头都不进文件。
     /// </summary>
     private void SaveTo(SongLibrary library, string name)
     {
@@ -742,18 +563,9 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// 改名 —— 就是把文件换个名字，内容一个字节都不碰。
-    ///
-    /// **唯一的入口是顶栏那格「歌曲名」框**（<see cref="OnSongNameKeyDown"/>，32 号工单收的口）。
-    /// 25 号一度还有第二条路：曲库列表里点一下曲名就地改。那条拆了 ——
-    /// 列表里点名字最常干的事是「选中它看看」，而改名混在里面就是误触。
-    ///
-    /// 改的要是**当前正开着的那一首**，曲名框得跟着换：它显示的就是这个名字，
-    /// 不改的话界面上会同时存在两个名字（列表里新的、框里旧的），按保存还会存回一个已经不存在的名字。
-    ///
-    /// 没改成的那一路（撞名、名字不能用）**曲库那条行不用管**：曲库是在动手之前抛的，
-    /// 盘上什么都没变，而那一行显示的一直是旧名字 —— 行的名字**只在刷新时**从盘上读，
-    /// 用户打在输入框里的那半截字从来没有进过那一行。喊一句错就够了。
+    /// 改名 —— 就是把文件换个名字，内容一个字节都不碰。唯一的入口是顶栏那格「歌曲名」框
+    /// （<see cref="OnSongNameKeyDown"/>）。改的要是当前正开着的那一首，曲名框得跟着换，
+    /// 不然界面上会同时存在两个名字。没改成的那一路不用管曲库那一行：盘上什么都没变。
     /// </summary>
     private void RenameTo(SongLibrary library, string oldName, string newName)
     {
@@ -779,14 +591,10 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// 曲名框：回车改名。
-    ///
-    /// 这一格显示的就是曲名，所以回车 = 「这首叫这个」。还没进曲库的（导入时取消了命名）
-    /// 回车就顺势存进去 —— 不然这一格是个打完回车什么都没发生的死框。
-    ///
-    /// 不合法（空的、全是文件名里不能用的字符）就报一句中文、把框退回原名：
-    /// 判据和曲库是同一个 <see cref="SongLibrary.IsUsableName"/>，两处各写一套的话，
-    /// 早晚出现「界面让过、曲库不让存」。
+    /// 曲名框：回车改名。这一格显示的就是曲名，所以回车 = 「这首叫这个」；
+    /// 还没进曲库的（导入时取消了命名）回车就顺势存进去，不然这一格是个死框。
+    /// 不合法就报一句中文、把框退回原名，判据和曲库是同一个
+    /// <see cref="SongLibrary.IsUsableName"/>。
     /// </summary>
     private void OnSongNameKeyDown(object? sender, KeyEventArgs e)
     {
@@ -807,10 +615,8 @@ public partial class MainWindow : Window
 
         if (_currentName is not { } oldName)
         {
-            // 还没进曲库：起了名就等于存进去。名字已经是别人的就拦下 ——
-            // 往曲名框里打一个已有的名字，本意多半是「这首叫这个」，不是「把那一首换掉」。
-            // 这一格是回车就走的，不适合弹一个确认框拦一下；报一句让他改更顺。
-            // 真要覆盖，走「另存为…」，那儿会问一句。
+            // 还没进曲库：起了名就等于存进去。名字已经是别人的就拦下 —— 往曲名框里打一个已有的名字，
+            // 本意多半是「这首叫这个」而不是「把那一首换掉」；真要覆盖走「另存为…」，那儿会问一句
             if (library.Contains(name))
             {
                 ShowError($"曲库里已经有一首「{name}」了，换个名字。要覆盖它请用「另存为…」，那里会问一句。");
@@ -824,7 +630,7 @@ public partial class MainWindow : Window
 
         if (oldName == name)
         {
-            HideMessages();               // 名字没变，什么都不用做，但别留着一句过期的话
+            HideMessages();               // 名字没变，但别留着一句过期的话
             return;
         }
 
@@ -834,34 +640,15 @@ public partial class MainWindow : Window
     // ==================== 编辑脊柱 ====================
 
     /// <summary>
-    /// 把一份编辑过的曲子换上，并把界面**按原样**恢复。整个编辑脊柱就落在这一个方法里。
-    ///
-    /// 三件事必须一起做，少一件用户就会看见「改一下就被弹走了」：
-    /// <list type="number">
-    /// <item>视口与选中按原样放回去 —— 改的是速度或移调，不该把人弹回第 1 小节、也不该丢掉选中。
-    /// 选中集**抄的是坐标本身**：坐标按身份寻址（见 <see cref="NoteRef"/>），
-    /// 编辑换的是内容不是身份，于是同一串坐标在新控制器上照样指着同一批音。</item>
-    /// <item>播放头用**新的**速度表把原来那个 tick 换算成秒再 Seek 回去。tick 是同一处，
-    /// 秒数变了（这正是改速度的意思）；用旧秒数的话改完播放头会跳。</item>
-    /// <item>试听换谱 —— <c>Load</c> 会先把正在响的音全松掉，所以编辑顺手停掉播放，
-    /// 这比「边放边改」安全（改到一半的谱子不该继续发出去）。</item>
-    /// </list>
-    ///
-    /// <b>「改没改」比引用</b>：跟装饰器同一条判据。一次「改成和现在一样」不该把上面这些全部重置一遍。
-    ///
-    /// <b>从前这里还有第二张嘴</b>：一条 <c>selectionAfter</c> 参数，收的是「编辑之后该选中哪几个音」
-    /// 的**值**（轨 + 音符内容），由 <c>CaptureSelection</c> / <c>SelectionAfter*</c> 那一套算出来，
-    /// 再由 <c>RestoreSelection</c> 拿值去新曲子里重新找下标 —— 因为 <see cref="NoteRef"/> 从前是
-    /// 下标，而挪音符 / 改时值都会重排数组（见 <c>Track.WithNotes</c>）。31 号工单把那套按值的镜像
-    /// 整个删了（坐标改成按身份寻址之后就没有「重新认一遍」这件事了），只剩下面这一种情形：
-    /// <b>命令自己改了「选中谁」</b>（删音符要落到邻居上），那时当然得把新的那一组交回来。
+    /// 把一份编辑过的曲子换上，并把界面按原样恢复。三件事必须一起做，少一件用户就会看见
+    /// 「改一下就被弹走了」：视口与选中按原样放回去（选中集 = 坐标本身，见 <see cref="NoteRef"/>，
+    /// 编辑换的是内容不是身份）；播放头用新的速度表把原来那个 tick 换算成秒再 Seek 回去；
+    /// 试听换谱（<c>Load</c> 会先松开正在响的音，等于顺手停了播放）。「改没改」比引用。
     /// </summary>
     /// <param name="selectionAfter">
-    /// 编辑**之后**该选中的那组音。不传（null）= 手上这一串原样留着 —— 那是绝大多数命令
+    /// 编辑之后该选中的那组音。不传（null）= 手上这一串原样留着，那是绝大多数命令
     /// （挪、拉、改速度、改移调、撤销、重做…），它们的坐标在新曲子上仍然成立。
-    ///
-    /// 传了就是「换掉」：只有删音符（落点换成邻居）和删轨 / 剪一段（坐标的轨那一半当场作废）
-    /// 这几种会传。**传进来的坐标必须是照着新曲子算的**（删音符那一路在编辑之后才拿邻居）。
+    /// 传了就是「换掉」：只有命令自己改了「选中谁」时才传，而且坐标必须是照着新曲子算的。
     /// </param>
     private void ApplySong(Song edited, IReadOnlyList<NoteRef>? selectionAfter = null)
     {
@@ -870,35 +657,29 @@ public partial class MainWindow : Window
         long playheadTick = _playback.PlayheadTick;
         long viewStartTick = _controller?.ViewStartTick ?? 0;
         // 必须在 SyncLanes 之前抄：下面换控制器，旧的那个当场作废。
-        // 抄下来的**不是它指向的音，是坐标本身** —— 这才是不必重新认音的原因
+        // 抄下来的是坐标本身，不是它指向的音 —— 这才是不必重新认音的原因
         var selection = selectionAfter ?? _controller?.SelectedNotes.ToArray() ?? Array.Empty<NoteRef>();
 
         _song = edited;
-        // 粘性标记：动过就是动过。撤销回原样也不清它（见 _edited 的说明），存盘也不清
+        // 粘性标记：动过就是动过，撤销回原样、存盘都不清
         _edited = true;
         SyncLanes();
 
-        // 视口照旧有效：小节刻度不受任何一条编辑命令影响（改速度只动速度表，其余只动音符），
-        // 控制器自己的 SetViewStart 还会夹一次，曲子变短也不会越界
+        // 视口照旧有效：小节刻度不受任何一条编辑命令影响，SetViewStart 还会夹一次，曲子变短也不越界
         _controller?.SetViewStart(viewStartTick);
-        // 选中集放回**新**控制器上：坐标是身份，原样交回去就行。
-        // 认不出的（音被删了、轨被删了）由 SetSelection 丢掉 —— 它不抛，那不是错误，是「它不在了」
+        // 选中集放回新控制器上：坐标是身份，原样交回去就行。
+        // 认不出的（音被删了、轨被删了）由 SetSelection 丢掉 —— 它不抛
         _controller?.SetSelection(selection);
 
-        // 收起来的轨照旧不出声 —— 重摊这张表的名单从控件现问（见 MutedTracks）
+        // 收起来的轨照旧不出声，名单从控件现问（见 MutedTracks）
         _playback.Load(edited, MutedTracks());
         _playback.SeekSeconds(edited.TempoMap.SecondsAt(playheadTick));
-        // 试听被换谱顺手停了（Load 会先松开所有正在响的音），走带条的亮灭跟着回位。
-        // **走 RefreshTransport 而不是在这儿手写两行** —— 从前就是手写的，
-        // 于是「■ 该不该灰」这条规矩散在三个地方（换曲子、编辑、播放），
-        // 改速度这一路（也走这里）就把 ■ 弄灰了，而屏幕上没有任何东西解释为什么。
+        // 试听被换谱顺手停了，走带条的亮灭跟着回位 —— 走 RefreshTransport，不在这儿手写两行
         RefreshTransport();
 
-        // 悬停那个音，说的可能是**刚被这条命令改掉（或者删掉）的那个音**，
-        // 而读数条只跟着鼠标动才更新 —— 鼠标这会儿多半正压在那个按钮上，
-        // 指针不动的话它会一直挂着一条已经作废的读数。清掉，比留一个错的强。
-        // 清掉之后读数**回落到选中**：编辑走的多半是「动着选中那个音」的路，
-        // 于是这一格正好接着显示它，而不是变空
+        // 悬停那个音说的可能是刚被这条命令改掉（或者删掉）的音，而读数条只跟着鼠标动才更新 ——
+        // 鼠标这会儿多半正压在那个按钮上，指针不动的话它会一直挂着一条已经作废的读数。
+        // 清掉之后读数回落到选中
         ShowHover(null);
         RefreshEditState();
         RefreshView();
@@ -907,21 +688,16 @@ public partial class MainWindow : Window
     /// <summary>撤销 / 重做、保存 / 另存为、速度框、曲名框这一组。换曲子和每次编辑之后调它。</summary>
     private void RefreshEditState()
     {
-        // 亮的是菜单项，不是按钮 —— 这几条命令收进「文件」/「操作」两组菜单了（见 MainWindow.axaml），
-        // 但「没得撤就置灰」这条规矩一个字节都没变：菜单项置灰一样点不动
+        // 亮的是菜单项（这几条命令收进「文件」/「操作」两组菜单了，见 MainWindow.axaml），
+        // 但「没得撤就置灰」这条规矩没变：菜单项置灰一样点不动
         UndoMenuItem.IsEnabled = _editor.CanUndo;
         RedoMenuItem.IsEnabled = _editor.CanRedo;
         BpmBox.IsEnabled = _song is not null;
         SongNameBox.IsEnabled = _song is not null;
         // 没有曲库就存不了（组装点没给），灰着比按了没反应诚实
-        //
-        // 这里和 21 号工单撞过一次：23 号是在「工具栏一排按钮」上写的（`SaveButton` / `SaveAsButton`
-        // + 一句 `DurationText.Text = …`），而 21 号把时长栏整个删了、位置读数也搬去了导航条。
-        // 合并时取了菜单项这一半，**没有**把那句 `DurationText` 带回来 —— main 上已经没有这个控件了。
         SaveMenuItem.IsEnabled = _song is not null && _library is not null;
         SaveAsMenuItem.IsEnabled = SaveMenuItem.IsEnabled;
-        // 「歌曲库」那颗按钮的判据**只有曲库这一半**（存不存得了要看装没装曲子，看曲库不用）——
-        // 没曲库时按下去会开出一个空窗口，灰着比那诚实
+        // 「歌曲库」的判据只有曲库这一半：没曲库时按下去会开出一个空窗口，灰着比那诚实
         LibraryButton.IsEnabled = _library is not null;
     }
 
@@ -943,9 +719,8 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// 轨道头上的移调步进器被按了：参数是新的**绝对半音数**。
-    ///
-    /// 移调只换 <c>Track.Transpose</c>，音符一个字节都不动 —— 所以这条路和改 BPM 共用同一套重绘。
+    /// 轨道头上的移调步进器被按了：参数是新的绝对半音数。
+    /// 移调只换 <c>Track.Transpose</c>，音符一个字节都不动，所以和改 BPM 共用同一套重绘。
     /// </summary>
     private void OnTransposeRequested(object? sender, int semitones)
     {
@@ -954,11 +729,8 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// 轨道头上的音色下拉挑了新的一号。
-    ///
-    /// **只影响试听**：音色是「我想听成什么样」，发给游戏时永远是口琴那套键位。
-    /// 所以它和移调、改速度共用同一套重绘 —— 谱面一个字节都不动，
-    /// 走 <see cref="ApplySong"/> 要换的只有试听那张表（<c>PreviewPlayback.Load</c>）。
+    /// 轨道头上的音色下拉挑了新的一号。只影响试听（发给游戏时永远是口琴那套键位），
+    /// 谱面一个字节都不动：和移调、改速度共用同一套重绘，要换的只有试听那张表。
     /// </summary>
     private void OnProgramRequested(object? sender, int program)
     {
@@ -969,13 +741,9 @@ public partial class MainWindow : Window
     // ==================== 卷帘编辑：事件 → 命令 ====================
 
     /// <summary>
-    /// 卷帘上拖完一组音符（方向键微调也走这一条）。
-    ///
-    /// 位移是**已经夹过**的：<c>PianoRollLane</c> 在发事件之前夹一次（预览不能画到命令去不了的地方），
-    /// <see cref="NudgeNotes"/> 在调命令之前夹一次。夹取这一步照旧要（预览和微调算出来的位置得真能落下去），
-    /// 但从前那个「不夹就会把选中集弄丢」的理由没有了 —— 那是按值认音那套镜像的毛病（31 号工单）。
-    ///
-    /// <b>选中集不用管</b>：命令换的是内容，坐标指着的那批音一个都没换号，原样留着就是对的。
+    /// 卷帘上拖完一组音符（方向键微调也走这一条）。位移是已经夹过的：<c>PianoRollLane</c>
+    /// 在发事件之前夹一次，<see cref="NudgeNotes"/> 在调命令之前夹一次。
+    /// 选中集不用管：命令换的是内容，坐标指着的那批音一个都没换号。
     /// </summary>
     private void OnNotesMoved(object? sender, NoteMoveRequest request)
     {
@@ -984,10 +752,8 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// 卷帘上拖完某条边。请求里是**绝对**的起点与时值，不是增量。
-    ///
-    /// 被拉的那个音**身份不变**（<c>SetNoteSpan</c> 只 <c>with</c> 起点和时值），
-    /// 所以选中集照旧不用管：哪怕它被拉得越过了邻居、在数组里换了位置，坐标还是指着它。
+    /// 卷帘上拖完某条边。请求里是绝对的起点与时值，不是增量。被拉的那个音身份不变
+    /// （<c>SetNoteSpan</c> 只 <c>with</c> 起点和时值），所以选中集照旧不用管。
     /// </summary>
     private void OnNoteResized(object? sender, NoteResizeRequest request)
     {
@@ -997,23 +763,12 @@ public partial class MainWindow : Window
 
     /// <summary>
     /// <c>Delete</c> / <c>Backspace</c>：把当前选中的音整批删掉（一次调用 = 撤销栈上一格）。
-    ///
-    /// <b>删完选中落到时间上最近的邻居，不清空</b> —— 连续删谱时手不用重新找位置。
-    /// 落的规则：拿被删那组里**最靠右**的那个音当基准（「从删掉的那一段末尾接着往下」），
-    /// 先找它右边最近的一个（<c>StartTick</c> 严格大于基准）；右边没有了就落回左边最近的一个。
-    /// 两边都没有（这条轨被删空了）就是空选中 —— 没地方可落，空着比指一个别的轨的音诚实。
-    ///
-    /// 基准取**最靠右**那个而不是最靠左：选中集可以是不挨着的（Shift + 点能点上相隔很远的两个），
-    /// 取最靠左的话，落点会掉进两次点击中间的缝里 —— 用户按着 Delete 想「接着往后删」，
-    /// 手却退回去了。取最靠右才是「继续往下走」。
-    ///
-    /// 基准落在**哪条轨**也由它定（那个音在哪条轨就落回哪条轨），不跟聚焦轨走：
-    /// 选中集可以横跨两条轨（Shift + 点），而「刚删掉的东西在哪儿」比「焦点在哪儿」
-    /// 更贴近用户此刻在看的地方。多轨同时删时只管一条 —— 落点只有一个。
-    ///
-    /// <b>只有这条路要显式交一份新的选中集</b>：被删的那几个音连身份一起没了，
-    /// 「原样留着」留住的是几个指向空处的坐标（<c>SetSelection</c> 会把它们丢掉，
-    /// 于是选中集空掉）。落点是**编辑之后**才算出来的——在新曲子上找邻居。
+    /// 删完选中落到时间上最近的邻居，不清空 —— 连续删谱时手不用重新找位置。
+    /// 落的规则：拿被删那组里最靠右的那个音当基准，先找它右边最近的一个
+    /// （<c>StartTick</c> 严格大于基准）；右边没有了就落回左边最近的一个；两边都没有就是空选中。
+    /// 基准取最靠右而不是最靠左：选中集可以是不挨着的，取最靠左会让落点掉进两次点击中间的缝里；
+    /// 落在哪条轨也由它定，不跟聚焦轨走。只有这条路要显式交一份新的选中集：被删的那几个音
+    /// 连身份一起没了，而落点是编辑之后才算出来的。
     /// </summary>
     private void DeleteSelection()
     {
@@ -1023,7 +778,7 @@ public partial class MainWindow : Window
         var doomed = controller.SelectedNotes.ToArray();
         if (doomed.Length == 0) return;
 
-        // 基准：最靠右的那个被删音（它所在的轨 + 它的起点）
+        // 基准：最靠右的那个被删音
         int track = doomed[0].Track;
         long edge = long.MinValue;
         foreach (var reference in doomed)
@@ -1038,16 +793,10 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// 删完之后选中该落到哪儿：<paramref name="track"/> 上起点**严格大于** <paramref name="edge"/>
-    /// 的第一个音；没有就退回起点**小于等于**它的最后一个（也就是它左边最近的那个）。
-    /// 那条轨空了就给空表。
-    ///
-    /// 返回的是**坐标**（身份，<see cref="NoteRef"/>）：调用方要把它交给
-    /// <see cref="ApplySong"/> 当「编辑之后该选中什么」，而在那份**新**曲子上，
-    /// 邻居的位置是现算的（音符按起点升序，<c>Track.WithNotes</c> 保证），身份是现取的。
-    ///
-    /// 起点**严格大于**而不是大于等于：删掉的那一段里可能还有没被选中的音留在原地，
-    /// 用「大于等于」会把其中一个当成右邻居 —— 那是往后删的时候手突然不动了。
+    /// 删完之后选中该落到哪儿：<paramref name="track"/> 上起点严格大于 <paramref name="edge"/>
+    /// 的第一个音；没有就退回起点小于等于它的最后一个。那条轨空了就给空表。
+    /// 返回的是坐标（身份，<see cref="NoteRef"/>），在那份新曲子上现算现取。
+    /// 起点取严格大于而不是大于等于：删掉的那一段里可能还有没被选中的音留在原地。
     /// </summary>
     private static List<NoteRef> NeighbourAfterDelete(Song song, int track, long edge)
     {
@@ -1057,22 +806,16 @@ public partial class MainWindow : Window
         for (int i = 0; i < notes.Count; i++)
             if (notes[i].StartTick > edge) return new List<NoteRef> { new(track, notes[i].Id) };
 
-        // 右边没有了：退回左边最近的一个。音符按起点升序（Track.WithNotes 保证），所以是最后一个
+        // 右边没有了：退回左边最近的一个（音符按起点升序，所以是最后一个）
         return notes.Count > 0
             ? new List<NoteRef> { new(track, notes[^1].Id) }
             : new List<NoteRef>();
     }
 
     /// <summary>
-    /// 那份曲子里的这个音；按**身份**找（见 <see cref="NoteRef"/>），
-    /// 认不出来（轨下标越界、这条轨上没有这个号）时给 null。
-    ///
-    /// 只剩删音符那一条路用它（要拿被删那组里最靠右那个的起点当落点基准）。
-    /// 从前它是整套按值镜像的一个零件 —— <c>CaptureSelection</c>、<c>SelectionAfterMove</c>、
-    /// <c>SelectionAfterResize</c>、<c>RestoreSelection</c> 和那个 <c>SelectedNote</c> 记录
-    /// 都跟着那套一起删了（31 号工单）。删掉的是「拿内容去重新认音」这件事；
-    /// 「按一个坐标去取那个音」还得留着，而且现在是**精确**的：内容一模一样的两个音也分得开。
-    /// 扫一遍而不是建索引表：一次删除手势里只走几十遍，建表更贵（而且表会过期）。
+    /// 那份曲子里的这个音；按身份找（见 <see cref="NoteRef"/>），认不出来时给 null。
+    /// 只剩删音符那一条路用它（要拿被删那组里最靠右那个的起点当落点基准）；内容一模一样的
+    /// 两个音也分得开。扫一遍而不是建索引表：一次删除手势里只走几十遍。
     /// </summary>
     private static Note? NoteAt(Song song, NoteRef reference)
     {
@@ -1091,14 +834,10 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// 删掉一整条轨（轨头上那个二次确认已经按过了）。
-    ///
-    /// 删完**明确清空选中**，而且这一次清空是**必须的**，不是随手：<see cref="NoteRef"/> 里
-    /// 轨那一半是**下标**，<see cref="Song.Tracks"/> 删掉一条之后剩下的整体前移 ——
-    /// 手上那串坐标会被解读成「挪了一条轨之后的那个位置」。更坏的是它**不会**认不出来：
-    /// 身份是从 1 开始按轨连号发的（见 <see cref="NoteIdentity"/>），换一条轨照样能撞上一个号，
-    /// 于是 <c>SetSelection</c> 那道「认不出就丢掉」根本拦不住 —— 用户会看到选中莫名其妙
-    /// 落在别条轨的某个音上。（这一条是身份寻址剩下的代价，写在 <see cref="NoteRef"/> 上。）
+    /// 删掉一整条轨（轨头上那个二次确认已经按过了）。删完明确清空选中：<see cref="NoteRef"/>
+    /// 里轨那一半是下标，删掉一条之后剩下的整体前移，手上那串坐标会被解读成别的位置；
+    /// 而且它不会认不出来 —— 身份从 1 开始按轨连号发（见 <see cref="NoteIdentity"/>），
+    /// 换一条轨照样能撞上一个号，<c>SetSelection</c> 那道「认不出就丢掉」拦不住。
     /// </summary>
     private void OnTrackDeleteRequested(object? sender, EventArgs e)
     {
@@ -1107,16 +846,9 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// 抽掉这条轨上的一段（轨道头上两个小节号填好了、预览那一行也看过了）。
-    ///
-    /// 传进来的已经是 tick：小节 → tick 的换算在控件里做完了，
-    /// 靠的是控制器手里那份速度表算出来的小节宽（命令层没有「小节」这个概念）。
-    ///
-    /// 抽完**明确清空选中**，理由和删轨不一样，说清楚：被剪断的音会拿到**新身份**
-    /// （见 <c>ISongEditor.CutRange</c>：剪出来的两截是新音），被前移的音则**保留身份**——
-    /// 于是「原样留着选中集」的结果是**一半对一半错**：被前移的那个还选着，
-    /// 被剪掉的那一截已经认不出来了（会被丢掉）。选中集忽然缩水一半比清空更难解释，
-    /// 而且这一刀本来就是把这一段整个拿走，清掉是更干脆的答复。
+    /// 抽掉这条轨上的一段（轨道头上两个小节号填好了、预览那一行也看过了）。传进来的已经是 tick：
+    /// 小节 → tick 的换算在控件里做完了。抽完明确清空选中：被剪断的音会拿到新身份
+    /// （见 <c>ISongEditor.CutRange</c>），被前移的保留身份，于是「原样留着选中集」一半对一半错。
     /// </summary>
     private void OnTrackCutRequested(object? sender, CutRangeRequest request)
     {
@@ -1127,9 +859,8 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// 卷帘上的选中变了。
-    ///
-    /// 选中集是**全局**的（一个控制器管所有轨），所以别的轨的高亮也得跟着变 —— 整窗重画一遍。
+    /// 卷帘上的选中变了。选中集是全局的（一个控制器管所有轨），所以别的轨的高亮也得跟着变 ——
+    /// 整窗重画一遍。
     /// </summary>
     private void OnLaneSelectionChanged(object? sender, IReadOnlyList<NoteRef> selected)
     {
@@ -1138,47 +869,35 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// 卷帘上按了一下，焦点轨跟到那一条去了。
-    ///
-    /// 那一头自己已经重画过（<see cref="TrackLaneView"/> 收到卷帘那一声就 Refresh 了），
-    /// 这里管的是**别的轨**：`Refresh` 里只管把「聚焦」那三笔点亮，灭掉上一条得整窗推一遍。
-    /// 读数和选中集都不用动 —— 换焦点不改选中集（那是刻意的，见 <see cref="MoveFocus"/>）。
-    ///
-    /// <b>不滚进视野。</b>Ctrl+↑/↓ 换聚焦轨会滚（你可能看不见落点在哪），
-    /// 而这里不会：鼠标点的东西本来就在眼前，这时候再滚一下反而是画面在手下抽搐 ——
-    /// 尤其这一按往往还接着一次拖动。
+    /// 卷帘上按了一下，焦点轨跟到那一条去了。那一头自己已经重画过，这里管的是别的轨：
+    /// 灭掉上一条焦点得整窗推一遍。读数和选中集都不用动 —— 换焦点不改选中集（见 <see cref="MoveFocus"/>）。
+    /// 不滚进视野：鼠标点的东西本来就在眼前，再滚一下反而是画面在手下抽搐。
     /// </summary>
     private void OnLaneFocusChanged(object? sender, EventArgs e) => RefreshView();
 
     // ==================== 改速度 ====================
 
     /// <summary>
-    /// 速度框：回车提交。
-    ///
-    /// 写进来的必须是**具体的拍/分**（比如 76），不是百分比也不是倍率 —— 用户要能对着原曲的标记直接填。
-    /// 不合法就报一句中文、把框退回原值：留一个看着生效了的错值比报错坏得多。
-    ///
-    /// 提交之后焦点从框里放开：不放的话接着打字会继续改这个框，
-    /// 而用户以为自己已经在按方向键看谱子了。
+    /// 速度框：回车提交。写进来的必须是具体的拍 / 分（比如 76），不是百分比也不是倍率 ——
+    /// 用户要能对着原曲的标记直接填。不合法就报一句中文、把框退回原值；提交之后焦点从框里放开。
     /// </summary>
     private void OnBpmKeyDown(object? sender, KeyEventArgs e)
     {
         if (e.Key != Key.Enter || _song is not { } song) return;
         e.Handled = true;
 
-        // double.TryParse 连 "NaN" / "Infinity" 都收（和 TempoMap 拦 NaN 那条是同一类坑），
-        // 所以解析成功之后还要自己判一次有限数
+        // double.TryParse 连 "NaN" / "Infinity" 都收，所以解析成功之后还要自己判一次有限数
         bool parsed = double.TryParse(BpmBox.Text?.Trim(), NumberStyles.Float,
             CultureInfo.InvariantCulture, out double bpm);
 
-        // 先放开焦点，否则框里写不进字（RefreshView 那一帧会跳过有焦点的框）
+        // 先放开焦点，否则框里写不进字（RefreshView 会跳过有焦点的框）
         ReleaseEditFocus();
 
         if (!parsed || !double.IsFinite(bpm) || bpm < SongEditor.MinBpm || bpm > SongEditor.MaxBpm)
         {
             ShowError($"速度要填 {SongEditor.MinBpm:0} 到 {SongEditor.MaxBpm:0} 之间的数（拍/分），"
                 + $"「{BpmBox.Text}」不算。");
-            // 退回原值：报错之后留一个看着生效了的数在框里，比报错本身难查得多
+            // 退回原值，不留一个看着生效了的数在框里
             BpmBox.Text = CurrentBpmText(song);
             return;
         }
@@ -1186,28 +905,16 @@ public partial class MainWindow : Window
         HideMessages();
         ApplySong(_editor.SetBpm(song, bpm));
 
-        // 把框写成规范样子。**就算是空操作也得写**：框里打的是 ` 76 ` 或者 `076` 时，
-        // 算出来的数和生效的值一模一样，SetBpm 返回同一个引用，ApplySong 提前返回、
-        // 跳过 RefreshView —— 于是用户回车了、什么都没发生、框里还留着他打的那串原文。
-        // 那正是这条要消掉的那种「回车了，框里怎么还是这个」的困惑。
+        // 把框写成规范样子。就算是空操作也得写：打的是 ` 76 ` 或者 `076` 时算出来的数和生效的值
+        // 一模一样，SetBpm 返回同一个引用、ApplySong 提前返回、跳过 RefreshView，
+        // 于是用户回车了，框里还留着他打的那串原文。
         BpmBox.Text = CurrentBpmText(_song!);
     }
 
     /// <summary>
-    /// 速度框此刻该写的数：**具体的拍/分**（四舍五入到整数），不是百分比也不是倍率。
-    ///
-    /// 取的是 **tick 0 的基准速度**，不是播放头那一点的速度 —— 这一格是**输入框**，
-    /// 显示的数必须就是回车之后生效的那个数。改速度写进去的是基准值再整体等比缩放
-    /// （<see cref="SongEditor.SetBpm"/>），所以 tick 0 就是它的逆。
-    ///
-    /// 从前这里写的是 <c>BeatsPerMinuteAt(播放头)</c>，注释里也认了「变速曲子上两者分得开」，
-    /// 当成小事放过了。它不是小事：语料库 63 首里有 22 首不止一个速度值。
-    /// 拿 `Carulli_Duetto_No2_Op4.mid` 说 —— tick 0 是 50，61920 那一段是 150；
-    /// 播到那一段停下，框里写的是 150，用户**一个字都没打**直接回车，
-    /// `SetBpm(150)` 就把 tick 0 改成 150、整首按 3 倍缩放：347.8 秒变 115.9 秒，
-    /// 撤销按钮亮了，曲子快了三倍。用户以为那一回车是「确认一下现在的值」。
-    ///
-    /// 一个显示的数和一个写入的数说的是两件事，是这一格最不该有的毛病。
+    /// 速度框此刻该写的数：具体的拍 / 分（四舍五入到整数）。取的是 tick 0 的基准速度，
+    /// 不是播放头那一点的速度 —— 这一格是输入框，显示的数必须就是回车之后生效的那个数
+    /// （<see cref="SongEditor.SetBpm"/> 写的就是基准值再整体等比缩放，所以 tick 0 是它的逆）。
     /// </summary>
     private string CurrentBpmText(Song song) =>
         Math.Round(song.TempoMap.BeatsPerMinuteAt(0))
@@ -1219,11 +926,8 @@ public partial class MainWindow : Window
     // ==================== 导出 / 演奏器 ====================
 
     /// <summary>
-    /// 「导出」—— 把此刻手上的谱面写回一个标准 MIDI 文件。
-    ///
-    /// 写出去的是**模型**，不是屏幕：<c>Track.Transpose</c>、卷帘视口、播放头都不进文件
-    /// （spec 里那条「Transpose 是轨的属性，不写进音符」的同一个道理）。
-    /// 一句「导出成功」也不说就太安静了 —— 用户没法知道盘上到底有没有落下一个文件。
+    /// 「导出」—— 把此刻手上的谱面写回一个标准 MIDI 文件。写出去的是模型，不是屏幕：
+    /// <c>Track.Transpose</c>、卷帘视口、播放头都不进文件。写完报一句，用户才知道盘上落了文件。
     /// </summary>
     private async void OnExportClick(object? sender, RoutedEventArgs e)
     {
@@ -1239,7 +943,7 @@ public partial class MainWindow : Window
 
         if (file?.TryGetLocalPath() is not { } path)
         {
-            // 用户取消了。取消不是失败，什么都不用说
+            // 用户取消了，不是失败
             return;
         }
 
@@ -1259,14 +963,8 @@ public partial class MainWindow : Window
 
     /// <summary>
     /// 工具栏上「演奏」—— 另开一个独立窗口，把选中的轨弹到别的程序里去。
-    ///
-    /// **40 号工单之前它叫「演奏器…」、坐在右上角，是那颗蓝框的 `launch` 按钮。**
-    /// 现在它和左边那三样并排、长相一样（`Button.menubar`）—— 用户要的是「表述形式统一」。
-    /// 代价说清楚：它不再「自己跳出来」了，变成需要找一下的第三个入口。
-    ///
-    /// 本窗口不 new 它、也不知道它要什么（钟和键鼠出口都在组装点手里）：
-    /// 要一个过来、挂到自己名下、Show。挂了 owner 之后主窗口一关它就跟着关 ——
-    /// 一个还在发按键的窗口不该在主窗口没了以后留在屏幕上。
+    /// 本窗口不 new 它、也不知道它要什么：要一个过来、挂到自己名下、Show ——
+    /// 挂了 owner 之后主窗口一关它就跟着关。
     /// </summary>
     private void OnPerformerClick(object? sender, RoutedEventArgs e)
     {
@@ -1305,9 +1003,7 @@ public partial class MainWindow : Window
 
     /// <summary>
     /// 走带条上那颗按钮：没在放就开始，正在放就暂停，暂停着就接着放。
-    /// 鼠标按它和空格键**走的是同一条**（见 <see cref="OnWindowKeyDown"/> 里的空格那一支）——
-    /// 两条各写一遍的话，置灰、按钮上的字、刷新这些收尾迟早只有一条会被改到，
-    /// 于是「空格」和「点按钮」在某个角落上开始不一样。
+    /// 鼠标按它和空格键走的是同一条（见 <see cref="OnWindowKeyDown"/> 里的空格那一支）。
     /// </summary>
     private void TogglePlayback()
     {
@@ -1317,8 +1013,8 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// 从当前位置开始播。<see cref="PreviewPlayback.Play"/> 那句 <c>Seek(MusicNow)</c> 一个人管三种情况
-    /// —— 从头、暂停之后接着、停止之后再放，这里不必分。
+    /// 从当前位置开始播。<see cref="PreviewPlayback.Play"/> 那句 <c>Seek(MusicNow)</c>
+    /// 一个人管三种情况（从头、暂停之后接着、停止之后再放），这里不必分。
     /// </summary>
     private void StartPlayback()
     {
@@ -1329,10 +1025,8 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// 停在原地。**和 <see cref="StopPlayback"/> 的差别只有两样：不动视野、按钮上写「继续」。**
-    ///
-    /// 那一下 <c>SnapViewToBar</c> 是「这段我听完了」的意思，暂停里做它就等于把视野从人正看着的
-    /// 地方拽走 —— 而暂停要的恰恰是「就在这，别动」。
+    /// 停在原地。和 <see cref="StopPlayback"/> 的差别只有两样：不动视野、按钮上写「继续」——
+    /// <c>SnapViewToBar</c> 是「这段我听完了」的意思，暂停要的恰恰是「就在这，别动」。
     /// </summary>
     private void PausePlayback()
     {
@@ -1343,25 +1037,15 @@ public partial class MainWindow : Window
 
     private void OnRestartClick(object? sender, RoutedEventArgs e) => RestartPlayback();
 
-    /// <summary>
-    /// 重头播放（33 号工单把走带条右边那颗 `■ 停止` 换成了它）：
-    /// **播放头回开头、视野回第一小节，然后立刻开始放。**
-    /// </summary>
+    /// <summary>重头播放：播放头回开头、视野回第一小节，然后立刻开始放。</summary>
     private void RestartPlayback() => SeekBarAndPlay(0);
 
     /// <summary>
-    /// 回跳一小节并播放（35 号工单，绑在 **Shift + 空格** 上）。
-    ///
-    /// 用户原话：「增加一个功能：回跳上一小节并播放……这个是很经常用的功能」。
-    /// 练琴时它就是「这一小节弹糊了，退一小节再来」—— 而它退的是**整整一小节的预备**
-    /// （在**当前小节 − 1** 的**小节头**上起播，不是「回本小节开头」）：播放头停在第 8 小节
-    /// 第 3 拍时按一下，从第 7 小节头开始放。第 1 小节按 = 回第 1 小节（夹住，见下）。
-    ///
+    /// 回跳一小节并播放（绑在 Shift + 空格 上）。退的是整整一小节的预备：在<em>当前小节 − 1</em>
+    /// 的小节头上起播，已经在第 1 小节就还在第 1 小节（夹住）。
     /// 「退到哪」和 <see cref="RestartPlayback"/> 是同一套算法，只是那一格写 0、这一格写
-    /// `当前小节 − 2`：<see cref="PianoRollController.BarOfTick"/> 给的是**1 起**的小节号，
-    /// 而 <see cref="PianoRollController.TickOfBarClamped"/> 收的是**0 起**的 ——
-    /// 中间那个减 2 就是这个换算，不是笔误。越界由 `TickOfBarClamped` 自己夹
-    ///（第 1 小节 → −1 → 夹到 0），和「跳到 __ 小节」框、和 ↻ 是同一把夹子。
+    /// 当前小节 − 2（<see cref="PianoRollController.BarOfTick"/> 给 1 起的小节号，
+    /// <see cref="PianoRollController.TickOfBarClamped"/> 收 0 起的，减 2 不是笔误）。
     /// </summary>
     private void BackOneBarAndPlay()
     {
@@ -1373,18 +1057,10 @@ public partial class MainWindow : Window
 
     /// <summary>
     /// 寻到某一小节的小节头，然后立刻开始放 —— ↻ 和 Shift+空格 共用的那一半。
-    ///
-    /// **不硬写 <c>SeekSeconds(0)</c>**：照抄 <see cref="OnNavSeek"/> 的算法
-    ///（`TickOfBarClamped` → `TempoMap.SecondsAt`），三处对「一小节从哪一秒开始」必须是同一个定义。
-    ///
-    /// 这一步**不做 <c>Stop()</c>**。正在播的时候按它，<see cref="PreviewPlayback.Play"/>
-    /// 那句 <c>Seek(MusicNow)</c> 拿到的就是刚寻过去的位置，于是自然变成「从那儿重放」——
-    /// 中间插一次 <c>Stop</c> 只会多改一次状态（它顺带把暂停态清掉），对结果没有任何影响，
-    /// 却会让人以为「必须先停一下才敢重放」。
-    ///
-    /// **能不能放以那颗播放键为准**（`IsEnabled`），不另算一套 —— 和空格那一支同一句话。
-    /// ↻ 本来就有这道闸门（按钮灰着点不动，所以以前不必写出来）；Shift+空格 是**按键**，
-    /// 绕得过按钮的灰，所以这道闸门得显式写着 —— 谱面一条轨都没有时这一下不该响。
+    /// 不硬写 <c>SeekSeconds(0)</c>：照抄 <see cref="OnNavSeek"/> 的算法，三处对「一小节从哪一秒
+    /// 开始」必须是同一个定义。这一步也不做 <c>Stop()</c>：正在播的时候按它，
+    /// <see cref="PreviewPlayback.Play"/> 拿到的就是刚寻过去的位置，自然变成「从那儿重放」。
+    /// 能不能放以那颗播放键的 <c>IsEnabled</c> 为准 —— Shift+空格 是按键，绕得过按钮的灰。
     /// </summary>
     private void SeekBarAndPlay(int barZeroBased)
     {
@@ -1394,12 +1070,11 @@ public partial class MainWindow : Window
         _controller.CenterOnBar(barZeroBased);
         _playback.SeekSeconds(_controller.Song.TempoMap.SecondsAt(_controller.TickOfBarClamped(barZeroBased)));
         // 之后的事全归 StartPlayback：它 RefreshTransport（按钮亮灭 / 字）+ RefreshView
-        // （红线、「位置」读数、缩略图都在里面）。这儿不额外补那两下 ——
-        // 补了就是第二处规矩，迟早和第一处不一样。
+        //（红线、「位置」读数、缩略图都在里面），这儿不额外补那两下
         StartPlayback();
     }
 
-    /// <summary>停下：松掉所有正在响的音，并把视图对齐到小节线（标注 4）。</summary>
+    /// <summary>停下：松掉所有正在响的音，并把视图对齐到小节线。</summary>
     private void StopPlayback()
     {
         _playback.Stop();
@@ -1410,9 +1085,8 @@ public partial class MainWindow : Window
 
     private void OnPlaybackFinished(object? sender, EventArgs e)
     {
-        // 放完了：和按停止一样收尾。**光标留在原地**，别自己跳回开头。
-        // 状态上走的是 Stop（不是 Pause），所以按钮回到「▶ 播放」—— 空格能重新开一段，
-        // 不会卡在「继续」上（那条路的语义是「从刚才停的地方接着听」，这回没有那个地方）
+        // 放完了：和按停止一样收尾，光标留在原地。状态上走的是 Stop 不是 Pause，
+        // 所以按钮回到「▶ 播放」，不会卡在「继续」上
         _playback.Stop();
         _controller?.SnapViewToBar();
         RefreshTransport();
@@ -1420,12 +1094,8 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// 走带条那两颗按钮的字和亮灭。播放状态一变就调它。
-    ///
-    /// **以播放器为准，不以「上一次点了什么」为准**：暂停、停止、放完自动停、
-    /// 换曲子（<c>Load</c> 里会 <c>Stop</c>）都能把状态改掉，靠记一个「上次是放还是停」
-    /// 的字段迟早会和真身对不上 —— 那时按钮上写着「暂停」而没东西在响。
-    /// 问 <see cref="PreviewPlayback"/> 自己要，没有第二个真相源。
+    /// 走带条那两颗按钮的字和亮灭。播放状态一变就调它。以播放器为准、不以「上一次点了什么」为准：
+    /// 暂停、停止、放完自动停、换曲子都能把状态改掉，靠记一个字段迟早会和真身对不上。
     /// </summary>
     private void RefreshTransport()
     {
@@ -1433,21 +1103,15 @@ public partial class MainWindow : Window
             : _playback.IsPaused ? "▶ 继续"
             : "▶ 播放";
 
-        // 判据和换曲子那儿一致：**有轨才放得响**，一条轨都没有的谱面按了也是白按
+        // 判据和换曲子那儿一致：有轨才放得响，一条轨都没有的谱面按了也是白按
         PlayButton.IsEnabled = _song is { Tracks.Count: > 0 };
-        // ↻ 的判据跟播放键**一模一样**（33 号工单改的）：它的意义就是「放」，
-        // 没东西可放时亮着等于承诺一件做不到的事。
-        // 从前这儿是 `_song is not null`（■ 始终可用）—— 那是「停下」的判据：
-        // 「我听完了、视野回小节」对空谱面也讲得通。换了语义，判据跟着换。
+        // ↻ 的判据跟播放键一模一样：它的意义就是「放」，没东西可放时亮着等于承诺一件做不到的事
         RestartButton.IsEnabled = _song is { Tracks.Count: > 0 };
     }
 
     /// <summary>
-    /// 导航条落到了某一小节（0 起，已吸附到小节线）。
-    ///
-    /// 它**搬的是播放头**，不只是视图 —— 松手后红线出现在新位置（标注 3），
-    /// 而那也正是「从当前位置播放」的起点。视图顺手把小节摆到屏幕中间，
-    /// 免得红线一松手就贴在左边缘上。
+    /// 导航条落到了某一小节（0 起，已吸附到小节线）。它搬的是播放头，不只是视图 ——
+    /// 松手后红线出现在新位置，而那也正是「从当前位置播放」的起点；视图顺手把小节摆到屏幕中间。
     /// </summary>
     private void OnNavSeek(object? sender, int barZeroBased)
     {
@@ -1463,15 +1127,9 @@ public partial class MainWindow : Window
 
     /// <summary>
     /// 「跳到 __ 小节」：回车生效，越界的小节号夹到首尾（输 999 的意思就是「去最后」）。
-    ///
-    /// **回车之后焦点从框里放开**（34 号工单），和速度框、曲名框同一句话。
-    /// 这一格尤其要放：跳过去就是为了听，而接着按下去的十有八九是**空格** ——
-    /// 焦点还在框里的话，那一下会把一个空格打进框里（数字后面多一个看不见的字符），
-    /// 曲子一动不动。用户看不出发生了什么，只觉得「空格坏了」。
-    ///
-    /// 放开焦点放在**校验之前**，照抄 <see cref="OnBpmKeyDown"/> 的次序：
-    /// 输了个不是数的东西、报了错、框退回原值之后焦点一样要出来 ——
-    /// 不然用户接着按空格修，空格又进框了。
+    /// 回车之后焦点从框里放开，而且放在校验之前（照抄 <see cref="OnBpmKeyDown"/> 的次序）：
+    /// 跳过去就是为了听，接着按下去的十有八九是空格，焦点还在框里的话那一下就打不进曲子；
+    /// 报了错、框退回原值之后焦点一样要出来。
     /// </summary>
     private void OnJumpKeyDown(object? sender, KeyEventArgs e)
     {
@@ -1481,7 +1139,7 @@ public partial class MainWindow : Window
 
         if (!int.TryParse(JumpBox.Text?.Trim(), out int bar))
         {
-            // 输了个不是数的东西：退回当前小节，不留一个看着生效了的错值
+            // 不是数：退回当前小节，不留一个看着生效了的错值
             JumpBox.Text = Format.BarNumber(_controller.BarOfTick(_playback.PlayheadTick));
             return;
         }
@@ -1498,47 +1156,25 @@ public partial class MainWindow : Window
     // ==================== 键盘 ====================
 
     /// <summary>
-    /// 窗口级快捷键：空格**播放 / 暂停**（20 号工单改的，从前只管「开始」）、
-    /// 撤销 / 重做（Ctrl+Z、Ctrl+Y、Ctrl+Shift+Z）、保存（Ctrl+S）、
+    /// 窗口级快捷键：空格播放 / 暂停、撤销 / 重做（Ctrl+Z、Ctrl+Y、Ctrl+Shift+Z）、保存（Ctrl+S）、
     /// 方向键微调、Ctrl+←/→ 定位、Ctrl+↑/↓ 换聚焦轨。
+    /// 这一段就是屏幕上那两行提示的真身（<see cref="Format.ReadoutHintPerforming"/> /
+    /// <see cref="Format.ReadoutHintEditing"/>），这里动的每一个键那边那行字都得跟着动。
     ///
-    /// **这一段就是屏幕上那两行提示的真身**（<see cref="Format.ReadoutHintPerforming"/> /
-    /// <see cref="Format.ReadoutHintEditing"/>）——
-    /// 这里动的每一个键，那边那行字都得跟着动：两处对不上的提示比没有提示更坏，
-    /// 它会让人以为功能坏了（26 号工单就是来收这一处的）。
-    ///
-    /// 方向键按**方案 A**（工单 09）：<c>←/→</c> 移时间、<c>↑/↓</c> 移音高、
-    /// <c>Shift+←/→</c> 改时值、<c>Ctrl+←/→</c> 在**焦点轨内**前后跳、
-    /// <c>Ctrl+↑/↓</c> 在轨之间上下走（聚焦，见 <see cref="MoveFocus"/>）。
-    /// <c>Delete</c> / <c>Backspace</c> 删掉选中（见 <see cref="DeleteSelection"/>），
-    /// <c>Esc</c> 放开选中（36 号，见上面那一支）。
-    /// 07 原本把裸 <c>←/→</c> 绑成「前后跳」，09 把裸键让给了微调 ——
-    /// <b>能力没砍，挪到 Ctrl 上了</b>：07 那两条测试测的是控制器上的 <c>MoveSelection</c>，
-    /// 那条路一个字节都没动，所以不会红，变的只是这里把哪个键绑到它上面。
-    ///
-    /// 隧道阶段接进来，先于任何控件拿到按键。
-    /// <b>焦点在输入框里时整个让开</b> —— 那时左右键归光标用、Ctrl+Z 归输入框自己的撤销，
-    /// 抢过来会让人没法改自己输的数。
+    /// 方向键：<c>←/→</c> 移时间、<c>↑/↓</c> 移音高、<c>Shift+←/→</c> 改时值、
+    /// <c>Ctrl+←/→</c> 在焦点轨内前后跳、<c>Ctrl+↑/↓</c> 在轨之间上下走（见 <see cref="MoveFocus"/>）。
+    /// <c>Delete</c> / <c>Backspace</c> 删掉选中（见 <see cref="DeleteSelection"/>），<c>Esc</c> 放开选中。
+    /// 隧道阶段接进来，先于任何控件拿到按键；焦点在输入框里时整个让开 ——
+    /// 那时左右键归光标用、Ctrl+Z 归输入框自己的撤销。
     /// </summary>
     private void OnWindowKeyDown(object? sender, KeyEventArgs e)
     {
         if (e.Handled) return;
         if (FocusManager?.GetFocusedElement() is TextBox) return;
 
-        // Esc：收掉「删掉这条轨？」和「抽掉一段」那两问。它们都不是弹窗（只是轨道头上换了一排控件），
-        // 收不掉的话键盘用户除了再点一次「取消」没有别的退路。
-        // 焦点在改名框里时上面那一句已经让开了 —— 那时 Esc 归输入框自己用。
-        //（38 号之后「抽掉一段」那一问里没有输入框了，所以它在任何焦点下都收得掉。）
-        //
-        // 36 号在这一支后面接了**第三件事**：那两问都没收掉时，把**选中的音**放开
-        //（用户 2026-09-20：「当你单独选中一个音的时候，按 Escape 键可以取消选择这一个音」）。
-        // 顺序是这么排的：屏幕上正摆着一问一答（「删掉这条轨？[删掉][取消]」）的时候，
-        // Esc 的意思是「我不回答」，不是「顺手把我选的东西也丢了」；
-        // 收了那一问之后，同一颗键再按才是放开选中 —— 两件事各按各的，谁也不抢谁。
-        //
-        // **只放音，不动焦点轨**（用户同一天：「但是焦点轨不能取消选择，必须选一个」）：
-        // 焦点轨是「我要弹哪条轨」，它一直有一条，Esc 不碰它 ——
-        // 所以放开选中之后按 Ctrl+←→，跳的还是原来那条轨上的音。
+        // Esc：先收掉「删掉这条轨？」和「抽掉一段」那两问（它们不是弹窗，只是轨道头上换了一排控件），
+        // 都没收掉时再把选中的音放开 —— 屏幕上正摆着一问一答时，Esc 的意思是「我不回答」。
+        // 只放音，不动焦点轨：焦点轨一直有一条 —— 放开选中之后按 Ctrl+←→ 跳的还是那条轨上的音。
         if (e.Key == Key.Escape)
         {
             bool consumed = false;
@@ -1548,9 +1184,8 @@ public partial class MainWindow : Window
                 consumed |= lane.CancelPendingSplit();
             }
 
-            // 一个音都没选中时**不标记 Handled**：这一下不该被吃掉，让它照常往下走
-            //（和 Delete 那一支同一条规矩）。放开选中要重画的那两下也在这儿：
-            // 读数和提示行归 RefreshReadout，卷帘上那圈高亮归 RefreshView。
+            // 一个音都没选中时不标记 Handled，让它照常往下走（和 Delete 那一支同一条规矩）。
+            // 放开选中要重画的那两下：读数和提示行归 RefreshReadout，卷帘上那圈高亮归 RefreshView。
             if (!consumed && _controller is { } controller && controller.SelectedNotes.Count > 0)
             {
                 controller.ClearSelection();
@@ -1563,14 +1198,10 @@ public partial class MainWindow : Window
             return;
         }
 
-        // Enter：把正摆着的「抽掉一段」按下去。**和 Esc 是同一对的两头** ——
-        // 38 号把那一问的输入框撤掉之后，焦点多半不在任何框里（划段那个手势不用打字），
-        // 于是这一下会落到窗口这一层。不接的话，键盘用户拖完一段还得回来找鼠标点「抽掉」。
-        //
-        // 摆在 Esc 后面是随意的（两颗键不同名），要紧的是**只在真摆着那一问时才算用掉** ——
-        // 没摆着的时候返回 false，回车照常往下走（将来谁要拿它当「确定」，
-        // 那份「往下走」的默认路径还在）。灰着的「抽掉」（这一段里没有音）也算用掉：
-        // 屏幕上正摆着一问一答，回车按进这一问里了，不该顺手去触发别的什么。
+        // Enter：把正摆着的「抽掉一段」按下去。那一问里没有输入框，焦点多半不在任何框里
+        //（划段那个手势不用打字），于是这一下会落到窗口这一层。
+        // 只在真摆着那一问时才算用掉：没摆着就返回 false，回车照常往下走。
+        // 灰着的「抽掉」（这一段里没有音）也算用掉 —— 屏幕上正摆着一问一答，不该顺手去触发别的什么。
         if (e.Key == Key.Enter)
         {
             foreach (var lane in _lanes)
@@ -1590,21 +1221,15 @@ public partial class MainWindow : Window
             if (e.Key == Key.Y || (e.Key == Key.Z && shift)) { e.Handled = true; Redo(); return; }
 
             // Ctrl+S = 保存，和「文件」菜单里那一条等价（走同一个 SaveAsync）。
-            // 菜单化之后按钮藏进菜单里了，不给快捷键说不过去；菜单项右边那个 Ctrl+S
-            // 只是**显示**（InputGesture 不管按键），真按键是这儿接的。
-            //
-            // **焦点在输入框里时这一条不会生效** —— 上面那句「焦点在 TextBox 里就让开」
-            // 是整段让开的，理由是输入框里的 Ctrl+Z 归它自己的撤销。保存键没有那个冲突，
-            // 按惯例（Windows 上哪个程序都是）也该在曲名框里照样保存 —— 但那要让开的那一句
-            // 再分一套例外出来，这一票不做，先记在这儿。
+            // 菜单项右边那个 Ctrl+S 只是显示（InputGesture 不管按键），真按键是这儿接的。
+            // 焦点在输入框里时这一条不会生效 —— 上面那句是整段让开的。
             if (e.Key == Key.S && !shift) { e.Handled = true; _ = SaveAsync(); return; }
         }
 
         if (_controller is null) return;
 
-        // Ctrl + ←/→ ：在**焦点轨**的音符之间前后跳（只定位，不动音符）。
-        // 限定在一条轨里是 18 改的：跨轨那版按着按着会莫名其妙换到别的轨上，
-        // 而换轨本来就有自己的手势（Ctrl+↑/↓，紧挨着下面那一段）
+        // Ctrl + ←/→：在焦点轨的音符之间前后跳（只定位，不动音符）。
+        // 限定在一条轨里：跨轨那版按着按着会莫名其妙换到别的轨上，换轨本来有自己的手势（Ctrl+↑/↓）
         if (ctrl && e.Key is Key.Left or Key.Right)
         {
             e.Handled = true;
@@ -1612,8 +1237,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        // Ctrl + ↑/↓ ：换一条轨（聚焦）。和 Ctrl + ←/→ 换一个音是对称的两件事：
-        // 一个在时间上走，一个在轨之间走，都不动谱面。
+        // Ctrl + ↑/↓：换一条轨（聚焦）。和 Ctrl + ←/→ 换一个音是对称的两件事，都不动谱面；
         // 裸 ↑/↓ 是微调音高（见下面那个 switch），所以这一对必须带 Ctrl 才分得开
         if (ctrl && e.Key is Key.Up or Key.Down)
         {
@@ -1624,9 +1248,8 @@ public partial class MainWindow : Window
 
         if (ctrl) return;
 
-        // Delete / Backspace：把当前选中的音整批删掉。两个键都绑（两个键原本都空着），
-        // 因为「删掉」这件事在键盘上有两个同样顺手的落点，选哪个是肌肉记忆，不是配置项。
-        // 一个音都没选中时**不标记 Handled**：这一下不该被吃掉，让它照常往下走。
+        // Delete / Backspace：把当前选中的音整批删掉，两个键都绑。
+        // 一个音都没选中时不标记 Handled，让它照常往下走。
         if (e.Key is Key.Delete or Key.Back && _controller.SelectedNotes.Count > 0)
         {
             e.Handled = true;
@@ -1634,10 +1257,8 @@ public partial class MainWindow : Window
             return;
         }
 
-        // **Shift + 空格 = 回跳一小节并播放**（35 号工单）。
-        // 空格**本身**还是播放 / 暂停，一个字都没变（用户 2026-09-20 的原话：
-        // 「空格还是播放和暂停的切换，然后 Shift+空格是快速回调上一小节并播放」）——
-        // 这一支只认按住 Shift 的那一下，所以它必须排在下面那一支**前面**。
+        // Shift + 空格 = 回跳一小节并播放。空格本身还是播放 / 暂停 ——
+        // 这一支只认按住 Shift 的那一下，所以必须排在下面那一支前面。
         // 落点、夹法、为什么不做 Stop 都写在 BackOneBarAndPlay 上。
         if (e.Key == Key.Space && shift)
         {
@@ -1647,30 +1268,21 @@ public partial class MainWindow : Window
             return;
         }
 
-        // 空格 = 走带条上那颗「▶ 从当前位置播放」。**必须抢在控件前面**：
-        // 焦点停在轨道头上那些按钮、下拉上的时候，空格本来归它们
-        //（按钮是「按一下」，下拉是「展开」），不抢的话「空格播放」就是时灵时不灵 ——
-        // 而屏幕上没有任何东西说得清为什么，人只会以为自己按歪了。
-        // 输入框那一头在上面已经整块让开了（改名、速度、小节号、曲名），所以改名字时打空格还是打空格。
+        // 空格 = 走带条上那颗「▶ 从当前位置播放」。必须抢在控件前面：焦点停在轨道头上那些按钮、
+        // 下拉上时空格本来归它们（按钮是「按一下」，下拉是「展开」），不抢的话空格播放就时灵时不灵。
+        // 输入框那一头在上面已经整块让开了。
         if (e.Key == Key.Space)
         {
             e.Handled = true;
             ReleaseControlFocus();
 
-            // 能不能按以**那颗按钮**为准，不是另算一套：它在没曲子、没音轨时是灰的，
-            // 空格一并跟着没反应（见 RefreshTransport）。
-            //
-            // **一个键管两头（放 / 暂停）是 20 号工单推翻的一处旧决定。** 从前空格只负责「开始」，
-            // 理由是「一个键管两头的话，连按两下手就不知道自己站在哪一头了」——
-            // 那条理由缺的正是**暂停**：当时两头是「放」和「停」，按第二下等于把刚放的东西丢掉，
-            // 确实让人迷失。现在的两头是「放」和「停在这，等下接着听」，
-            // 按第二下的结果就写在按钮上（▶ 暂停 → ▶ 继续），迷失不了。
-            // 文档照实改在 27 号工单，这里先把行为改过来。
+            // 能不能按以那颗按钮为准，不是另算一套：它在没曲子、没音轨时是灰的，
+            // 空格一并跟着没反应（见 RefreshTransport）
             if (PlayButton.IsEnabled) TogglePlayback();
             return;
         }
 
-        // 一步一格 = 一个十六分音符，和拖动吸的是同一个格（控制器算好放在那儿）
+        // 一步一格 = 一个十六分音符，和拖动吸的是同一个格
         long grid = _controller.GridTicks;
         switch (e.Key)
         {
@@ -1701,21 +1313,9 @@ public partial class MainWindow : Window
 
     /// <summary>
     /// 把键盘焦点从「会被空格按响」的控件上收回来 —— 空格和 Shift+空格 起手都要先做这一下。
-    ///
-    /// **光在隧道处理器里标记 Handled 是拦不住的。** 实测：焦点停在轨头那颗「折叠」上按空格，
-    /// 那条轨收起来了**而且**开始播放了 —— 一个键干了两件事。
-    /// 原因是 <c>Button</c>（下拉也一样）对空格走的是**类处理器**，
-    /// 它不看你在这个隧道处理器里标没标 Handled，照按不误。
-    ///
-    /// 所以顺手把键盘焦点收回窗口：KeyUp 的路由是按**抬起那一刻**的焦点重新算的，
-    /// 焦点已经不在那颗按钮上了，它「按下 → 抬起 → 触发」这条路就断在中间
-    ///（Avalonia 的按钮是**抬起**才触发的，ClickMode.Release）。
-    /// 收回来的副作用只有一样：那颗按钮不再带着焦点框 —— 而它本来也不该有，
-    /// 空格是走带键，不是「按按钮」。
-    ///
-    /// **35 号工单把它从空格那一支里提出来**：Shift+空格 走的是同一条「抢在控件前面」的路，
-    /// 抄一份就是第二处规矩，迟早有一处忘了改（那一处的症状是「一个键干了两件事」，
-    /// 而屏幕上什么也看不出来）。
+    /// 光在隧道处理器里标记 Handled 拦不住：<c>Button</c>（下拉也一样）对空格走的是类处理器，
+    /// 不看你标没标，于是会「一个键干了两件事」。收回焦点之后 KeyUp 按抬起那一刻的焦点重新路由，
+    /// 按钮「按下 → 抬起 → 触发」那条路就断在中间。
     /// </summary>
     private void ReleaseControlFocus()
     {
@@ -1724,10 +1324,8 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// 在**焦点轨**的音符之间前后跳一个（Ctrl + ←/→）。只定位，不动音符、不动焦点。
-    ///
-    /// 落点一定在焦点轨上（见 <see cref="PianoRollController.MoveSelection"/>），
-    /// 所以下面那个 <c>Reveal</c> 展开的就是焦点轨自己。
+    /// 在焦点轨的音符之间前后跳一个（Ctrl + ←/→）。只定位，不动音符、不动焦点。
+    /// 落点一定在焦点轨上（见 <see cref="PianoRollController.MoveSelection"/>）。
     /// </summary>
     private void JumpSelection(int delta)
     {
@@ -1737,26 +1335,17 @@ public partial class MainWindow : Window
         if (info is not { } note) return;
 
         RefreshReadout();
-        // 横向已经由控制器对齐到那一小节，纵向（哪条轨）在这儿滚进视野。
-        // 走 Reveal 而不是 BringIntoView：那条轨要是收着的，「滚到它那儿」在屏幕上
-        // 一个像素的变化都没有 —— 跳过去的是那个音，所以顺手把它展开
+        // 横向已经由控制器对齐到那一小节，纵向在这儿滚进视野。走 Reveal 而不是 BringIntoView：
+        // 那条轨要是收着的，「滚到它那儿」屏幕上一点变化都没有 —— 跳过去的是那个音，顺手把它展开
         if (note.Track >= 0 && note.Track < _lanes.Count) _lanes[note.Track].Reveal();
 
         RefreshView();
     }
 
     /// <summary>
-    /// Ctrl + ↑/↓ ：把聚焦挪到上一条 / 下一条轨，**跳过收起来的那些**。
-    ///
-    /// 上下和屏幕上的上下一致：↑ 是往上（下标小的那一条）。
-    /// 到头、或者这个方向上只剩收起来的轨，就原地不动（不绕回去）。
-    ///
-    /// 落点滚进视野，但**不展开**：展开是 Ctrl+←/→ 定位到一个音上时的做法
-    /// （那条路非展开不可，否则跳过去屏幕上什么变化都没有），
-    /// 而这里本来就绕开了收起来的轨，绕过去比掰开它合适。
-    ///
-    /// 也不动选中集、不动试听、不动播放头 —— 换聚焦是「手挪到哪条轨上」，
-    /// 不是「改哪条轨」。
+    /// Ctrl + ↑/↓：把聚焦挪到上一条 / 下一条轨，跳过收起来的那些（↑ 是往上，即下标小的那一条）。
+    /// 到头、或者这个方向上只剩收起来的轨，就原地不动（不绕回去）。落点滚进视野但不展开 ——
+    /// 这里本来就绕开了收起来的轨。也不动选中集、不动试听、不动播放头：换聚焦不改哪条轨。
     /// </summary>
     private void MoveFocus(int delta)
     {
@@ -1770,15 +1359,9 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// 方向键微调：把选中的一组音整体挪一格（时间）或一个半音（音高）。
-    ///
-    /// 夹在这儿做一次，夹完的增量才是真正会生效的那个 —— 预览与命令两边都得拿它算
-    /// （命令那边还会再夹一次，夹的是已经合法的值，等于没夹）。
-    ///
-    /// 从前这里跟着一句「拿没夹过的增量算出来的位置在边界上根本不存在，选中集那一下就丢了」——
-    /// 那是按值认音那套镜像的毛病（31 号工单删了那套，坐标按身份寻址之后没有「算新位置」这件事）。
-    /// 夹取本身照旧要：不夹的话按一下方向键会发一条被命令缩掉一截的位移，
-    /// 屏幕上动的地方和用户按的那一下对不上。
+    /// 方向键微调：把选中的一组音整体挪一格（时间）或一个半音（音高）。夹在这儿做一次，
+    /// 夹完的增量才是真正会生效的那个，预览与命令两边都得拿它算 ——
+    /// 不夹的话屏幕上动的地方和用户按的那一下对不上。
     /// </summary>
     private void NudgeNotes(long deltaTicks, int deltaPitch)
     {
@@ -1794,14 +1377,9 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Shift + ←/→ ：改时值，一步一格；缩到头也不小于 1 个 tick（时值不能是 0）。
-    ///
-    /// 只动**主选中**那一个。一组音一起改时值本来该是一条命令，而 <c>SetNoteSpan</c> 只收一个音：
-    /// 选中一组按一下就会记 N 格撤销，得按 N 次才回到原样，那是坑不是功能。
-    /// 主选中就是用户最后点的那个（读数条报的也是它），按一下只改它一个说得通。
-    ///
-    /// 选中集不用管：改时值的那个音**身份不变**（只是变长变短，见 <c>SetNoteSpan</c>），
-    /// 哪怕它越过邻居在数组里换了位置，坐标还是指着它。
+    /// Shift + ←/→：改时值，一步一格；缩到头也不小于 1 个 tick（时值不能是 0）。
+    /// 只动主选中那一个：<c>SetNoteSpan</c> 只收一个音，选中一组按一下会记 N 格撤销。
+    /// 选中集不用管：改时值的那个音身份不变，哪怕它越过邻居在数组里换了位置。
     /// </summary>
     private void NudgeLength(long deltaLength)
     {
@@ -1820,11 +1398,9 @@ public partial class MainWindow : Window
     // ==================== 读数条 ====================
 
     /// <summary>
-    /// 悬停到某个音上。参数是那个音的**身份**，<see cref="NoteId.None"/> = 没命中（空白处）。
-    ///
-    /// 没命中时不用特判：<c>NoteId.None</c> 是 0，而真曲子里的号是从 1 开始连号发的
-    /// （见 <see cref="NoteIdentity"/>），所以它在这条轨上一个音都对不上，Describe 给 null，
-    /// 读数条照旧是占位符 —— 「认不出来就是没这个音」这一条两边是同一个判断。
+    /// 悬停到某个音上。参数是那个音的身份，<see cref="NoteId.None"/> = 没命中（空白处）。
+    /// 没命中时不用特判：真曲子里的号是从 1 开始连号发的（见 <see cref="NoteIdentity"/>），
+    /// 0 在这条轨上一个音都对不上。
     /// </summary>
     private void OnLaneHover(object? sender, NoteId note)
     {
@@ -1833,19 +1409,13 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// 鼠标此刻悬在哪个音上。**null 有两种意思**：「没悬在任何音上」和「鼠标刚离开卷帘」——
-    /// 两种都落到「回落到主选中」，所以不用分开。
-    ///
-    /// 为什么存下来、而不是悬停时直接把读数改写掉：悬停是**一过性**的，鼠标一移开就得把
-    /// 选中那个音的读数重新摆回去，于是必须回答「刚才被顶掉的是什么」—— 那正是从前那两套
-    /// 读数的病根（悬停那套变空、选中那套还留着，同一个音在两处各显示一半）。
-    /// 存下「悬停」这件事本身，每次现算「悬停优先、选中兜底」，就没有「要还原什么」这回事了。
-    ///
-    /// **它是个下标，编辑之后一律作废** —— 所以换曲子和每次编辑都要清（见 ApplySong / LoadSong）。
+    /// 鼠标此刻悬在哪个音上。<c>null</c> 既是「没悬在任何音上」也是「鼠标刚离开卷帘」，
+    /// 两种都回落到主选中。存下「悬停」这件事本身、每次现算「悬停优先、选中兜底」，
+    /// 就不用回答「刚才被顶掉的是什么」。编辑之后一律作废，所以换曲子和每次编辑都要清。
     /// </summary>
     private PianoRollController.NoteInfo? _hovered;
 
-    /// <summary>鼠标进/出一个音。传 null 是「离开了」——这时读数不是变空，是回落到主选中。</summary>
+    /// <summary>鼠标进 / 出一个音。传 null 是「离开了」——这时读数回落到主选中。</summary>
     private void ShowHover(PianoRollController.NoteInfo? info)
     {
         _hovered = info;
@@ -1853,19 +1423,10 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// 读数条那一行提示**该显示哪一层**（36 号工单）。
-    ///
-    /// 判据是**选中集的个数**，不是「悬停在哪」：悬停是**一过性**的，鼠标一移开就得变回去 ——
-    /// 那行字会跟着鼠标闪，比截断更坏。**选中**是一个稳定的状态（点一下才变），
-    /// 而这一行说的正是「选中了之后你能拿它干什么」。
-    ///
-    /// 为什么 &gt; 0 而不是 == 1：`← →` / `↑ ↓` / `Delete` 动的都是**整批选中**
-    ///（见 <see cref="NudgeNotes"/> / <see cref="DeleteSelection"/>），选中一批的时候
-    /// 显示走带那一行是答非所问。多选在 UI 里做得出来（`Shift` 点、空白处框选）。
-    /// 用户 2026-09-20 拍的判据就是这一条（另一个选项是「恰好一个才切」）。
-    ///
-    /// **不动 ToolTip**：它始终是两行合起来的全文（见 <see cref="Format.ReadoutHintTooltip"/>），
-    /// 换层换的是屏幕上那一行，不是「能看全」的那一处。
+    /// 读数条那一行提示该显示哪一层。判据是选中集的个数，不是「悬停在哪」——
+    /// 悬停是一过性的，那行字会跟着鼠标闪。用 &gt; 0 而不是 == 1：<c>← →</c> / <c>↑ ↓</c> /
+    /// <c>Delete</c> 动的都是整批选中（见 <see cref="NudgeNotes"/> / <see cref="DeleteSelection"/>）。
+    /// 不动 ToolTip：它始终是两行合起来的全文（见 <see cref="Format.ReadoutHintTooltip"/>）。
     /// </summary>
     private void RefreshHint()
     {
@@ -1874,21 +1435,11 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// 读数条上那一套（轨 / 音高 / 小节 / 拍位 / 时值）**唯一的出处**。
-    ///
-    /// 值从哪来：**悬停优先，没悬停就用主选中的音**。这就是「合并成一套」的兑现 ——
-    /// 鼠标从音上移开时读数回落到选中的音（而不是变空），是这条规矩的直接结果，不是副作用。
-    ///
-    /// 两个都没有时，**标签和值一起藏**：只藏里面那块（ReadoutDetail），外面
-    /// `Border.readoutbar` 上的 MinHeight 一个像素不动 —— 不然鼠标一移开这一条会塌下去，
-    /// 整窗跟着跳一下，比留着几个占位符还难受。
-    ///
-    /// 轨号留着：合起来之后它是「这个音在哪条轨」的唯一线索（从前那句「选中」里也有它）。
-    ///
-    /// **提示行也在这条上，所以也在这儿喊**（<see cref="RefreshHint"/>）：
-    /// 一个是「悬停优先」，一个是「只看选中」，判据不同所以分成两个方法；
-    /// 但改选中的每一条路最后都会走到这儿（点、框选、Ctrl+←→ 跳、Escape 放开、编辑、撤销），
-    /// 所以这儿是它们**唯一**的汇合点 —— 另起一处喊，早晚有一条路忘了喊。
+    /// 读数条上那一套（轨 / 音高 / 小节 / 拍位 / 时值）唯一的出处。值从哪来：悬停优先，
+    /// 没悬停就用主选中的音 —— 鼠标从音上移开时读数回落到选中的音，而不是变空。
+    /// 两个都没有时标签和值一起藏：只藏里面那块（ReadoutDetail），外面 <c>Border</c> 的
+    /// MinHeight 不动，不然鼠标一移开这一条会塌下去。改选中的每一条路最后都走到这儿，
+    /// 所以提示行也在这条上喊（<see cref="RefreshHint"/>）。
     /// </summary>
     private void RefreshReadout()
     {
@@ -1927,11 +1478,9 @@ public partial class MainWindow : Window
         double navWidth = NavStrip.Bounds.Width;
         if (navWidth >= 20)
         {
-            // 缩略图画的是**焦点轨**：Ctrl+↑/↓ 换了焦点、或者点了别条轨上的音符，下一帧它就跟着换。
-            //
-            // 焦点轨的轨对象要按下标取，而「轨被删光」那一帧 FocusedTrack 已经越界了
-            // （控制器那边把这个下标当「没这条轨」，见 PitchRangeOf 的说明，它照答不误）。
-            // 这儿同样给 null 而不是硬取 —— 索引越界会当场炸在重画里，而重画是每个播放帧都跑的
+            // 缩略图画的是焦点轨：Ctrl+↑/↓ 换了焦点、或者点了别条轨上的音符，下一帧它就跟着换。
+            // 焦点轨的轨对象要按下标取，而「轨被删光」那一帧 FocusedTrack 已经越界，
+            // 这儿给 null 而不是硬取 —— 重画是每个播放帧都跑的，越界会当场炸
             int focused = controller.FocusedTrack;
             var navTrack = focused >= 0 && focused < controller.Song.Tracks.Count
                 ? controller.Song.Tracks[focused]
@@ -1944,16 +1493,12 @@ public partial class MainWindow : Window
                 controller.ViewStartTick, controller.TicksVisible));
         }
 
-        // 视图范围从前在这儿写成「第 1–4 小节 / 共 96」—— 那句话没了：
-        // 上面缩略图上那个视口框已经在视觉上说明「我在看哪一段」，文字是同一件事说第二遍。
-        // 位置读数留的是**播放头**所在小节（不是视口起始）：它右边紧挨着「跳到某小节」的输入框，
+        // 位置读数留的是播放头所在小节（不是视口起始）：它右边紧挨着「跳到某小节」的输入框，
         // 「我在哪 / 我要去哪」摆在一起才成对照。
         PositionText.Text = Format.Position(controller.BarOfTick(playhead), controller.BarCount);
 
-        // 速度框报的是 **tick 0 的基准速度** —— 也就是回车之后真正生效的那个数
-        // （判据为什么不取播放头那一点，见 CurrentBpmText 的注释）。
-        //
-        // **焦点在框里时跳过**：这一帧一帧地重写，会把用户正打进去的字吃掉半个。
+        // 速度框报的是 tick 0 的基准速度，也就是回车之后真正生效的那个数（见 CurrentBpmText）。
+        // 焦点在框里时跳过：这一帧一帧地重写，会把用户正打进去的字吃掉半个。
         if (!BpmBox.IsFocused) BpmBox.Text = CurrentBpmText(controller.Song);
     }
 
@@ -1966,7 +1511,7 @@ public partial class MainWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
-        // 定时器跟着窗口一起收掉。出声的设备不在这儿关 —— 它是 App 建的，由 App 收尾
+        // 定时器跟着窗口一起收掉。出声的设备是 App 建的，由 App 收尾
         _playback.Dispose();
         base.OnClosed(e);
     }

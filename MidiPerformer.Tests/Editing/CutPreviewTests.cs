@@ -7,14 +7,9 @@ using NUnit.Framework;
 namespace MidiPerformer.Tests.Editing;
 
 /// <summary>
-/// 「抽掉这一段会怎么样」那份预测，和真跑一遍 <see cref="ISongEditor.CutRange"/> 对不对得上。
-///
-/// 这份预测是给轨道头上那一行预览用的（用户按下「抽掉」之前看到的就是它）。
-/// 它是**照着命令那张分支表再走一遍**写的 —— 数数、不动音符 —— 所以这里最要紧的一条
-/// 不是「数得对不对」，而是「和命令是不是还一致」：
-/// <c>SongEditor.CutRange</c> 那边的分支表哪天改了而这边没跟上，
-/// 屏幕上就会先说一句假话，然后才做一件别的事。下面的
-/// <see cref="预测和命令逐条对得上"/> 就是钉这件事的。
+/// 「抽掉这一段会怎么样」那份预测（轨道头上那行预览）和真跑一遍 <see cref="ISongEditor.CutRange"/>
+/// 对不对得上。预测是照着命令那张分支表再走一遍写的（数数、不动音符），
+/// 所以要紧的不是「数得对不对」，而是「和命令是不是还一致」。
 /// </summary>
 public class CutPreviewTests
 {
@@ -78,7 +73,7 @@ public class CutPreviewTests
         });
     }
 
-    /// <summary>跨过左切口：在切口上剪断，留下左边那截 —— 右边那截**丢掉**，末尾就落在切口起点。</summary>
+    /// <summary>跨过左切口：在切口上剪断，留下左边那截（右边丢掉），末尾落在切口起点。</summary>
     [Test]
     public void 跨过左切口的音剪断在切口上()
     {
@@ -97,8 +92,7 @@ public class CutPreviewTests
     }
 
     /// <summary>
-    /// 伸出右切口：剪下外面那截、挪到左切口接上 —— 末尾是
-    /// <c>startTick + (e - endTick)</c>，不是原样搬过去。
+    /// 伸出右切口：剪下外面那截、挪到左切口接上，末尾是 <c>startTick + (e - endTick)</c>。
     /// </summary>
     [Test]
     public void 伸出右切口的音挪到左切口接上()
@@ -132,7 +126,7 @@ public class CutPreviewTests
         });
     }
 
-    /// <summary>切口里一个音都没有、后面也没有音要挪：这一刀什么都没动 —— 界面上那颗「抽掉」该灰着。</summary>
+    /// <summary>切口里一个音都没有、后面也没有音要挪：这一刀什么都没动（「抽掉」该灰着）。</summary>
     [Test]
     public void 谁都没碰到的切口什么都不改()
     {
@@ -162,7 +156,7 @@ public class CutPreviewTests
         });
     }
 
-    /// <summary>负数起点夹到 0（命令那边也夹），于是「从曲子头开始抽」这种事不会被算成另一段。</summary>
+    /// <summary>负数起点夹到 0（命令那边也夹）。</summary>
     [Test]
     public void 起点是负数时按零算()
     {
@@ -180,12 +174,8 @@ public class CutPreviewTests
     // ==================== 和命令对得上 ====================
 
     /// <summary>
-    /// <b>这条是这一份预测的命根子。</b>同一份谱子先预测、再真跑一遍命令，逐条对：
-    /// 有没有变化、少掉几个音、这条轨剩几小节。
-    ///
-    /// 三样都是命令**自己报得出来的**：有没有变化看它是不是原样返回同一个引用，
-    /// 少掉几个音数音符，剩几小节拿末尾 tick 套同一个 <see cref="PianoRollGeometry.BarCount"/>。
-    /// 于是预测里的 <c>Deleted</c> 和 <c>BarsAfter</c> 一旦和命令的真实行为对不上，这里当场红。
+    /// 同一份谱子先预测、再真跑一遍命令，逐条对：有没有变化、少掉几个音、这条轨剩几小节
+    /// （三样都是命令自己报得出来的，对不上就当场红）。
     /// </summary>
     [TestCaseSource(nameof(切口样本))]
     public void 预测和命令逐条对得上(string name, Note[] notes, long startTick, long endTick)
@@ -218,8 +208,8 @@ public class CutPreviewTests
                 preview.BarsAfter, Is.EqualTo(PianoRollGeometry.BarCount(edited.Tracks[0].EndTick, ticksPerBar)),
                 $"[{name}] 「抽之后几小节」对不上");
 
-            // 每一个音都得落进且只落进一档：没被碰的 + 剪短 + 删掉 + 前移 = 全部。
-            // 空区间不适用 —— 那一段是特判（什么都不改），本来就不走这张分支表
+            // 每个音都得落进且只落进一档：没被碰的 + 剪短 + 删掉 + 前移 = 全部
+            //（空区间是特判，本来就不走这张分支表）
             if (endTick > startTick)
             {
                 int untouched = before.Count(n => n.EndTick <= Math.Max(0, startTick));
@@ -232,8 +222,7 @@ public class CutPreviewTests
     }
 
     /// <summary>
-    /// 拿来对账的那些切口。挑的都是真会碰上的形状：正中间剪、剪尾巴、长音盖住整段、
-    /// 空区间、一个音都不碰、起点终点正好压在音上。
+    /// 拿来对账的那些切口：正中间剪、剪尾巴、长音盖住整段、空区间、一个音都不碰、起终点压在音上。
     /// </summary>
     private static IEnumerable<TestCaseData> 切口样本()
     {

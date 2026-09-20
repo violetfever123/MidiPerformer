@@ -10,13 +10,9 @@ namespace MidiPerformer.App.Views;
 
 /// <summary>
 /// 自绘的令牌板：26 个令牌各占一格，标上名字和当前主题下的色值。dev-only 样板窗口的一部分。
+/// 这块画布拿不到 <c>DynamicResource</c>，颜色全部来自 <see cref="TokenSource"/>。
 ///
-/// 它是<a href="../../docs/wireframe.html">取色桥</a>的可见产物 —— 这块画布拿不到
-/// <c>DynamicResource</c>，颜色**全部**来自 <see cref="TokenSource"/>。
-/// 旁边就是 XAML 控件，切主题时两边必须一起变；哪边没动，就是桥断了。
-///
-/// 格子的内容靠反射遍历 <see cref="TokenPalette"/> 的属性得来，不另抄一份名单 ——
-/// 抄一份就迟早会和令牌表对不上。顺序是属性声明顺序。
+/// 格子的内容靠反射遍历 <see cref="TokenPalette"/> 的属性得来，不另抄一份名单。顺序是属性声明顺序。
 /// </summary>
 public sealed class TokenSwatchBoard : Control
 {
@@ -99,8 +95,7 @@ public sealed class TokenSwatchBoard : Control
     }
 
     /// <summary>
-    /// 颜色画成实心块；阴影没有"颜色"可画，就在同一块地方把阴影本身画出来。
-    /// 令牌只有这两种类型，各画各的，不硬凑成一样。
+    /// 颜色画成实心块；阴影没有「颜色」可画，就在同一块地方把阴影本身画出来。
     /// </summary>
     private static void DrawSwatch(
         DrawingContext context, Rect cell, object? value, TokenPalette palette, IBrush line)

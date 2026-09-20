@@ -6,18 +6,14 @@ using Avalonia.Styling;
 namespace MidiPerformer.App.Theme;
 
 /// <summary>
-/// 某一份主题下的 26 个令牌，取成 Avalonia 的类型。
+/// 某一份主题下的 26 个令牌，取成 Avalonia 的类型。卷帘和悬浮层是代码画的，拿不到
+/// <c>Styles/Tokens.axaml</c> 那套 <c>DynamicResource</c>，必须有个入口把令牌取出来。
 ///
-/// 为什么需要它：<c>Styles/Tokens.axaml</c> 那套走的是 <c>DynamicResource</c>，
-/// 只有 XAML 里的控件吃得到。<b>卷帘和悬浮层是代码画的</b>，拿不到资源查找链，
-/// 必须有个入口把当前主题的令牌取出来。没有这一步，结果就是控件变浅色、卷帘还是硬编码深色。
+/// 属性名和令牌键是一回事：<c>NoteEdge</c> 就是 <c>TokenNoteEdge</c>，
+/// <see cref="Resolve"/> 靠这条机械映射按名字取，没有第二张对照表。加令牌只要在这里
+/// 加一个属性，别处自动跟上。
 ///
-/// <b>属性名和令牌键是一回事</b>：<c>NoteEdge</c> 就是 <c>TokenNoteEdge</c>。
-/// <see cref="Resolve"/> 就靠这条机械映射按名字取，没有第二张对照表 ——
-/// 26 个同类型的参数排成一列手写，串一个位置是迟早的事，而且串了看不出来。
-/// 加令牌只要在这里加一个属性，别处自动跟上。
-///
-/// 一次取一份快照：画一帧画到一半主题变了不会花屏，那一帧整个是旧主题，下一帧整个是新的。
+/// 一次取一份快照：画一帧画到一半主题变了不会花屏。
 /// </summary>
 public sealed record TokenPalette(
     Color Ground,
@@ -51,11 +47,10 @@ public sealed record TokenPalette(
     public const string KeyPrefix = "Token";
 
     /// <summary>
-    /// 属性按**构造函数参数的名字**排，不是按 <c>GetProperties()</c> 的返回顺序 ——
-    /// 那个顺序 CLR 明确不保证，而 26 个令牌里 24 个是同一个类型：
-    /// 顺序一旦变了，<see cref="Activator.CreateInstance(Type, object?[])"/> 会把颜色安安静静地
-    /// 装错位置（Ground 拿到 Surface 的值），一个异常都不抛。
-    /// 按参数名取属性，位置由语言保证对得上，而名单仍然只有这一张。
+    /// 属性按构造函数参数的名字排，不是按 <c>GetProperties()</c> 的返回顺序 —— 那个顺序 CLR
+    /// 不保证，而 26 个令牌里 24 个是同一个类型，顺序一变
+    /// <see cref="Activator.CreateInstance(Type, object?[])"/> 会静默装错位置。按参数名取属性，
+    /// 位置由语言保证对得上，名单仍然只有这一张。
     /// </summary>
     private static readonly PropertyInfo[] Properties = typeof(TokenPalette)
         .GetConstructors()
@@ -69,9 +64,8 @@ public sealed record TokenPalette(
         => Resolve((key, theme) => host.TryGetResource(key, theme, out var value) ? value : null, variant);
 
     /// <summary>
-    /// 同上，只是把「取」这件事交出去 —— 只要一个「键 + 主题 → 值」的函数。
-    /// 开这个口子是为了让取色桥可测：Avalonia 的 <c>IResourceHost</c> 不许用户代码实现，
-    /// 不开这个口子，这块最容易漏的东西就只能靠手点着看。
+    /// 同上，只是把「取」这件事交出去 —— 只要一个「键 + 主题 → 值」的函数。开这个口子是为了
+    /// 让取色桥可测：Avalonia 的 <c>IResourceHost</c> 不许用户代码实现。
     /// </summary>
     public static TokenPalette Resolve(Func<string, ThemeVariant, object?> lookup, ThemeVariant variant)
     {
@@ -83,8 +77,7 @@ public sealed record TokenPalette(
     }
 
     /// <summary>
-    /// 取不到就直接炸，不给默认值。
-    /// 令牌写错名字的后果应该是**启动就崩**，而不是界面上悄悄少一块颜色。
+    /// 取不到就直接炸，不给默认值：令牌名字写错应该是启动就崩，而不是界面上悄悄少一块颜色。
     /// </summary>
     private static object Read(Func<string, ThemeVariant, object?> lookup, ThemeVariant variant, PropertyInfo property)
     {

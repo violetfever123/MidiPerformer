@@ -7,16 +7,10 @@ namespace MidiPerformer.Tests.Preview;
 
 /// <summary>
 /// 折叠一条轨时试听那一头的反应（<see cref="PreviewPlayback.SetMutedTracks"/>）。
-///
-/// winmm 出声本身断言不了，但**「这一下之后声卡又收到了一批什么音」**断言得了 ——
-/// 缝开在 <c>IAudioSink</c> 上（<see cref="FakeAudioSink"/>），于是这一条能落到机器上。
-///
-/// 验的是两件事：折叠**接着放**（不打断正在听的那一遍），以及那一刻声卡收到的表里
-/// 确实少掉了那一条轨 —— 光换掉内部那个列表是不够的，出声那头手上还留着上一批音，
-/// 被静音的那条轨会一直响到它自己结束。
-///
-/// 界面那一半（点按钮、那一行小字、卷帘藏没藏）在这儿验不了：要起窗口、看布局。
-/// 那部分见 <c>.scratch/midi-performer/issues/17-collapse-mutes-preview.md</c>。
+/// 缝开在 <see cref="FakeAudioSink"/> 上，验两件事：折叠接着放（不打断正在听的那一遍），
+/// 以及那一刻声卡收到的表里确实少掉了那一条轨 —— 光换掉内部那个列表是不够的，
+/// 出声那头手上还留着上一批音，被静音的那条轨会一直响到它自己结束。
+/// 界面那一半（点按钮、那一行小字）在这儿验不了。
 /// </summary>
 public class PreviewPlaybackMuteTests
 {
@@ -35,7 +29,7 @@ public class PreviewPlaybackMuteTests
 
         Assert.That(sink.LastPlayed, Has.Count.EqualTo(2), "起播时两条轨都在");
 
-        // 基数在起播之后取：Load 自己也会停一次（它换了曲子），那一次不是这一下造成的
+        // 基数在起播之后取：Load 自己也会停一次，那一次不是这一下造成的
         int plays = sink.PlayCount;
         int stops = sink.StopCount;
 
@@ -51,10 +45,7 @@ public class PreviewPlaybackMuteTests
         });
     }
 
-    /// <summary>
-    /// 重排是从**此刻的音乐时间**接下去的，不是从这一遍的开头重来。
-    /// 时钟走了半秒，声卡就该收到 0.5 秒。
-    /// </summary>
+    /// <summary>重排是从此刻的音乐时间接下去的，不是从这一遍的开头重来。</summary>
     [Test]
     public void 重排是从此刻接着排不是从头()
     {
@@ -90,7 +81,7 @@ public class PreviewPlaybackMuteTests
         });
     }
 
-    /// <summary>**没在播**的时候只换那张表，一个字节都不往声卡发（用户只是在收拾屏幕）。</summary>
+    /// <summary>没在播的时候只换那张表，一个字节都不往声卡发。</summary>
     [Test]
     public void 没在播的时候不碰声卡()
     {
@@ -126,7 +117,7 @@ public class PreviewPlaybackMuteTests
         Assert.That(sink.PlayCount, Is.EqualTo(0));
     }
 
-    /// <summary>整首都折叠起来：声卡收到的是一张空表（出声那头见了空表就是不出声）。</summary>
+    /// <summary>整首都折叠起来：声卡收到的是一张空表。</summary>
     [Test]
     public void 全都折叠之后声卡收到空表()
     {
@@ -140,14 +131,9 @@ public class PreviewPlaybackMuteTests
         Assert.That(sink.LastPlayed, Is.Empty);
     }
 
-    // ==================== 长度也跟着折叠走 ====================
-
     /// <summary>
-    /// 折叠一条**比别的都长**的轨：整曲时长当场缩短。
-    ///
-    /// 这是「主旋律放完了还要空转一段」那个毛病的正面：出声那头早就不发伴奏的音了，
-    /// 时间轴上却还在按整份谱面走。长度只按听得见的轨算（见 <c>AudibleLength</c>），
-    /// 展开回来自然长回去。
+    /// 折叠一条比别的都长的轨：整曲时长当场缩短，展开回来长回去。
+    /// 长度只按听得见的轨算（见 <c>AudibleLength</c>），不然会出现「主旋律放完还要空转一段」。
     /// </summary>
     [Test]
     public void 折叠最长的轨让整曲时长缩短()
@@ -167,7 +153,7 @@ public class PreviewPlaybackMuteTests
         Assert.That(playback.TotalSeconds, Is.EqualTo(6.0).Within(1e-9), "展开回来长度也回来");
     }
 
-    /// <summary>装曲子时就带着折叠名单走的那条路（换曲子不该把折叠带过去，见 <c>MainWindow.SyncLanes</c>）。</summary>
+    /// <summary>装曲子时就带着折叠名单走的那条路。</summary>
     [Test]
     public void 装曲子时就按名单算时长()
     {
@@ -180,12 +166,9 @@ public class PreviewPlaybackMuteTests
     }
 
     /// <summary>
-    /// 正放着的时候把长的那条收起来：**位置当场落到曲子外面**。
-    ///
-    /// 这一条量的是窗口那颗判据赖以成立的那个状态（「位置 &gt; 总长」）——
-    /// 窗口据此把暂停中的播放头拉回曲尾（见 <c>MainWindow.OnLaneCollapseChanged</c>）；
-    /// 正在播的话，下一帧的 <c>Finished</c> 会把它停掉。
-    /// 定时器那一帧在这儿推不动（真 <c>DispatcherTimer</c>），所以量的是状态不是结果。
+    /// 正放着的时候把长的那条收起来：位置当场落到曲子外面（「位置 &gt; 总长」）。
+    /// 窗口据此把暂停中的播放头拉回曲尾，正在播的话下一帧的 <c>Finished</c> 会把它停掉；
+    /// 定时器那一帧在这儿推不动，所以量的是状态不是结果。
     /// </summary>
     [Test]
     public void 折叠之后位置可能当场落到曲子外面()
@@ -208,8 +191,6 @@ public class PreviewPlaybackMuteTests
         });
     }
 
-    // ==================== 帮手 ====================
-
     /// <summary>两条轨：轨块 0 的 0 号声道（C4）、轨块 1 的 1 号声道（E2）。</summary>
     private static Song 两条轨() => new(
         new[]
@@ -220,8 +201,8 @@ public class PreviewPlaybackMuteTests
         new TempoMap(TimeDivision.PulsesPerQuarter(480)));
 
     /// <summary>
-    /// **长短不一**的两条轨：轨块 0 那条 1 小节（1920 tick = 2.0 秒），轨块 1 那条 3 小节（6.0 秒）。
-    /// 长度口径的用例都得用它 —— 等长的两条轨测不出「按哪条算」。
+    /// 长短不一的两条轨：轨块 0 那条 1 小节（2.0 秒），轨块 1 那条 3 小节（6.0 秒）。
+    /// 长度口径的用例都得用它，等长的两条测不出「按哪条算」。
     /// </summary>
     private static Song 长轨与短轨() => new(
         new[]
@@ -231,7 +212,7 @@ public class PreviewPlaybackMuteTests
         },
         new TempoMap(TimeDivision.PulsesPerQuarter(480)));
 
-    /// <summary>按**轨块号**写一份折叠名单：两条轨刚好是 0 号和 1 号，读起来比写 (轨块, 声道) 省事。</summary>
+    /// <summary>按轨块号写一份折叠名单（两条轨刚好是 0 号和 1 号）。</summary>
     private static IReadOnlySet<(int TrackIndex, int Channel)> 静音(params int[] trackIndexes)
         => trackIndexes.Select(i => (i, i)).ToHashSet();
 }

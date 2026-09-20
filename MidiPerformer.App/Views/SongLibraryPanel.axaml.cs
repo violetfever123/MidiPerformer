@@ -10,49 +10,25 @@ using MidiPerformer.Core.UseCases.Project;
 namespace MidiPerformer.App.Views;
 
 /// <summary>
-/// 歌曲库那一条：曲名列表 + 删除。
+/// 歌曲库那一条：曲名列表 + 删除。曲名不可编辑 —— 点它只是选中这一行，双击才打开；
+/// 改名只剩顶栏那格「歌曲名」框（见 <c>MainWindow.OnSongNameKeyDown</c>，改的是当前开着的那首）。
 ///
-/// **曲名不可编辑**（32 号工单拆的）：点它只是「选中这一行」，双击才打开。
-/// 改名只剩一处入口 —— 顶栏那格「歌曲名」框（见 <c>MainWindow.OnSongNameKeyDown</c>），
-/// 改的是**当前开着的那首**。
+/// 它自己不改盘（写）：点一首、要删除，都只是喊一声（<see cref="OpenRequested"/> /
+/// <see cref="DeleteRequested"/>），真正读文件、删文件的是窗口。读是有的 ——
+/// <see cref="AddRow"/> 为每一行读一次文件头（<see cref="SongProjectFile.TryReadProjectHeader"/>），
+/// 「改过 / 没动过」那格小字就写在文件头里。删除前那句「真要删？」也留在这儿 ——
+/// 居中要有 <see cref="Window"/> 才好问，而窗口是这一层拿得到的东西（<c>TopLevel.GetTopLevel</c>）。
 ///
-/// 为什么退回来：25 号一度让名字本身可点（点一下就进编辑），代价是列表里
-/// **每一次点名字都可能是改名**，而那件最常干的事其实是「选中它看看」。
-/// 鼠标和键盘是**一起**拆的（选中一行按 F2 也不进编辑）——只拆一半的话，
-/// 「曲名不可编辑」这句话就带了个例外，而下一个人看不见它。
-/// 代价是**没打开的那首歌键盘改不了名**：得先打开它，再用顶栏那格改。
-///
-/// **它自己不改盘。** 点一首、要删除，都只是喊一声
-/// （<see cref="OpenRequested"/> / <see cref="DeleteRequested"/>），
-/// 真正读文件、删文件的是窗口 —— 因为那些事都会**反过来影响窗口手上的状态**
-/// （删掉的正好是当前这首怎么办？），而面板不知道窗口手上有什么。
-/// 面板只负责「问用户」，问完把名字交出去。
-///
-/// 「不改盘」说的是**写**：这个类里没有一次 <c>Write</c> / <c>Delete</c> / <c>Rename</c>。
-/// **读是有的** —— <see cref="AddRow"/> 为每一行读一次文件头（<see cref="SongProjectFile.TryReadProjectHeader"/>），
-/// 因为「改过 / 没动过」那格小字就写在文件头里。那是这条路线上唯一碰盘的地方。
-///
-/// 唯一的例外是删除前那句「真要删？」：它得有个 <see cref="Window"/> 当爹才好居中，
-/// 而**窗口是面板这一层拿得到、控制器拿不到的**东西（<c>TopLevel.GetTopLevel</c>），
-/// 所以这句问话留在这儿，删的动作仍然是窗口的。
-///
-/// 列表的每一行是**代码摆的**（曲名 + 改过没改过 + 删除）：行里有什么由曲库的内容决定，
-/// 写在 XAML 里反而是死的一堆。房子在 .axaml，家具在这儿。
-///
-/// 看着那格小字不写时长（wireframe 的 .song .mt 是 4:32）是有意的：
-/// 时长要**把整份工程读出来算**，而列表要显示的「改过没改过」只要读文件头就够了
-/// （<see cref="SongProjectFile.TryReadProjectHeader"/>）—— 为一行装饰把每首曲子的谱面
-/// 都反序列化一遍，是这个列表最不该干的事。
+/// 列表的每一行是代码摆的（曲名 + 改过没改过 + 删除），房子在 .axaml，家具在这儿。
+/// 那格小字不写时长：时长要把整份工程读出来算，而「改过没改过」只要读文件头。
 /// </summary>
 public sealed partial class SongLibraryPanel : UserControl
 {
     private readonly SongLibrary? _library;
 
     /// <summary>
-    /// 列表里每一行，按**曲名**索引。
-    ///
-    /// 按名字而不是按行号：曲名是这个列表里唯一稳定的东西（<see cref="Refresh"/> 每次都把行
-    /// 整批换掉，行号当场就过期了），而「把某一首标成正开着」手上只有「是哪首歌」这一个名字。
+    /// 列表里每一行，按曲名索引 —— 曲名是唯一稳定的东西（<see cref="Refresh"/> 每次都把行整批
+    /// 换掉，行号当场过期），而「把某一首标成正开着」手上只有名字。
     /// </summary>
     private readonly Dictionary<string, ListBoxItem> _rows = new();
 
@@ -84,24 +60,18 @@ public sealed partial class SongLibraryPanel : UserControl
     /// <summary>用户点开了一首歌（双击，或选中之后回车）。参数是曲名。</summary>
     public event EventHandler<string>? OpenRequested;
 
-    /// <summary>用户**已经确认**要删掉这首。参数是曲名，盘上的活由窗口干。</summary>
+    /// <summary>用户已经确认要删掉这首。参数是曲名，盘上的活由窗口干。</summary>
     public event EventHandler<string>? DeleteRequested;
 
     /// <summary>
-    /// 组装点给的取色桥。
-    ///
-    /// 这个面板今天**一处都不读它**：标题、行、按钮全由 .axaml 里那些令牌
-    /// （<c>DynamicResource</c>）着色，主题一换样式系统自己跟上，一行代码都不用写。
-    /// 留成属性而不是把参数丢掉，是因为面板里将来任何一个**按运行时状态现画**的东西
-    /// （不是控件、样式管不着的那种）都得从这儿取色 —— 一条颜色字面值都不许写。
+    /// 组装点给的取色桥。这个面板一处都不读它 —— 标题、行、按钮全由 .axaml 里那些令牌
+    /// （<c>DynamicResource</c>）着色。留成属性，是为了将来按运行时状态现画的东西有地方取色。
     /// </summary>
     public TokenSource? Tokens { get; }
 
     /// <summary>
-    /// 照曲库现在的样子重摆一遍列表。
-    ///
-    /// 什么时候调：窗口导入完一首之后、存完、改完名之后、删完。**不是**每次写入都自动调 ——
-    /// 曲库不会喊「我变了」（它就是个目录），谁动了盘谁负责喊这一声。
+    /// 照曲库现在的样子重摆一遍列表。窗口导入完、存完、改完名、删完之后调 —— 曲库不会喊
+    /// 「我变了」（它就是个目录），谁动了盘谁负责喊这一声。
     /// </summary>
     public void Refresh()
     {
@@ -121,9 +91,7 @@ public sealed partial class SongLibraryPanel : UserControl
     }
 
     /// <summary>
-    /// 把某一首标成「正开着」。<c>null</c> = 一首都不标（比如把当前这首关掉了）。
-    ///
-    /// 名字不在曲库里（比如刚被删掉）就当作没有 —— 界面不该因为一个过期的名字报错。
+    /// 把某一首标成「正开着」。<c>null</c> = 一首都不标。名字不在曲库里（比如刚被删掉）就当作没有。
     /// </summary>
     public void MarkCurrent(string? name)
     {
@@ -134,32 +102,26 @@ public sealed partial class SongLibraryPanel : UserControl
     /// <summary>摆一行。<paramref name="name"/> 是曲名（= 文件名，改名就是改它）。</summary>
     private void AddRow(string name)
     {
-        // 曲名用的是**文件名的那个**，不是文件头里存的那个 Name：这个曲库的规矩就是
-        // 「文件名即曲名」（用户改的是文件名，文件头里那个只是导入那一刻留下的复印件），
-        // 两者不一致时以用户看得见的那个为准。
+        // 曲名用文件名那个，不是文件头里存的 Name：这个曲库的规矩是「文件名即曲名」，
+        // 文件头里那个只是导入那一刻留下的复印件，两者不一致时以用户看得见的为准。
         var nameText = new TextBlock { Text = name, Classes = { "song-name" } };
 
-        // 悬浮显示**完整曲名**：这一格是省略号截断的（.song-name 那条样式），
-        // 长名字在列表里看不出全貌，而曲名恰恰是这一行里最要紧的信息。
-        //
-        // 32 号之后这一格**不接任何手势**了：点它和点这一行里别处完全一样（只是选中），
-        // 双击它会一路冒到 ListBoxItem 上打开这一首 —— 从前那条「点一下就进改名」的路拆了，
-        // 见类注释。ToolTip 留着，它说的是「这一格装的是什么」，和能不能编辑是两件事。
+        // 悬浮显示完整曲名：这一格是省略号截断的（.song-name 那条样式）。这一格不接任何手势 ——
+        // 点它和点这一行别处完全一样，ToolTip 说的是「这一格装的是什么」。
         ToolTip.SetTip(nameText, name);
 
         // 只读文件头，不读谱面。读不出来的（坏工程、版本比本程序新）返回 null 而不是抛 ——
-        // 一首读不出来不能让整个列表消失：用户得有机会把它删掉。
+        // 一首读不出来不能让整个列表消失。
         ProjectHeader? header = SongProjectFile.TryReadProjectHeader(_library!.PathOf(name));
         var metaText = new TextBlock { Text = Meta(header), Classes = { "song-meta" } };
         if (header is null) metaText.Classes.Add("bad");
 
-        // danger 那条类是 Controls.axaml 里现成的「危险：删轨 / 删曲子」：悬停变 warn 色
+        // danger 是 Controls.axaml 里现成的「危险：删轨 / 删曲子」：悬停变 warn 色
         var delete = new Button { Content = "×", Classes = { "row-action", "del", "danger" }, Tag = name };
         delete.Click += OnDeleteClickAsync;
         ToolTip.SetTip(delete, "把这首从曲库里删掉");
 
-        // 三格：名字（占满剩下的宽度）、改过没改过、删除。行动作只剩删除这一颗 ——
-        // 改名那两半（文字 + 顶上来的框）随 32 号工单一起没了，名字那一格现在真的只是一格字。
+        // 三格：名字（占满剩下的宽度）、改过没改过、删除。行动作只剩删除这一颗。
         var grid = new Grid
         {
             ColumnDefinitions = ColumnDefinitions.Parse("*,Auto,Auto"),
@@ -187,7 +149,7 @@ public sealed partial class SongLibraryPanel : UserControl
         _ => "没动过",
     };
 
-    /// <summary>「N 首」。这句话本该住在 <c>Format</c> 里，但那是别的切片的文件，这条切片只许动自己的。</summary>
+    /// <summary>「N 首」这句汇总读数。</summary>
     private static string Count(int count) => $"{count} 首";
 
     private void ApplyCurrent() =>
@@ -197,19 +159,14 @@ public sealed partial class SongLibraryPanel : UserControl
     private string? SelectedName => (SongList.SelectedItem as ListBoxItem)?.Tag as string;
 
     /// <summary>
-    /// 双击 = 打开这一首。
-    ///
-    /// **单击只选中，不打开**：上下键浏览时每挪一格就重新载入整首曲子的话，
-    /// 想看一眼下一首叫什么都不行（载入会把当前这份没存过的编辑顶掉）。
-    /// 回车走 <see cref="OnListKeyDown"/>，和双击是同一件事。
+    /// 双击 = 打开这一首。单击只选中，不打开 —— 上下键浏览时每挪一格就重新载入整首曲子的话，
+    /// 当前这份没存过的编辑会被顶掉。回车走 <see cref="OnListKeyDown"/>，和双击是同一件事。
     /// </summary>
     private void OnRowDoubleTapped(object? sender, TappedEventArgs e)
     {
         if (sender is not ListBoxItem { Tag: string name } item) return;
 
         // 点在那颗「删除」上不算打开：双击「删除」不该把这首曲子载进来。
-        // 32 号之后这一格拦的只剩删除那一颗了 —— 名字那格不再有输入框，
-        // 双击名字本来就是「打开这首」，该放行（从前它被拦着，是因为第一下已经进了改名）。
         if (e.Source is Visual source &&
             source.GetVisualAncestors().TakeWhile(v => v != item).Any(v => v is Button))
         {
@@ -231,10 +188,8 @@ public sealed partial class SongLibraryPanel : UserControl
     }
 
     /// <summary>
-    /// 删除：**先问一句，问住了才喊**。
-    ///
-    /// 没挂在窗口上（<c>GetTopLevel</c> 不是 Window）就什么都不做 —— 拿不到窗口就没法
-    /// 居中问一句，而这种时候默默删掉是不可接受的，问一声又没地方问。
+    /// 删除：先问一句，问住了才喊。没挂在窗口上（<c>GetTopLevel</c> 不是 Window）就什么都不做 ——
+    /// 拿不到窗口就没法居中问一句，而默默删掉是不可接受的。
     /// </summary>
     private async void OnDeleteClickAsync(object? sender, RoutedEventArgs e)
     {

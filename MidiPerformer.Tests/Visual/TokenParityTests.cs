@@ -12,15 +12,9 @@ using NUnit.Framework;
 namespace MidiPerformer.Tests.Visual;
 
 /// <summary>
-/// 视觉令牌层的守卫。这一层没有行为可测，但有**四条会悄悄坏掉的约束**，
-/// 全靠这里强制 —— 它们坏了都不会报错，只会让界面某处悄悄变成另一个颜色：
-///
-/// 1. 令牌和 <c>docs/wireframe.html</c> 的 <c>:root</c> 逐条对应（改了 wireframe 没改令牌）
-/// 2. 取色桥按属性名取到**对的那个**令牌（<c>Resolve</c> 的参数写串了）
-/// 3. <c>{DynamicResource}</c> 引用的键真的存在（键名打错 —— 这条最阴，运行时静默失效）
-/// 4. 除 <c>Tokens.axaml</c> 外没有字面颜色值（令牌是唯一来源）
-///
-/// 判据全是**文件文本**，不需要起 Avalonia —— 跑得跟在 NUnit 里读两个文件一样快。
+/// 视觉令牌层的守卫：令牌和 <c>docs/wireframe.html</c> 的 <c>:root</c> 逐条对应、
+/// 取色桥按属性名取到对的那个令牌、<c>{DynamicResource}</c> 引用的键真的存在、
+/// 除 <c>Tokens.axaml</c> 外没有字面颜色值。判据全是文件文本，不需要起 Avalonia。
 /// </summary>
 public class TokenParityTests
 {
@@ -112,7 +106,7 @@ public class TokenParityTests
     [Test]
     public void 取色桥按属性名取到对的那个令牌()
     {
-        // 每条令牌的值都按自己的键去查，所以「取串了」在这里会被抓住 —— 光比名字是抓不住的
+        // 每条令牌的值都按自己的键去查，所以「取串了」在这里会被抓住
         AssertPaletteMatches(TokenPalette.Resolve(LookupFor("Light"), ThemeVariant.Light), "Light");
         AssertPaletteMatches(TokenPalette.Resolve(LookupFor("Dark"), ThemeVariant.Dark), "Dark");
     }
@@ -135,8 +129,7 @@ public class TokenParityTests
 
         foreach (var file in SourceFiles(".axaml"))
         {
-            // 注释要抹掉再找：说明里提一句「Fluent 那边写的是 {DynamicResource SliderThumbBackground}」
-            // 是解释，不是引用，不该被当成打错的键名
+            // 注释要抹掉再找：说明文字里提一句 {DynamicResource Xxx} 不是引用
             var text = BlankComments(File.ReadAllText(file));
             foreach (Match m in ResourceReference.Matches(text))
             {
@@ -161,8 +154,7 @@ public class TokenParityTests
         {
             if (Path.GetFileName(file) == "Tokens.axaml") continue;
 
-            // 注释要抹掉再找 —— 注释里写「这里为什么不用 #fff」是说明，不是写死颜色。
-            // 抹成等长的空格而不是删掉，行号才不会跑偏。
+            // 注释要抹掉再找；抹成等长的空格而不是删掉，行号才不会跑偏
             var lines = BlankComments(File.ReadAllText(file)).Split('\n');
             for (var i = 0; i < lines.Length; i++)
                 if (LiteralColor.IsMatch(lines[i]))
@@ -176,15 +168,10 @@ public class TokenParityTests
     // ==================== 5. 覆盖 Fluent 的资源键 ====================
 
     /// <summary>
-    /// Fluent 声明成 <c>Color</c>、而只能用画刷覆盖的键 —— 每条都得登记，并写明消费处。
-    ///
-    /// 为什么不能照着 Fluent 声明成 <c>Color</c>：令牌驱动的 Color 资源在 Avalonia 里写不出来。
-    /// <c>&lt;Color x:Key="x"&gt;{DynamicResource TokenY}&lt;/Color&gt;</c> 直接报
-    /// AVLN2005「Unable to parse ... as a color」—— 它把花括号那截当颜色字面值解析，
-    /// 不会走标记扩展。唯一能表达的形态是 SolidColorBrush。
-    ///
-    /// 而画刷塞进 <c>Color=</c> 属性会崩（这个形状本轮真崩过一次），
-    /// 所以每一条都必须确认过消费方吃的是画刷。登记表就是那条确认记录。
+    /// Fluent 声明成 <c>Color</c>、我们只能用画刷覆盖的键，每条都得登记消费处。
+    /// 令牌驱动的 Color 资源在 Avalonia 里写不出来：<c>&lt;Color x:Key="x"&gt;{DynamicResource TokenY}&lt;/Color&gt;</c>
+    /// 报 AVLN2005（花括号那截被当颜色字面值解析，不走标记扩展），只能用 SolidColorBrush；
+    /// 而画刷塞进 <c>Color=</c> 属性会崩，所以每条都得确认过消费方吃的是画刷。
     /// </summary>
     private static readonly Dictionary<string, string> BrushOverridesColorKey = new()
     {
@@ -214,10 +201,10 @@ public class TokenParityTests
             .Select(pair => pair.Key)
             .ToList();
 
-        // 解析器要是没匹配上，下面那条相等断言会退化成「空表等于空表」，白测
+        // 解析器没匹配上的话，下面那条相等断言会退化成「空表等于空表」
         Assert.That(colorTyped, Is.Not.Empty, "一个 Color 键都没解析出来，先看看是不是解析没匹配上");
 
-        // 相等而不是包含：登记的键哪天不再是 Color 了，也要回来把这一条删掉，别留烂账
+        // 相等而不是包含：登记的键哪天不再是 Color 了，也得回来删掉这一条
         Assert.That(BrushOverridesColorKey.Keys, Is.EquivalentTo(colorTyped),
             "这些键 Fluent 声明的是 Color，我们只能用画刷覆盖（Color 拼不出令牌），"
             + "但画刷被喂给 Color= 属性会崩。新增的先去 Fluent 源码确认消费方吃画刷再登记；"
@@ -246,7 +233,7 @@ public class TokenParityTests
     private static Dictionary<string, (string Element, string Text)> DeclaredTokens(string theme)
     {
         // ThemeDictionaries 是属性元素，元素名是 ResourceDictionary.ThemeDictionaries；
-        // 按 LocalName 找，省得去纠结它落在哪个命名空间
+        // 按 LocalName 找，避开命名空间
         var dictionary = XDocument.Load(TokensAxaml)
             .Descendants()
             .Single(e => e.Name.LocalName == "ResourceDictionary.ThemeDictionaries")
@@ -263,17 +250,15 @@ public class TokenParityTests
     {
         var keys = new HashSet<string>(StringComparer.Ordinal);
         foreach (var file in SourceFiles(".axaml"))
-            // 注释要抹掉：把一条定义 <!-- --> 掉，键就**不存在**了。
-            // 不抹的话注释里的 x:Key 照样算「已定义」，引用它的地方看着通过、运行时静默失效 ——
-            // 正是这条测试要拦的那件事，反被它自己放过去。
+            // 注释要抹掉：被 <!-- --> 掉的定义等于不存在，
+            // 不抹的话注释里的 x:Key 会被当成「已定义」
             foreach (Match m in XKey.Matches(BlankComments(File.ReadAllText(file))))
                 keys.Add(m.Groups[1].Value);
         return keys;
     }
 
     /// <summary>
-    /// <c>--ink-muted</c> → <c>TokenInkMuted</c>。<c>--surface-2</c> → <c>TokenSurface2</c>。
-    /// 机械映射，没有第二张对照表 —— 有第二张表就迟早对不上。
+    /// <c>--ink-muted</c> → <c>TokenInkMuted</c>，机械映射，没有第二张对照表。
     /// </summary>
     private static string TokenName(string cssVar)
     {
@@ -309,8 +294,7 @@ public class TokenParityTests
     private static string Relative(string file) => Path.GetRelativePath(RepoRoot, file);
 
     /// <summary>
-    /// XML 注释、C# 块注释、C# 行注释统统抹成空格（换行留着，行号不变）。
-    /// 只会漏报不会误报：注释里的颜色本来就不算数。
+    /// XML 注释、C# 块注释、C# 行注释统统抹成空格（换行留着，行号不变），只会漏报不会误报。
     /// </summary>
     private static string BlankComments(string text)
         => Comment.Replace(text, m => new string(m.Value.Select(c => c == '\n' ? '\n' : ' ').ToArray()));
@@ -334,9 +318,8 @@ public class TokenParityTests
     /// <summary>一段阴影：偏移、模糊半径、spread、颜色。</summary>
     private static List<(double X, double Y, double Blur, double Spread, Color Color)> CssShadow(string css)
     {
-        // 不按逗号切 —— rgba 里面就有逗号，切了会把颜色拆成好几段。
-        // 改成分头捞出「三个挨着的数」和「一个 rgb()/rgba()」，再按出现顺序配对：
-        // 每段阴影正好一个颜色，数量对不上就说明这段 CSS 不是这里假设的形状。
+        // 不按逗号切（rgba 里面就有逗号）：分头捞出「三个挨着的数」和「一个 rgb()/rgba()」，
+        // 再按出现顺序配对 —— 每段阴影正好一个颜色，数量对不上就是形状不是这里假设的样子。
         var triples = ShadowTriple.Matches(css)
             .Select(m => (
                 double.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture),
@@ -364,9 +347,8 @@ public class TokenParityTests
     }
 
     /// <summary>
-    /// <c>rgba(23,28,35,.06)</c> → Color。
-    /// alpha 用 <see cref="MidpointRounding.AwayFromZero"/>：<c>.3*255=76.5</c>，
-    /// 默认的银行家舍入会把它变成 76（偶数），而 wireframe 那边写的是 <c>#4D</c>=77。
+    /// <c>rgba(23,28,35,.06)</c> → Color。alpha 用 <see cref="MidpointRounding.AwayFromZero"/>：
+    /// <c>.3*255=76.5</c> 会被银行家舍入成 76，而 wireframe 那边写的是 <c>#4D</c>=77。
     /// </summary>
     private static Color ParseCssColor(string css)
     {
@@ -405,8 +387,7 @@ public class TokenParityTests
     }
 
     /// <summary>
-    /// 拿 Tokens.axaml 当资源表，按里面声明的元素类型把文本变成真的 Avalonia 对象。
-    /// 于是取色桥是在**真令牌表**上测的，不是在一份手写的替身上。
+    /// 拿 Tokens.axaml 当资源表，按声明的元素类型把文本变成真的 Avalonia 对象，于是取色桥是在真令牌表上测的。
     /// </summary>
     private static Func<string, ThemeVariant, object?> LookupFor(string theme)
     {
@@ -428,7 +409,7 @@ public class TokenParityTests
 
     /// <summary>
     /// 一段阴影里的三个数：偏移 x、偏移 y、模糊半径（单位 px 可省）。
-    /// 要求三个数**挨着**，所以 <c>rgba(23,28,35,.06)</c> 那截匹配不上 —— 它中间是逗号不是空白。
+    /// 三个数必须挨着，所以 <c>rgba(23,28,35,.06)</c> 那截匹配不上。
     /// </summary>
     private static readonly Regex ShadowTriple =
         new(@"(-?[\d.]+)(?:px)?\s+(-?[\d.]+)(?:px)?\s+(-?[\d.]+)(?:px)?", RegexOptions.Compiled);
@@ -437,18 +418,16 @@ public class TokenParityTests
     private static readonly Regex CssColor = new(@"rgba?\([^)]*\)", RegexOptions.Compiled);
 
     /// <summary>
-    /// XML 注释 / C# 块注释 / C# 行注释。
-    /// 行注释要求 <c>//</c> 前面不是冒号 —— App.axaml 里的 <c>avares://…</c> 也是两个斜杠，
-    /// 照着注释抹掉的话，那一行后面的颜色就再也查不出来了（静默漏报）。
-    /// 已知边界：字符串里真的写了 <c>//</c> 且后面还跟颜色，仍然会漏 —— 这条是减少漏报，不是杜绝。
+    /// XML 注释 / C# 块注释 / C# 行注释。行注释要求 <c>//</c> 前面不是冒号
+    /// （App.axaml 里的 <c>avares://…</c> 也是两个斜杠，照注释抹掉会让那行后面的颜色查不出来）。
+    /// 已知边界：字符串里写了 <c>//</c> 且后面跟颜色，仍然会漏。
     /// </summary>
     private static readonly Regex Comment =
         new(@"<!--.*?-->|/\*.*?\*/|(?<!:)//[^\n]*", RegexOptions.Compiled | RegexOptions.Singleline);
 
     /// <summary>
-    /// 字面颜色值。只看十六进制和 rgb()/rgba() 两种 —— 具名颜色（Transparent 之类）
-    /// 有正当用途，混进来当颜色用的可能性小，不值得为它把误报拉高。
-    /// 已知边界：<c>Colors.White</c> 这种也拦得住，但 <c>Brushes.White</c> 拦不住。
+    /// 字面颜色值。只看十六进制和 rgb()/rgba() 两种（具名颜色有正当用途）。
+    /// 已知边界：<c>Colors.White</c> 拦得住，<c>Brushes.White</c> 拦不住。
     /// </summary>
     private static readonly Regex LiteralColor =
         new(@"#[0-9a-fA-F]{3,8}\b|\brgba?\s*\(|\bColors\.[A-Z]", RegexOptions.Compiled);

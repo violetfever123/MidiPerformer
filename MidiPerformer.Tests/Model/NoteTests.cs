@@ -4,19 +4,11 @@ using NUnit.Framework;
 namespace MidiPerformer.Tests.Model;
 
 /// <summary>
-/// <see cref="Note"/> 的相等语义里**身份那一半**：身份是身份，内容是内容，两者不许混。
-///
-/// 这一条也卡着 S1 缝，方向和 <see cref="TrackTests"/> 相反：那边要的是「内容一样就算相等」，
-/// 这边要的是「身份不参与这件事」—— MIDI 里没有地方放身份，导出再导入身份是重新发的，
-/// 身份要是参与值相等，那条缝会红得让人以为读取逻辑坏了。
-///
-/// 代价一并钉在这儿（<c>身份不同、内容相同的两个音是值相等的</c>）：那不是 bug，是这件事的定义 ——
-/// 分开两个一模一样的音靠身份，不靠 <c>Equals</c>。
+/// <see cref="Note"/> 的相等语义里身份那一半：身份不参与值相等，
+/// 身份不同、内容相同的两个音就是值相等的。
 /// </summary>
 public class NoteTests
 {
-    // ==================== 身份本身 ====================
-
     [Test]
     public void 手工构造的音符没有身份()
     {
@@ -29,10 +21,7 @@ public class NoteTests
         });
     }
 
-    /// <summary>
-    /// 号本身是发出来的：<see cref="NoteId.Next"/> 就是下一个号，
-    /// 一轨之内从 1 往上发（见 <c>NoteIdentity</c>）。
-    /// </summary>
+    /// <summary><see cref="NoteId.Next"/> 就是下一个号，一轨之内从 1 往上发。</summary>
     [Test]
     public void 身份的号往下发()
     {
@@ -46,15 +35,8 @@ public class NoteTests
     }
 
     /// <summary>
-    /// <c>ToString()</c> 只说号码 —— 这也是那个栈溢出 bug 的回归测试。
-    ///
-    /// record struct 自动生成的 <c>PrintMembers</c> 会把**每个公开属性**印一遍，
-    /// 而 <see cref="NoteId.Next"/> 是个 <see cref="NoteId"/> 类型的属性，于是「印身份」
-    /// 会一路递归到自己身上（实测：整轮测试就是这么被刷停的，输出里全是同一段递归堆栈）。
-    /// 覆盖掉 PrintMembers 之后只印号码，这里把它钉住。
-    ///
-    /// 真有人把那个覆盖删了的话，这条测试会**崩**而不是断言失败（栈溢出不是失败，是进程没了）——
-    /// 崩在这一条上，总好过崩在别处一句顺手的日志里。
+    /// <c>ToString()</c> 只说号码：<see cref="NoteId.Next"/> 是 <see cref="NoteId"/> 类型的属性，
+    /// 不覆盖 <c>PrintMembers</c> 就会递归印到自己身上，栈溢出。
     /// </summary>
     [Test]
     public void 身份的ToString只说号码()
@@ -67,8 +49,6 @@ public class NoteTests
             Assert.That(text, Does.Not.Contain("Next"), "别把 Next 也印出来 —— 它一印就是无限的");
         });
     }
-
-    // ==================== 值相等：只比内容 ====================
 
     [Test]
     public void 身份不参与音符的值相等()
@@ -87,10 +67,7 @@ public class NoteTests
         });
     }
 
-    /// <summary>
-    /// 有身份的音和没有身份的音，内容一样就还相等 —— 手工拼出来的谱面（测试里那种）
-    /// 和从文件读进来的谱面因此比得到一起去。身份要是参与相等，这两边永远比不相等。
-    /// </summary>
+    /// <summary>有身份的音和手工拼的音，内容一样就相等。</summary>
     [Test]
     public void 有身份的和手工拼的内容一样就相等()
     {
@@ -105,10 +82,7 @@ public class NoteTests
         });
     }
 
-    /// <summary>
-    /// 内容一样的意思是四个字段都一样：音高、起点、时值、力度，少比哪一个都会让
-    /// 两份不同的谱面看起来相等（而导出、试听都会把它们当成两个音）。
-    /// </summary>
+    /// <summary>内容指音高、起点、时值、力度四个字段，少比哪一个都不行。</summary>
     [Test]
     public void 内容不一样就是不相等()
     {
@@ -123,12 +97,7 @@ public class NoteTests
         });
     }
 
-    /// <summary>
-    /// 后果说清楚：两个内容一样的音会**掉进同一个哈希集合**（这就是「分不开」那句话的机器样子）。
-    ///
-    /// 要分开它俩的地方（界面的选中集、按身份认音）拿的是 <see cref="Note.Id"/>，不是相等 ——
-    /// 这条测试就是那份合同的反面：<c>Equals</c> 帮不上忙，别指望它。
-    /// </summary>
+    /// <summary>内容相同的两个音会掉进同一个哈希集合，要分开它们得靠 <see cref="Note.Id"/>。</summary>
     [Test]
     public void 内容相同的两个音在集合里挤成一个()
     {

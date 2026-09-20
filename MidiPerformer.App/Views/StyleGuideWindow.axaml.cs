@@ -8,9 +8,7 @@ namespace MidiPerformer.App.Views;
 
 /// <summary>
 /// dev-only 样板窗口。令牌、圆角、字体、控件平铺出来，和 <c>docs/wireframe.html</c> 逐块对照。
-///
-/// 主题切换按钮是**唯一的**主题入口，产品界面里没有 —— 它在这儿是为了能当场看见
-/// 「XAML 控件和自绘层同时变」这件事。
+/// 主题切换按钮是唯一的主题入口，产品界面里没有。
 /// </summary>
 public partial class StyleGuideWindow : Window
 {
@@ -41,8 +39,7 @@ public partial class StyleGuideWindow : Window
     }
 
     /// <summary>
-    /// 当前那个用「主」样式顶出来。
-    /// 这里只改 Classes，颜色还是走 Controls.axaml —— 样板窗口自己也不许写死颜色。
+    /// 当前那个用「主」样式顶出来。这里只改 Classes，颜色还是走 Controls.axaml。
     /// </summary>
     private void Highlight(ThemeVariant variant)
     {

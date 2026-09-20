@@ -3,10 +3,7 @@ using System.Text;
 namespace MidiPerformer.Tests.Corpus;
 
 /// <summary>
-/// 一个最小标准 MIDI 文件写手，**只为造测试语料而生**。
-///
-/// 刻意不用 DryWetMidi 来造：被测的是读取端，写手如果和被读的那一方同源，
-/// 两边会一起错、一起对，等于没测。这里直接吐字节，读错了立刻现形。
+/// 一个最小标准 MIDI 文件写手，只为造测试语料而生；直接吐字节，不走 DryWetMidi。
 /// </summary>
 internal static class SmfWriter
 {
@@ -32,7 +29,7 @@ internal static class SmfWriter
         return head.Concat(body).ToArray();
     }
 
-    /// <summary>只有一个轨块、里面什么都没写（连 EndOfTrack 都没有）的空壳。</summary>
+    /// <summary>只有 MThd、一个 MTrk 都没有的文件头，声明了 <paramref name="declaredTracks"/> 条轨。</summary>
     public static byte[] HeaderOnly(int format, int division, int declaredTracks) =>
         Ascii("MThd").Concat(BE32(6)).Concat(BE16(format)).Concat(BE16(declaredTracks)).Concat(BE16(division)).ToArray();
 
@@ -56,8 +53,7 @@ internal static class SmfWriter
         return bytes.ToArray();
     }
 
-    // 同一 tick 上的先后：元事件/音色 → 抬键 → 按键。
-    // 抬键排在按键之前是 MIDI 的常规写法，也保证「前一个音刚好在这一点结束、后一个音在同一点开始」时配对不串。
+    // 同一 tick 上的先后：元事件/音色 → 抬键 → 按键，保证前一个音在此结束、后一个音在此开始时配对不串。
     private const int OrderMeta = 0;
     private const int OrderNoteOff = 1;
     private const int OrderNoteOn = 2;

@@ -7,11 +7,7 @@ using NUnit.Framework;
 namespace MidiPerformer.Tests.Timeline;
 
 /// <summary>
-/// 音乐时间 ⇄ 物理时间的积分器。
-///
-/// 这一整块是纯数学：物理时刻由测试喂进去，一行真时间都不用等。
-/// 最要紧的两条是「倍速下互为逆运算」和「变速点处 tick 不跳变」——
-/// 前者保证事件表的时间戳能被翻译回墙上的钟，后者保证曲子自己变速时播放头不会蹦。
+/// 音乐时间 ⇄ 物理时间的积分器：纯数学，物理时刻由测试喂进去，一行真时间都不用等。
 /// </summary>
 public class SongWalkerTests
 {
@@ -30,7 +26,7 @@ public class SongWalkerTests
 
         Assert.Multiple(() =>
         {
-            // 锚点本身：跳过去的那一刻，两个方向都该原样答出来
+            // 锚点本身：两个方向都该原样答出来
             Assert.That(walker.MusicAt(100.0), Is.EqualTo(1.3).Within(1e-12));
             Assert.That(walker.PhysicalAt(1.3), Is.EqualTo(100.0).Within(1e-9));
 
@@ -73,8 +69,7 @@ public class SongWalkerTests
     [Test]
     public void 变速曲目在原速下走四秒音乐时间就是四秒()
     {
-        // 这首曲子在音乐时间 2.0s 处变速（120BPM → 240BPM）。
-        // 音乐时间**不含**播放倍速，所以曲子内部变速不该让它走得快一点或慢一点。
+        // 这首曲子在音乐时间 2.0s 处变速（120BPM → 240BPM）；音乐时间不含播放倍速。
         var walker = new SongWalker(变速曲(), speed: 1.0);
         walker.Start(0.0);
 
@@ -105,7 +100,7 @@ public class SongWalkerTests
     [Test]
     public void 倍速为零或负数时退回原速()
     {
-        // 倍速 0 会让 PhysicalAt 除以零，负数是时间倒流。两者都不该被接受。
+        // 倍速 0 会让 PhysicalAt 除以零，负数是时间倒流
         var walker = new SongWalker(变速曲(), 0.0);
         Assert.That(walker.Speed, Is.EqualTo(1.0));
 
@@ -120,11 +115,7 @@ public class SongWalkerTests
 
     /// <summary>
     /// NaN 和 ±∞ 与 0 / 负数一样，一律退回原速。
-    ///
-    /// NaN 单独值一条测试的原因：<c>NaN &lt;= 0</c> 是 **false**，所以只写 <c>speed &lt;= 0</c>
-    /// 的守卫会把 NaN 放行；而 <c>double.Parse("NaN")</c> 是会成功的，
-    /// 界面上的倍速输入框真能递进来一个 NaN。放进去的后果不是「播快一点」，
-    /// 是 <c>MusicNow</c> 变成 NaN、<c>Finished</c> 永远 false、<c>TickNow</c> 是垃圾 —— 播放器卡死且不自愈。
+    /// NaN 要单独照顾：<c>NaN &lt;= 0</c> 是 false，只写 <c>speed &lt;= 0</c> 的守卫会放行它。
     /// </summary>
     [TestCase(double.NaN)]
     [TestCase(double.PositiveInfinity)]
@@ -145,7 +136,7 @@ public class SongWalkerTests
             Assert.That(walker.MusicNow, Is.EqualTo(2.0).Within(1e-12));
             Assert.That(walker.TickNow, Is.EqualTo(变速曲().TempoMap.TickAt(2.0)));
             Assert.That(walker.Finished, Is.False, "才走了 2 秒就不该说结束了");
-            // 倍速 0 会让这里除以零得 ∞，那正是「退回原速」要防的
+            // 倍速 0 会让这里除以零得 ∞，正是退回原速要防的
             Assert.That(walker.PhysicalAt(3.0), Is.EqualTo(3.0).Within(1e-9));
         });
     }
@@ -272,7 +263,7 @@ public class SongWalkerTests
         double previousMusic = 0;
         long biggestStep = 0;
 
-        // 以 1ms 的步长走完整曲（3.25 秒）。变速点在音乐时间 2.0s 处。
+        // 以 1ms 的步长走完整曲（3.25 秒）；变速点在音乐时间 2.0s 处
         for (int ms = 1; ms <= 3250; ms++)
         {
             double physical = ms / 1000.0;
@@ -289,16 +280,15 @@ public class SongWalkerTests
             previousMusic = walker.MusicNow;
         }
 
-        // 最快的一档是 240BPM = 4 个四分音符/秒，480 tick/四分音符 → 1ms ≈ 1.92 tick。
-        // 给 3 倍余量：超过就说明分段边界处被算重或算漏了一大块。
+        // 最快一档 240BPM = 4 个四分音符/秒，480 tick/四分音符 → 1ms ≈ 1.92 tick；
+        // 6 留了 3 倍余量，超过就是分段边界处被算重或算漏了。
         Assert.That(biggestStep, Is.LessThanOrEqualTo(6), "变速点处 tick 跳了");
     }
 
     [Test]
     public void 变速点两侧tick的推进速度确实不同()
     {
-        // 上一条只证明「不跳」。这一条证明「换挡真的发生了」，两条合起来才排得掉
-        // 「分段表根本没生效，整曲匀速」这种错法。
+        // 上一条只证明不跳，这一条证明换挡真的发生了
         var song = 变速曲();
         var map = song.TempoMap;
 
@@ -319,7 +309,7 @@ public class SongWalkerTests
 
         Assert.That(walker.Finished, Is.False, "刚开头就说结束了");
 
-        // 用 Seek 直接落到两个点上，避免「累加出来差最后一个 ULP」把断言卡在边界
+        // 用 Seek 直接落到两个点上，避开累加误差
         double total = walker.TotalMusicSeconds;
 
         walker.Seek(total - 0.01, 0.0);
@@ -335,7 +325,7 @@ public class SongWalkerTests
     [Test]
     public void 没人喂物理时刻就不会自己走()
     {
-        // 纯数学：不读时钟。查询本身不能改变状态。
+        // 不读时钟；查询本身不能改变状态
         var walker = new SongWalker(变速曲(), 2.0);
         walker.Start(10.0);
 
@@ -355,10 +345,7 @@ public class SongWalkerTests
 
     // ==================== 曲尾是可以搬动的 ====================
 
-    /// <summary>
-    /// 不喊 <see cref="SongWalker.SetEndTick"/> 时，曲尾就是整份谱面的末尾 ——
-    /// 这是试听、演奏两条路一直以来的那个数，搬动曲尾的能力不该顺手改掉它。
-    /// </summary>
+    /// <summary>没调过 <see cref="SongWalker.SetEndTick"/> 时，曲尾就是整份谱面的末尾。</summary>
     [Test]
     public void 没搬过曲尾时就是整份谱面的时长()
     {
@@ -373,10 +360,8 @@ public class SongWalkerTests
     }
 
     /// <summary>
-    /// 搬曲尾**只改时长**：积分不动、播放头一个 tick 都不跳 ——
-    /// 改的是「曲子多长」，不是「现在放到哪了」，两件事。
-    /// 而搬短之后当前位置落在曲子外面，<see cref="SongWalker.Finished"/> 当场就是 true
-    /// （试听那头靠它停钟，见 <c>PreviewPlayback.OnTimerTick</c>）。
+    /// 搬曲尾只改时长：积分不动、播放头一个 tick 都不跳。
+    /// 搬短之后当前位置落在曲子外面，<see cref="SongWalker.Finished"/> 当场就是 true。
     /// </summary>
     [Test]
     public void 搬曲尾不动播放头但会当场算走到头()
@@ -385,7 +370,7 @@ public class SongWalkerTests
         walker.Seek(2.5, 0.0);
         long tickBefore = walker.TickNow;
 
-        walker.SetEndTick(1920);   // 曲子砍到音乐时间 2.0s
+        walker.SetEndTick(1920);   // 曲子砍到 1920 tick = 音乐时间 2.0s
 
         Assert.Multiple(() =>
         {
@@ -396,7 +381,7 @@ public class SongWalkerTests
         });
     }
 
-    /// <summary>搬回去时长跟着回去 —— 折叠 / 展开是同一条路上的两个方向。</summary>
+    /// <summary>搬回去时长跟着回去。</summary>
     [Test]
     public void 曲尾搬回去时长跟着回去()
     {
@@ -414,7 +399,7 @@ public class SongWalkerTests
         });
     }
 
-    /// <summary>负数当 0：空曲（或者一条轨都没有）就是 0 长度的曲子，别让秒数变成负的。</summary>
+    /// <summary>负数当 0：空曲就是 0 长度的曲子，秒数不该变成负的。</summary>
     [Test]
     public void 曲尾给负数当零()
     {
@@ -447,7 +432,7 @@ public class SongWalkerTests
             walker.Start(0.0);
 
             long previous = 0;
-            // 整曲切成 200 步走完
+            // 整曲切成 200 步走完（2 tick 容累加漂移）
             for (int i = 1; i <= 200; i++)
             {
                 walker.AdvanceTo(song.TotalSeconds * i / 200.0);
@@ -456,7 +441,6 @@ public class SongWalkerTests
                 previous = walker.TickNow;
             }
 
-            // 走满整曲应当正好落在 EndTick 上（容一两个 tick 的累加漂移）
             Assert.That((double)previous, Is.EqualTo(song.EndTick).Within(2),
                 $"{Path.GetFileName(path)}：走到曲尾时 tick 应当落在 EndTick 附近");
             checkedFiles++;
@@ -466,8 +450,8 @@ public class SongWalkerTests
     }
 
     /// <summary>
-    /// 一首手工造的变速曲：480 tick/四分音符，第 1920 tick 起从 120BPM 变到 240BPM。
-    /// 于是音乐时间 0–2.0s 是第一档，2.0s 之后是第二档，总长 3.25s。
+    /// 手工造的变速曲：480 tick/四分音符，第 1920 tick 起 120BPM → 240BPM，
+    /// 音乐时间 0–2.0s 是第一档，之后是第二档，总长 3.25s。
     /// </summary>
     private static Song 变速曲() => MidiReader.ReadBytes(SmfWriter.Build(1, 480,
         SmfTrack.Named("旋律")

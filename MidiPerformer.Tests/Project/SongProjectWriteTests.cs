@@ -1,12 +1,12 @@
-using Melanchall.DryWetMidi.Common;       // SevenBitNumber —— 只在断言音色时点名，不是拿来造文件
+using Melanchall.DryWetMidi.Common;       // SevenBitNumber —— 只在断言音色时用到
 using Melanchall.DryWetMidi.Core;
-using Melanchall.DryWetMidi.Interaction;   // 这里用它来**检查**写出去的文件，不是拿来写
+using Melanchall.DryWetMidi.Interaction;   // 只用来检查写出去的文件
 using MidiPerformer.Core.Model;
 using MidiPerformer.Core.UseCases.Editing;
 using MidiPerformer.Core.UseCases.Project;
 using MidiPerformer.Tests.Corpus;
 using NUnit.Framework;
-// DryWetMidi 也有同名的 MidiReader / MidiWriter，不加别名就分不清说的是哪一边
+// 与 DryWetMidi 里的同名类型区分
 using MidiReader = MidiPerformer.Core.UseCases.Project.MidiReader;
 using MidiWriter = MidiPerformer.Core.UseCases.Project.MidiWriter;
 using ModelNote = MidiPerformer.Core.Model.Note;
@@ -16,14 +16,11 @@ using ModelTimeDivision = MidiPerformer.Core.Model.TimeDivision;
 namespace MidiPerformer.Tests.Project;
 
 /// <summary>
-/// S1 缝的写半边：<see cref="Song"/> → MIDI 文件。
-///
-/// 「别的 MIDI 软件读得出来」这条没法自动化，代理是**再导入一次能读回同一首曲子** ——
-/// 走的是我们自己的读取端，而读取端的能力已经由 <see cref="SongProjectReadTests"/> 对着原版
-/// <c>MidiLoader</c> 和文件里的整数 tick 逐条钉过了。所以「读得回来」等价于「写出去的是标准形态的 MIDI」。
-///
-/// 比较一律**逐字段、精确**（tick 是整数，不用容差），这是 S1 缝的原话。
-/// 比较帮手是 <see cref="SongAssert"/>，<c>Song</c> 刻意没有值相等（撤销装饰器要的是引用相等），只能自己比。
+/// 写半边：<see cref="Song"/> → MIDI 文件。
+/// 代理是「再导入一次能读回同一首曲子」——走的是我们自己的读取端，而读取端的能力已由
+/// <see cref="SongProjectReadTests"/> 对着原版 <c>MidiLoader</c> 钉过。
+/// 比较一律逐字段、精确（tick 是整数，不用容差），帮手是 <see cref="SongAssert"/>
+/// （<c>Song</c> 没有值相等，撤销装饰器要的是引用相等）。
 /// </summary>
 public class SongProjectWriteTests
 {
@@ -38,12 +35,7 @@ public class SongProjectWriteTests
         SongAssert.Same(song, again, Path.GetFileName(path));
     }
 
-    /// <summary>
-    /// 变速语料单独再跑一遍，把速度事件表**逐条**比掉。
-    ///
-    /// <see cref="AssertSameSong"/> 里本来也比了速度表，但那条测试红的时候得先分清是音符错了还是速度错了；
-    /// 这一条把「变速曲目导出后别的软件读出来速度正确」单独拎出来盯着。
-    /// </summary>
+    /// <summary>变速语料的速度事件表逐条相等（红了能一眼分清是速度错了还是音符错了）。</summary>
     [TestCaseSource(typeof(MidiCorpus), nameof(MidiCorpus.VariableTempoFiles))]
     public void 变速语料的速度事件逐条相等(string path)
     {
@@ -63,10 +55,7 @@ public class SongProjectWriteTests
         });
     }
 
-    /// <summary>
-    /// 语料整体上有料 —— 和读测试里那条同样的理由：逐条比对的测试对空壳文件是**空转**的，
-    /// 「导出这条路真的被走过了」得单独有一条来盯。
-    /// </summary>
+    /// <summary>语料整体上有料，保证导出这条路真被走过，逐条比对的测试不是对空壳文件空转。</summary>
     [Test]
     public void 语料整体上导出不是空转()
     {
@@ -88,17 +77,13 @@ public class SongProjectWriteTests
     }
 
     /// <summary>
-    /// 导出会踩到的那几种形状，语料里真的都有。
-    ///
-    /// 为什么要有这一条：往返测试对「语料没覆盖到的形状」是**静默正确**的。
-    /// 尤其是轨块序号跳号 —— 那条路（中间补空轨块）要是没有语料走到，写错了也永远是绿的。
-    /// 格式 2 那份是**故意写不回去**的（格式没进模型），走一遍只为证明它不会读不回来。
+    /// 语料覆盖了导出会踩到的形状（序号跳号、一个轨块多声道、鼓轨、多轨块、格式 2）；
+    /// 没覆盖到的形状往返测试会静默正确。格式 2 没进模型、写不回去，只验它读得回来。
     /// </summary>
     [Test]
     public void 语料覆盖了导出会踩到的形状()
     {
-        // 门槛故意压得比实测低（实测 63 份里有 18 / 32 / 30 / 23 份），
-        // 只是不让语料哪天整体退化到这几条路没人走。
+        // 门槛比实测低（实测 18 / 32 / 30 / 23 份），只防语料整体退化到这几条路没人走。
         var (gap, multiChannel, drums, multiChunk, format2) = CorpusShapes();
 
         Assert.Multiple(() =>
@@ -117,14 +102,9 @@ public class SongProjectWriteTests
 
     // ==================== 移调 ====================
 
-    /// <summary>
-    /// 移调**在导出时才叠加**：写出去的音高 = <c>Note.Pitch + Track.Transpose</c>，
-    /// 而源 <see cref="Song"/> 的音符一个字节都不动。
-    ///
-    /// 后一半同样是验收条目：「移调是轨的属性，永远不落进音符」这条约束靠它盯着。
-    /// </summary>
-    [TestCase(12)]      // 往上一个八度
-    [TestCase(-12)]     // 往下一个八度
+    /// <summary>移调只在导出时叠加：写出去的音高 = <c>Note.Pitch + Track.Transpose</c>，源 <see cref="Song"/> 的音符一个都不动。</summary>
+    [TestCase(12)]
+    [TestCase(-12)]
     [TestCase(3)]
     public void 移调在导出时叠加且源音符不动(int transpose)
     {
@@ -134,7 +114,7 @@ public class SongProjectWriteTests
         var shifted = song.Tracks.Single() with { Transpose = transpose };
         var source = new Song(new[] { shifted }, song.TempoMap);
 
-        // 导出前先抄一份源音符，导出后逐条比回来
+        // 导出前先抄一份源音符，导出后比回来
         var before = source.Tracks.Single().Notes.ToArray();
 
         var again = MidiReader.ReadBytes(MidiWriter.WriteBytes(source));
@@ -150,13 +130,7 @@ public class SongProjectWriteTests
         });
     }
 
-    /// <summary>
-    /// 移调把音高推出 0..127 时**夹到边界，不跳过**。
-    ///
-    /// 取舍写在 <c>MidiWriter.ClampPitch</c> 的注释里：导出物要被人编辑、被别的软件读，
-    /// 夹住至少保住音数、时值和节奏，跳过则是静默丢音、用户在导出结果里找不到少了哪儿。
-    /// 这里把「不丢音」这件事钉死。
-    /// </summary>
+    /// <summary>移调把音高推出 0..127 时夹到边界、不跳过，音数与时值都不丢。</summary>
     [Test]
     public void 移调后音高越界时夹住不丢音()
     {
@@ -166,8 +140,8 @@ public class SongProjectWriteTests
         var shifted = new Song(
             new[]
             {
-                song.Tracks.Single() with { Transpose = 10 },   // 125+10 → 夹到 127，120+10 → 130 也夹到 127
-                song.Tracks.Single() with { Channel = 1, Transpose = -10 }  // 往下：125-10=115，120-10=110
+                song.Tracks.Single() with { Transpose = 10 },
+                song.Tracks.Single() with { Channel = 1, Transpose = -10 }
             },
             song.TempoMap);
 
@@ -199,10 +173,7 @@ public class SongProjectWriteTests
 
     // ==================== 轨名与音色 ====================
 
-    /// <summary>
-    /// 轨名与音色一起写出去。这里换一个角度验：不信我们自己的读取端，直接看写出去的字节里
-    /// 有没有那两个事件 —— 「别的 MIDI 软件读得出来轨名和音色」靠的就是它们。
-    /// </summary>
+    /// <summary>写出去的字节里直接有轨名与音色事件（不经过我们自己的读取端）。</summary>
     [Test]
     public void 写出去的文件里有轨名和音色事件()
     {
@@ -211,8 +182,7 @@ public class SongProjectWriteTests
             SmfTrack.Named("伴奏").Program(0, 1, 24).Note(0, 960, 1, 48)));
 
         byte[] bytes = MidiWriter.WriteBytes(song);
-        // 读的时候要自己指 UTF-8：DryWetMidi 的**默认**读写编码都是 ASCII，
-        // 这里不指名的话中文轨名会读成一串问号，那是读数的人错了，不是写的人错了。
+        // DryWetMidi 的默认读写编码是 ASCII，不指 UTF-8 中文轨名会读成一串问号
         var file = MidiFile.Read(new MemoryStream(bytes), new ReadingSettings
         {
             TextEncoding = System.Text.Encoding.UTF8
@@ -231,7 +201,6 @@ public class SongProjectWriteTests
         });
     }
 
-    /// <summary>中文轨名要能原样过去原样回来。默认写 ASCII 的话这里会变成一串问号。</summary>
     [Test]
     public void 中文轨名往返不变()
     {
@@ -243,10 +212,7 @@ public class SongProjectWriteTests
         Assert.That(again.Tracks.Single().Name, Is.EqualTo("第一小提琴·主旋律"));
     }
 
-    /// <summary>
-    /// 格式 0 的曲子整首塞在一个轨块里靠声道分声部，同一个轨块里的几个声道**共用轨名**。
-    /// 导出时只写一个轨名（取该组第一条），再导入时它发给组里每个声道，名字就还原了。
-    /// </summary>
+    /// <summary>格式 0 整首一个轨块、按声道分声部，同轨块的声道共用轨名；导出只写一个轨名，再导入时发给组里每个声道。</summary>
     [Test]
     public void 格式0的多声道轨名音色都还在()
     {
@@ -271,10 +237,8 @@ public class SongProjectWriteTests
     // ==================== 轨块序号 ====================
 
     /// <summary>
-    /// <see cref="Track.TrackIndex"/> 是「文件里第几个轨块」，导出必须原样占住那个位置。
-    ///
-    /// 中间空掉的序号要补一个空轨块：不补的话再导入时后面所有轨的序号会整体前移
-    /// （导入端「没有音符的轨块不产生 Track，但序号照样往前走」）。
+    /// <see cref="Track.TrackIndex"/> 是「文件里第几个轨块」，导出要原样占住那个位置；
+    /// 中间空掉的序号得补一个空轨块，否则再导入时后面所有轨的序号整体前移。
     /// </summary>
     [Test]
     public void 只有一条轨但轨块序号不为零()
@@ -284,7 +248,7 @@ public class SongProjectWriteTests
             SmfTrack.Named("第二块").Note(0, 480, 0, 60),
             SmfTrack.Named("第三块").Note(480, 480, 0, 62)));
 
-        // 导入后第 0 块（纯速度轨）不成轨，剩下两条的序号是 1 和 2
+        // 第 0 块是纯速度轨不成轨，剩下两条的序号是 1 和 2
         Assert.That(song.Tracks.Select(t => t.TrackIndex), Is.EqualTo(new[] { 1, 2 }), "前提：序号不从 0 起");
 
         var again = MidiReader.ReadBytes(MidiWriter.WriteBytes(song));
@@ -295,7 +259,7 @@ public class SongProjectWriteTests
     [Test]
     public void 轨块序号中间空掉的要补空轨块()
     {
-        // 手工拼一份：序号 0 和 2 有轨，序号 1 空着 —— 正是「第 0 轨块是纯速度轨」那类曲子的形状
+        // 序号 1 空着
         var map = new ModelTempoMap(ModelTimeDivision.PulsesPerQuarter(480));
         var song = new Song(
             new[]
@@ -317,7 +281,7 @@ public class SongProjectWriteTests
 
     // ==================== 分辨率 ====================
 
-    /// <summary>分辨率照 <see cref="ModelTempoMap.Division"/> 写，PPQ 与 SMPTE 都要能往返。</summary>
+    /// <summary>分辨率照 <see cref="ModelTempoMap.Division"/> 写。</summary>
     [TestCase(480)]
     [TestCase(96)]
     [TestCase(1)]
@@ -354,10 +318,7 @@ public class SongProjectWriteTests
 
     // ==================== 边界 ====================
 
-    /// <summary>
-    /// 空曲（0 轨）。**不是**写一个没有轨块的文件：速度表和分辨率得有地方待，
-    /// 所以照样写一个（空的）轨块，再导入时它不产生 Track，但速度表原样回来。
-    /// </summary>
+    /// <summary>空曲（0 轨）照样写一个空轨块给速度表和分辨率待，再导入时不产生 Track。</summary>
     [Test]
     public void 空曲能写出来也能读回去()
     {
@@ -394,14 +355,9 @@ public class SongProjectWriteTests
     }
 
     /// <summary>
-    /// 零时长的音（按下和抬起在同一 tick）也要能往返。
-    ///
-    /// 这一条单拎出来是因为它踩的是**事件顺序**：MIDI 里没有「时长」这个东西，
-    /// 抬键若排在按键之前，配对的会是别人的按下，两个音一起坏。
-    ///
-    /// 语料里没有这种曲子，也造不出来：<see cref="SmfTrack"/> 的约定就是「同一 tick 上抬键排在按键之前」，
-    /// 那个约定本身就会把零时长的音吃掉。所以这里手拼一份 Song 走导出
-    /// —— 而「零时长音的抬键要排到它自己按下之后」正是导出端要**故意破例**的地方。
+    /// 零时长的音（按下与抬起在同一 tick）往返不变。
+    /// MIDI 里没有「时长」，同 tick 上抬键若排在按键之前会配错对；
+    /// <see cref="SmfTrack"/> 的约定正是抬键在前，所以这里手拼一份 Song 走导出。
     /// </summary>
     [Test]
     public void 零时长的音往返不变()
@@ -429,15 +385,11 @@ public class SongProjectWriteTests
         });
     }
 
-    /// <summary>
-    /// 写不出来的东西要**炸出中文错误**，不能是截断出来的垃圾值。
-    /// 与读取端「分辨率 0 / 每帧 0 tick 报中文错」是对称的两条。
-    /// </summary>
+    /// <summary>分辨率写不出去时抛 InvalidDataException，消息是中文，不是截断出来的垃圾值。</summary>
     [Test]
     public void 分辨率写不出去时报清楚的错不崩()
     {
         // 帧率 26 不是 MIDI 规定的四种之一；每帧 300 tick 装不进一个字节。
-        // （每帧 0 tick 那种在这里造不出来 —— 模型的分辨率工厂本身就只收 ≥ 1。）
         var badFrameRate = new Song(Array.Empty<Track>(),
             new ModelTempoMap(ModelTimeDivision.Smpte(26, 40)));
         var badTicksPerFrame = new Song(Array.Empty<Track>(),
@@ -461,7 +413,7 @@ public class SongProjectWriteTests
             Array.Empty<Track>(), new ModelTempoMap(ModelTimeDivision.PulsesPerQuarter(ticksPerQuarterNote)));
     }
 
-    /// <summary>轨块序号是负数的 Song 写出去会悄悄少轨，所以宁可报错。</summary>
+    /// <summary>轨块序号为负时抛错，否则写出去会悄悄少轨。</summary>
     [Test]
     public void 轨块序号是负数时报清楚的错不崩()
     {
@@ -476,12 +428,8 @@ public class SongProjectWriteTests
     // ==================== 身份 ====================
 
     /// <summary>
-    /// **导出不带身份，重新导入时按位置重发** —— 标准 MIDI 里没有地方放它，也没必要放。
-    ///
-    /// 造一份「身份和位置对不上」的曲子来看这件事：剪一刀之后新发的号是 4（3 号是那个被剪的音占着的），
-    /// 导出再导入回来，号是按位置重发的 1、2 —— 那个 4 没有跟着文件走。
-    /// 这不算丢东西：身份只在一份 <see cref="Song"/> 里有意义，而导出导入出来的是**另一份**曲子。
-    /// 跨存盘的那条路是 .mproj，那边身份是存下来的（见 <c>SongProjectFileTests.存盘再打开身份不变</c>）。
+    /// 导出不带身份，重新导入时按位置重发（标准 MIDI 里没有地方放它）；
+    /// 身份只在 .mproj 那条路上存下来（见 <c>SongProjectFileTests.存盘再打开身份不变</c>）。
     /// </summary>
     [Test]
     public void 导出不带身份再导入时按位置重发()
@@ -492,7 +440,7 @@ public class SongProjectWriteTests
                 new Track(0, 0, "主旋律", 0, new[]
                 {
                     new ModelNote(60, 0, 480, 100, new NoteId(1)),
-                    new ModelNote(62, 3360, 720, 100, new NoteId(3))   // 伸出右切口 → 剪完发新号
+                    new ModelNote(62, 3360, 720, 100, new NoteId(3))   // 伸出右切口，剪完发新号
                 })
             },
             new ModelTempoMap(ModelTimeDivision.PulsesPerQuarter(480)));
@@ -538,6 +486,5 @@ public class SongProjectWriteTests
         return (gap, multiChannel, drums, multiChunk, format2);
     }
 
-    // 逐字段比较的帮手在 SongAssert 里 —— .mproj 那半（SongProjectFileTests）用的是同一份：
-    // 缝的两半要比的是同一个东西，比法也该是同一份实现，不然两边会各松各的。
+    // 逐字段比较的帮手在 SongAssert，与 .mproj 那半（SongProjectFileTests）共用同一份。
 }

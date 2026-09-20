@@ -13,87 +13,40 @@ using MidiPerformer.Core.Model;
 namespace MidiPerformer.App.Views;
 
 /// <summary>
-/// 一条轨的卷帘。<b>画的全是 <see cref="PianoRollPresenter.LaneScene"/> 里算好的东西</b>，
-/// 这里一个乘法都不做 —— 「画什么」和「画在哪」分开，前者才能不起窗口就测。
-///
-/// <b>它自己不改谱面。</b>按下 / 拖动 / 抬起只产出两种**意图**
-/// （<see cref="NotesMoved"/> / <see cref="NoteResized"/>），
-/// 调命令的是窗口：编辑脊柱只有一条，撤销的记账在装饰器里，谁调命令都自动有撤销，
-/// 但调命令的地方只该有一处。选中集也不存在这儿 —— 它住在
-/// <see cref="PianoRollController"/> 里（全程序一个），这里只负责调它、再喊一声
-/// <see cref="SelectionChanged"/>。多选有两条路：在音符上 <c>Shift</c> 点、
-/// 在空白处横拖框一段；删是另一件事，绑在 Delete / Backspace 上，归窗口。
-///
-/// <b>拖动期间谱面一个字节都不改。</b>一边拖一边调命令，撤销栈会被灌满上百条微步，
-/// 用户按 Ctrl+Z 得按到手酸。所以每一帧只画**预览**：被拖的音用虚线幽灵画在它们将要去的位置上
-/// （见 <see cref="DragPreview"/> / <see cref="Marquee"/>），松手才结算成一条命令。
-/// 连「即将发生什么」也不在这儿算 —— 这里给的是纯数据（挪多少 tick、框住哪段），
-/// 方块、虚线幽灵和框选那根带子都由 <see cref="PianoRollPresenter"/> 算出来。
-///
-/// 命中判定同样交给 <see cref="PianoRollController"/>，画的和点的才是同一份几何。
-///
-/// 画法照 <c>RollPreviewStrip</c>：实心块 + 顶边 1px 亮线，不倒圆角、不描边。
+/// 一条轨的卷帘：画的全是 <see cref="PianoRollPresenter.LaneScene"/> 里算好的东西，自己一个乘法都不做。
+/// 指针交互只产出 <see cref="NotesMoved"/> / <see cref="NoteResized"/> 两种意图，命令由窗口去调；
+/// 命中判定与选中集都归 <see cref="PianoRollController"/>，拖动期间不改谱面，只画预览。
 /// </summary>
 public sealed class PianoRollLane : Control
 {
-    /// <summary>
-    /// 刻度数字的字号。wireframe 是 <c>10px</c>，配上它的浅灰和细体，做出来几乎看不见。
-    ///
-    /// 抬到 12px 是三样一起改里的一样（另两样是颜色和字重，见 <see cref="DrawRulerLabels"/>）：
-    /// 只放大不改颜色，还是浅灰；只改颜色不放大，还是细。这三样少一样都还是「看不清」。
-    /// 代价是标尺得跟着长高，见 <see cref="PianoRollGeometry.RulerHeight"/>。
-    /// </summary>
+    /// <summary>刻度数字的字号。标尺高度得跟着它走，见 <see cref="PianoRollGeometry.RulerHeight"/>。</summary>
     private const double RulerFontSize = 12;
 
     /// <summary>播放头红线多宽，照 wireframe 的 <c>fillRect(px-1, 0, 2, h)</c>。</summary>
     private const double PlayheadWidth = 2;
 
     /// <summary>
-    /// 选中那一圈的线宽，照 <c>prototype-编辑痕迹.html</c> 的 A
-    /// （<c>.note[data-sel]{box-shadow:0 0 0 2px var(--accent)}</c>）。
-    ///
-    /// 原来是 1px，密的地方（一整排音挨着、时值又短）看不出被选中了。
-    ///
-    /// **骑在音符块的边上画**（<see cref="DrawingContext.DrawRectangle"/> 的描边以路径为中心、
-    /// 里外各一半），没有照原型那样整圈往外长：音符块上下只留了 1.6px 的缝
-    /// （<c>NotePad</c> 0.8 × 2），往外长要吃掉 4px，上下两行挨着的音直接连成一整片；
-    /// 骑边只吃 2px，最坏也就压过缝 0.4px —— 压过去的还是同一个 accent 色，
-    /// 看着就是两条边贴在一起。
-    ///
-    /// 代价是音符自己的芯窄了 2px（一条五六像素高的音，芯还剩三四像素）。
-    /// 这条在原型里就写明了（「音符本身只剩 2px 的芯」），选 A 就是认了它。
+    /// 选中那一圈的线宽，照 <c>prototype-编辑痕迹.html</c> 的 A。
+    /// 描边骑在音符块的边上画（<see cref="DrawingContext.DrawRectangle"/> 以路径为中心、里外各一半），
+    /// 音符块上下只留 1.6px 的缝（<c>NotePad</c> 0.8 × 2），往外长会吃掉 4px 把相邻两行连成一片。
     /// </summary>
     private const double SelectionStrokeWidth = 2;
 
     /// <summary>
-    /// 幽灵的虚线节奏（画 3px、空 2px）。
-    ///
-    /// 虚线是**这一层唯一能用的「还不作数」记号**：实心块 = 谱面上真有的音，
-    /// 虚线 = 松手之后会变成的样子。整块换成一个新颜色做不到这一点 ——
-    /// 不新增颜色值（令牌就那 26 条），而且实心/虚线的分别比两种蓝的分别好认。
-    ///
-    /// 框选那根带子**不用**它：带子是实底 + 左右两条实边（见 <c>DrawMarquee</c>，
-    /// 照 wireframe 的 <c>.rangebar</c>）。两者说的不是一件事，见那边的说明。
+    /// 幽灵的虚线节奏（画 3px、空 2px）：实心块是谱面上真有的音，虚线是松手之后会变成的样子。
+    /// 框选那根带子不用它（见 <see cref="DrawMarquee"/>）。
     /// </summary>
     private static readonly ImmutableDashStyle GhostDash = new(new double[] { 3, 2 }, 0);
 
     /// <summary>
-    /// 带子底色补的透明度，照 wireframe 的 <c>.rangebar { opacity: .7 }</c>。
-    /// 框选那根（蓝）和「抽掉一段」那根（红）共用这一个数 —— 两根带子要的观感是同一件事：
-    /// 看得见「盖住了哪一段」，同时里面的音还看得清。
-    ///
-    /// 令牌里只有实色，透明是**画的时候**配上去的（同 <c>RollNavStrip.WithAlpha</c>）——
-    /// 本切片不新增颜色值，基色仍然只从令牌来。实心铺满会把带子里的音盖住，
-    /// 而那几个音正是用户盯着要看的东西。
+    /// 带子底色补的透明度，照 wireframe 的 <c>.rangebar { opacity: .7 }</c>；框选那根和「抽掉一段」那根共用。
+    /// 令牌里只有实色，透明是画的时候配上去的（同 <c>RollNavStrip.WithAlpha</c>）。
     /// </summary>
     private const double MarqueeOpacity = 0.7;
 
     /// <summary>
-    /// 三种光标，建一次就够了。
-    ///
-    /// 每次 <c>OnPointerMoved</c> 都 <c>new Cursor(...)</c> 的话，鼠标一动就造一个
-    /// 平台光标对象（<see cref="Cursor"/> 是 IDisposable，还带一个句柄），
-    /// 一次拖动就是几百个。和 <c>RollNavStrip</c> 一样，光标是控件级的东西，建一次用到底。
+    /// 三种光标，建一次用到底 —— <see cref="Cursor"/> 是 IDisposable 还带一个句柄，
+    /// 每次指针移动都 new 一个的话，一次拖动就是几百个。
     /// </summary>
     private static readonly Cursor ArrowCursor = new(StandardCursorType.Arrow);
     private static readonly Cursor GrabCursor = new(StandardCursorType.Hand);
@@ -116,13 +69,7 @@ public sealed class PianoRollLane : Control
         /// <summary>在空白处按下：框一段时间出来。</summary>
         Marquee,
 
-        /// <summary>
-        /// 「抽掉一段」装备着的时候按下：在卷帘上横拖出**会消失的那一段**。
-        ///
-        /// 它是**模式**，不是「空白的另一种用法」：装备期间不管手落在哪儿（音符上也算）
-        /// 都是划段，因为要剪的那一段是**时间**，和音高无关 —— 落在音符上开始划，
-        /// 划出来的仍然是整条轨上的一段时间。
-        /// </summary>
+        /// <summary>「抽掉一段」装备着的时候按下：在卷帘上横拖出会消失的那一段（要剪的是时间，与音高无关）。</summary>
         Cut
     }
 
@@ -132,27 +79,19 @@ public sealed class PianoRollLane : Control
 
     private DragKind _drag = DragKind.None;
 
-    /// <summary>按下时命中的那个音的**身份**（<see cref="Note.Id"/>）。框选时它是 <see cref="NoteId.None"/>。</summary>
+    /// <summary>按下时命中的那个音的身份（<see cref="Note.Id"/>）。框选时它是 <see cref="NoteId.None"/>。</summary>
     private NoteId _anchor = NoteId.None;
 
     /// <summary>
-    /// 按下那一刻指针底下的 tick 与音高。
-    ///
-    /// **一切位移都是相对它算的**（不是相对「鼠标挪了几像素」）：吸附要的是
-    /// 「锚音原来的位置 + 原始位移」再吸一次，理由见 <see cref="UpdateDrag"/>。
-    /// 存 tick 而不是像素，是因为视口可能在拖动中途滚动（播放跟着播放头走），
-    /// 像素差会跟着失效，tick 差不会。
+    /// 按下那一刻指针底下的 tick 与音高；一切位移都是相对它算的
+    ///（吸附要的是「锚音原来的位置 + 原始位移」再吸一次）。
+    /// 存 tick 而不是像素，是因为视口可能在拖动中途滚动（播放跟着播放头走），像素差那时就失效了。
     /// </summary>
     private double _pressTick;
     private int _pressPitch;
 
     /// <summary>
-    /// 按下那一刻指针在控件里的位置（像素）。
-    ///
-    /// **只用来量「手挪开了没有」**，不用来算位移 —— 位移一律走 <see cref="_pressTick"/>，
-    /// 理由是视口会在拖动中途滚动（播放跟着播放头走），像素差那时就失效了。
-    /// 而「手抖没抖」问的正是像素：音符在底下滚不滚，跟手有没有动是两码事。
-    ///
+    /// 按下那一刻指针在控件里的位置（像素），只用来量「手挪开了没有」；位移一律走 <see cref="_pressTick"/>。
     /// 判据在 <see cref="PianoRollGeometry.ExceedsDragThreshold"/>，用在 <see cref="UpdateDrag"/> 开头。
     /// </summary>
     private Point _pressPoint;
@@ -166,24 +105,18 @@ public sealed class PianoRollLane : Control
     private long _lengthDelta;
     private int _pitchDelta;
 
-    /// <summary>框选的起止 tick（未吸附 —— 框说的是「我框到哪儿了」，不是「吸到哪条线上」）。</summary>
+    /// <summary>框选的起止 tick（不吸附 —— 框说的是「我框到哪儿了」，不是「吸到哪条线上」）。</summary>
     private double _marqueeStart;
     private double _marqueeEnd;
 
     /// <summary>
-    /// 「抽掉一段」装备着（轨道头上正摆着那一问）。
-    ///
-    /// 装备期间这一次手势**只划段**：按下不选中、不挪音，整条卷帘只有一个意思。
-    /// 想改音符就先按「取消」或 Esc 收掉 —— 一个模式有明确的进出口，比「按位置猜意图」好懂。
+    /// 「抽掉一段」装备着（轨道头上正摆着那一问）。装备期间这一次手势只划段：按下不选中、不挪音。
     /// </summary>
     private bool _cutArmed;
 
     /// <summary>
-    /// 抽掉那一段的起止 tick（**已吸附到格线**，起止有序）。
-    ///
-    /// 和框选那两个不一样，这两个是**持久**的：松手之后要留着，用户得先看着这一段、
-    /// 再决定按不按「抽掉」（见 <see cref="CutRange"/>）。所以 <see cref="ResetDrag"/>
-    /// **不清它们** —— 清它们的是 <see cref="DisarmCut"/>。
+    /// 抽掉那一段的起止 tick（已吸附到格线，起止有序）。
+    /// 和框选那两个不一样，它们是持久的：松手之后要留着，由 <see cref="DisarmCut"/> 清掉，<see cref="ResetDrag"/> 不碰。
     /// </summary>
     private long _cutStart;
     private long _cutEnd;
@@ -191,7 +124,7 @@ public sealed class PianoRollLane : Control
     /// <summary>这一次要动的整组音（按下那一刻的快照，见 <see cref="NoteMoveRequest"/>）。</summary>
     private readonly List<NoteRef> _group = new();
 
-    /// <summary>其中落在**本轨**上的那几个的身份 —— 幽灵只画得动这一条轨上的。</summary>
+    /// <summary>其中落在本轨上的那几个的身份 —— 幽灵只画得动这一条轨上的。</summary>
     private readonly List<NoteId> _ghostIds = new();
 
     public PianoRollLane()
@@ -201,7 +134,7 @@ public sealed class PianoRollLane : Control
         Cursor = ArrowCursor;
     }
 
-    /// <summary>做命中判定用的控制器。**只用于悬停与命中** —— 画法一个字都不从这儿取。</summary>
+    /// <summary>做命中判定用的控制器。只用于悬停与命中，画法一个字都不从这儿取。</summary>
     public PianoRollController? Controller { get; set; }
 
     /// <summary>这条轨在 <c>Song.Tracks</c> 里的下标。</summary>
@@ -210,12 +143,8 @@ public sealed class PianoRollLane : Control
     private bool _focused;
 
     /// <summary>
-    /// 这是不是当前聚焦的那条轨（Ctrl+↑/↓ 走的那个光标，见
-    /// <see cref="PianoRollController.FocusedTrack"/>）。只影响这一条的底色。
-    ///
-    /// 底色**整条换掉**，不是在原来的底色上再压一层：令牌都是实色（26 条里没有带透明度的），
-    /// 往上叠一层的话叠出来是什么颜色就没准了 —— 而「准不准」正是这套令牌要保证的事。
-    /// 所以聚焦时铺的是 <c>LaneFocus</c> 那一条，奇偶底色这时候不参与。
+    /// 这是不是当前聚焦的那条轨（Ctrl+↑/↓ 走的那个光标，见 <see cref="PianoRollController.FocusedTrack"/>）。只影响这一条的底色。
+    /// 令牌都是实色，所以聚焦时整条换成 <c>LaneFocus</c>，不在奇偶底色上再压一层。
     /// </summary>
     public bool Focused
     {
@@ -228,7 +157,7 @@ public sealed class PianoRollLane : Control
         }
     }
 
-    /// <summary>悬停到的音符变了。参数是那个音的**身份**，<see cref="NoteId.None"/> = 移开了或没命中。</summary>
+    /// <summary>悬停到的音符变了。参数是那个音的身份，<see cref="NoteId.None"/> = 移开了或没命中。</summary>
     public event EventHandler<NoteId>? HoverChanged;
 
     /// <summary>这一组音被拖到了别处，命令由窗口去调（一次拖动只发一次）。</summary>
@@ -241,30 +170,20 @@ public sealed class PianoRollLane : Control
     public event EventHandler<IReadOnlyList<NoteRef>>? SelectionChanged;
 
     /// <summary>
-    /// 聚焦轨挪到这条轨上来了（按下时手落在这一条上，见 <see cref="OnPointerPressed"/>）。
-    ///
-    /// 只在这条轨**本来不是**聚焦轨时发 —— 控制器上的
-    /// <see cref="PianoRollController.SetFocusedTrack"/> 会说这次到底挪没挪。
-    /// 窗口收到它把整窗的底色推一遍（别的轨要把高亮灭掉），这一条自己已经重画过了。
-    ///
-    /// <b>悬浮不发这条。</b>鼠标横扫过几条轨不该让焦点跟着闪 ——
-    /// 焦点是「手搭在哪条轨上」，得有一下明确的动作（按下去、或者 Ctrl+↑/↓）才算数。
+    /// 聚焦轨挪到这条轨上来了（按下时手落在这一条上，见 <see cref="OnPointerPressed"/>），
+    /// 只在这条轨本来不是聚焦轨时发。
+    /// 窗口收到它把整窗的底色推一遍；悬浮不发这条，焦点得有明确的动作（按下、或 Ctrl+↑/↓）才算数。
     /// </summary>
     public event EventHandler? FocusChanged;
 
     /// <summary>
-    /// 拖动预览变了（幽灵挪了、带子宽了），这一屏要重算一遍才画得出来。
-    ///
-    /// 场景是 <c>TrackLaneView</c> 那边算的，所以这里只能喊一声；它再拿**同一份**播放头状态
-    /// 重跑一次 Refresh。拖动中不重算的话，画面会一直停在按下那一刻的预览上。
+    /// 拖动预览变了（幽灵挪了、带子宽了），这一屏要重算一遍才画得出来 —— 场景是 <c>TrackLaneView</c> 那边算的。
     /// </summary>
     public event EventHandler? PreviewChanged;
 
     /// <summary>
-    /// 被拖的那几个音**松手之后会落在哪**。没在拖、或者还没有位移就是 null。
-    ///
-    /// 没有位移时给 null 而不是给一个全 0 的预览：幽灵和原音符完全重合，
-    /// 画出来就是一层虚线糊在实心块上，看着像「坏了」。
+    /// 被拖的那几个音松手之后会落在哪。没在拖、或者还没有位移就是 null
+    ///（给全 0 的预览的话，幽灵和原音符完全重合，画出来像坏了）。
     /// </summary>
     public PianoRollPresenter.DragPreview? DragPreview
     {
@@ -288,9 +207,7 @@ public sealed class PianoRollLane : Control
 
     /// <summary>
     /// 装备着「抽掉一段」时，此刻划出来的那一段。没装备、或者还没拖出宽度就是 null。
-    ///
-    /// **松手之后照样有值**（这正是它和 <see cref="Marquee"/> 的分别）：
-    /// 用户拖一段、看一眼轨道头上那句预览，然后才按「抽掉」。
+    /// 松手之后照样有值，这一点和 <see cref="Marquee"/> 不一样。
     /// </summary>
     public PianoRollPresenter.MarqueeRange? CutRange
         => _cutArmed && _cutStart != _cutEnd
@@ -298,14 +215,7 @@ public sealed class PianoRollLane : Control
             : null;
 
     /// <summary>
-    /// 装备上「抽掉一段」：整条卷帘从此只划段，并且**先替用户划好一段**。
-    ///
-    /// 预填这一段是有讲究的（由调用方算好给进来）：多半是「本轨选中的那几个音」——
-    /// 用户点了几个音发现不对、再按「抽掉一段」，想剪的多半就是它们；
-    /// 一个音都没选中才退回「播放头所在的那一小节」。
-    ///
-    /// 不在这儿算，是因为算它要知道选中集（控制器）和播放头（<c>TrackLaneView</c> 手上）——
-    /// 卷帘这一层只存「划到哪儿了」，不问「该划哪儿」。
+    /// 装备上「抽掉一段」：整条卷帘从此只划段，并且先替用户划好一段（范围由调用方算好给进来）。
     /// </summary>
     public void ArmCut(long startTick, long endTick)
     {
@@ -319,10 +229,7 @@ public sealed class PianoRollLane : Control
     }
 
     /// <summary>
-    /// 收掉「抽掉一段」：划好的那一段一起丢掉（它说的就是这一问），卷帘回到平时那个意思。
-    ///
-    /// 没装备时什么都不做，也不喊 —— 窗口每次编辑都会重挂控件、无条件来收一遍
-    ///（见 <c>TrackLaneView.Rebind</c>），空喊一声会让窗口白重画一屏。
+    /// 收掉「抽掉一段」：划好的那一段一起丢掉，卷帘回到平时那个意思。没装备时什么都不做，也不喊。
     /// </summary>
     public void DisarmCut()
     {
@@ -340,10 +247,7 @@ public sealed class PianoRollLane : Control
 
     /// <summary>
     /// 划出来的那一段变了（装备上、拖动中、收掉），轨道头上那句预览要重算。
-    ///
-    /// 和 <see cref="PreviewChanged"/> 分开，是因为两者的代价差着量级：
-    /// 那一声让整条轨重算一屏场景，这一声只让一行字重算一遍
-    /// （<c>CutPreview.Of</c> 要把这条轨的音扫一遍）。拖动中每帧两个都喊就白扫几百遍。
+    /// 和 <see cref="PreviewChanged"/> 分开：这一声只让一行字重算，那一声让整条轨重算一屏场景。
     /// </summary>
     public event EventHandler? CutRangeChanged;
 
@@ -373,17 +277,14 @@ public sealed class PianoRollLane : Control
         var palette = tokens.Current;
         var viewport = scene.Viewport;
 
-        // 轨道底色铺满整条，顺带给鼠标一个能命中的面 —— 悬停要落在空白处也算「移开了」。
-        // 深浅按轨号奇偶交替，照 wireframe 的 .lane.a / .lane.b：堆在一起时能看清一条轨在哪儿结束。
-        // 聚焦的那一条换成 LaneFocus —— 奇偶这时候不参与，整条一个色（见 Focused 的说明）。
+        // 轨道底色铺满整条，顺带给鼠标一个能命中的面 —— 悬停落在空白处也算「移开了」。
+        // 深浅按轨号奇偶交替（wireframe 的 .lane.a / .lane.b），聚焦的那一条整条换成 LaneFocus。
         var background = Focused
             ? palette.LaneFocus
             : TrackIndex % 2 == 0 ? palette.LaneA : palette.LaneB;
         context.FillRectangle(new ImmutableSolidColorBrush(background), new Rect(Bounds.Size));
 
-        // 音高行的黑键底纹**刻意没画**：wireframe 用的是半透明灰（rgba(128,140,155,.075)），
-        // 而这一层不许出现颜色字面值，也不为它新造一个令牌。少一层底纹不影响读谱。
-        // 音高行之间的分隔线同理 —— 音符块自己就说明了行在哪。
+        // 音高行的黑键底纹和行分隔线都不画
 
         DrawGrid(context, palette, scene);
 
@@ -393,8 +294,7 @@ public sealed class PianoRollLane : Control
             DrawNote(context, palette, box, scene.SelectedNotes.Contains(box.Id));
         }
 
-        // 幽灵压在真音符上面：拖到哪儿去了，看的就是它。下面那一块**不动**，
-        // 一实一虚摆在一起，用户一眼就看出「现在在哪、松手去哪儿」。
+        // 幽灵压在真音符上面：底下那一块不动，一实一虚摆在一起就是「现在在哪、松手去哪儿」
         foreach (var ghost in scene.GhostNotes)
         {
             DrawGhost(context, palette, ghost);
@@ -404,12 +304,7 @@ public sealed class PianoRollLane : Control
         DrawCutBand(context, palette, scene.CutBand);
 
         // 标尺下沿那条横线：刻度区到此为止，照 wireframe 的 `moveTo(0, RULER_H + .5)`。
-        //
-        // 颜色从 Line 提到 InkFaint —— 令牌阶梯上的**下一档**（LineSoft → Line → InkFaint → …），
-        // 不是新写一个颜色值。线宽仍然是 1px：要的是「刻度区到此为止」这条边界更明确，
-        // 不是要一条粗杠把标尺和谱面隔开（那会抢走音符的注意力）。
-        // 字号放大之后它也得跟着硬一点，否则 12px 的字下面拖着一条几乎看不见的线，
-        // 标尺看着像飘在谱面上。
+        // 颜色用 Line 的下一档 InkFaint，线宽仍是 1px —— 要的是边界明确，不是一条抢注意力的粗杠。
         context.DrawLine(
             new Pen(new ImmutableSolidColorBrush(palette.InkFaint), 1),
             new Point(0, Math.Round(PianoRollGeometry.RulerHeight) + 0.5),
@@ -425,7 +320,6 @@ public sealed class PianoRollLane : Control
     {
         base.OnPointerPressed(e);
         if (Controller is not { } controller || _scene is not { } scene) return;
-        // 只接左键：右键在别处另有意思（将来），别在这儿顺手开一次拖动
         if (!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed) return;
 
         // 上一次拖动没收拾干净（捕获丢过、控件刚被换过）就地收掉，别让两次拖动叠在一起
@@ -439,22 +333,14 @@ public sealed class PianoRollLane : Control
         _pressPoint = point;
 
         // 先抓住指针：拖到控件外面松手（或者窗口中途重画把这条轨换掉）也要收得到消息。
-        // 放在改选中之前 —— 改选中会让窗口重画一屏，那一趟里这条控件要是被换掉，
-        // 捕获就丢了，而这个顺序至少保证「抓到了才算数」
+        // 放在改选中之前 —— 改选中会让窗口重画一屏，那一趟里控件被换掉捕获就丢了
         e.Pointer.Capture(this);
         e.Handled = true;
 
-        // 手落在哪条轨上，焦点就跟到哪条轨上（见 FocusChanged）。
-        // 摆在捕获之后：挪焦点会让窗口重画一屏，那一趟里这条控件要是被换掉，捕获就丢了。
-        //
-        // **四支都算** —— 拖头尾、拖身体、Shift 加选、点空白和拖框，说的都是同一句话：
-        // 「我现在在弄这条轨」。只有悬浮不算（见 OnPointerMoved）。
+        // 手落在哪条轨上，焦点就跟到哪条轨上（见 FocusChanged）。摆在这里的理由同上：挪焦点也会让窗口重画一屏
         bool focusChanged = controller.SetFocusedTrack(TrackIndex);
 
-        // 「抽掉一段」装备着的时候，整条卷帘只有这一个意思：按下就是**重新划一段**，
-        // 划到哪儿算哪儿。命中判定、选中集一概不参与 —— 要剪的那一段是时间，
-        // 和手落在哪个音上无关，而顺手把选中集改了反而会让预填的那一段（多半就是选中的那几个音）
-        // 在手底下一闪就没了。
+        // 「抽掉一段」装备着的时候，整条卷帘只有这一个意思：按下就是重新划一段，命中判定与选中集一概不参与
         if (_cutArmed)
         {
             _drag = DragKind.Cut;
@@ -462,8 +348,7 @@ public sealed class PianoRollLane : Control
 
             UpdateCursor(PianoRollGeometry.RollHit.None);
             InvalidateVisual();
-            // 叫一声把那一行预览说回「先拖一段」：上一次划的那一段已经被这一下清掉了，
-            // 而「抽掉」还灰着（范围是空的）—— 不喊的话它会停在上一次那句数上
+            // 叫一声把那一行预览说回「先拖一段」：上一次划的那一段已经被这一下清掉了
             RaiseCutRangeChanged();
             if (focusChanged) FocusChanged?.Invoke(this, EventArgs.Empty);
             return;
@@ -477,9 +362,7 @@ public sealed class PianoRollLane : Control
         {
             case PianoRollGeometry.RollHit.Head:
             case PianoRollGeometry.RollHit.Tail:
-                // 拖边缘是**直接操作**，不是选中的动作：没选中它也照样能拉时值。
-                // 拉成什么样由幽灵说，不需要先给它点亮一圈边 —— 那反而会让人以为
-                // 「要先选中才能改」（框选出来的那一组里，是谁被拉了也看不出来）。
+                // 拖边缘是直接操作，不需要先选中 —— 拉成什么样由幽灵说
                 _drag = hit == PianoRollGeometry.RollHit.Head ? DragKind.ResizeHead : DragKind.ResizeTail;
                 _anchor = note.Id;
                 CaptureAnchor(controller);
@@ -491,16 +374,13 @@ public sealed class PianoRollLane : Control
                 _anchor = note.Id;
                 CaptureAnchor(controller);
 
-                // Shift 点一下 = 把它也带上。堆多选有两条路：这一条，和空白处横拖框一段
-                //（见 default 一支 —— 19 之前框选是「松手就删」、不留选中，那时只有这一条）。
-                //
-                // ExtendSelection 对已经在里面的音什么都不做，正合这里的语义：
-                // 用户点一个已选中的音，意思是「留着它」，而不是把整组收成它一个。
+                // Shift 点一下 = 把它也带上（多选的另一条路是空白处横拖框一段）。
+                // ExtendSelection 对已经在里面的音什么都不做，正合这里的语义：点一个已选中的音意思是「留着它」
                 if (e.KeyModifiers.HasFlag(KeyModifiers.Shift))
                 {
                     int before = controller.SelectedNotes.Count;
                     controller.ExtendSelection(note);
-                    // 本来就在里面 → 选中集没变，那就别喊：喊一声窗口就白重画一屏
+                    // 选中集没变就别喊：喊一声窗口就白重画一屏
                     selectionChanged = controller.SelectedNotes.Count != before;
                 }
                 // 不在选中集里就先只选它一个；已经在里面就整组留着 —— 用户拖的是那一组
@@ -510,8 +390,7 @@ public sealed class PianoRollLane : Control
                     selectionChanged = true;
                 }
 
-                // 要动的那组在按下这一刻定下来：拖动当中谁也不会再改选中集，快照一份，
-                // 松手时交给命令的就是它（松手时现取也行，但那时窗口可能已经动过选中集了）
+                // 要动的那组在按下这一刻快照一份 —— 松手时窗口可能已经动过选中集了
                 _group.Clear();
                 _group.AddRange(controller.SelectedNotes);
                 foreach (var item in _group)
@@ -519,10 +398,7 @@ public sealed class PianoRollLane : Control
                 break;
 
             default:
-                // 空白处按下 = 框选。选中集**当场清掉**：这一次手势要么框出一段、
-                // 要么什么也没框到，两种结果说的都是「从现在开始算」，不该留着上一次的选中
-                //（框完就删的那一版里，留着被删音的下标只会指向别人 —— 现在框完只是选中，
-                // 但「按下 = 重新开始框」这条语义没变，也从没变过）。
+                // 空白处按下 = 框选，选中集当场清掉：这一次手势说的就是「从现在开始算」
                 controller.ClearSelection();
                 selectionChanged = true;
                 _drag = DragKind.Marquee;
@@ -533,8 +409,7 @@ public sealed class PianoRollLane : Control
         UpdateCursor(hit);
         InvalidateVisual();
 
-        // 选中的那一声先喊：它一路走到窗口的读数条，两件事这一帧就都落定了。
-        // 焦点这一声摆后面，于是它引起的那次重画画的已经是最终的选中集
+        // 选中的那一声先喊，焦点那一声摆后面 —— 它引起的那次重画画的已经是最终的选中集
         if (selectionChanged) RaiseSelectionChanged();
         if (focusChanged) FocusChanged?.Invoke(this, EventArgs.Empty);
     }
@@ -547,9 +422,8 @@ public sealed class PianoRollLane : Control
 
         if (_drag != DragKind.None)
         {
-            // 拖动中**不报悬停**：读数条上那几个数说的是模型里的那个音，而拖动期间模型没变。
-            // 顺着指针报的话，指针一跑出那个音的方块（方块自己没动），读数条就空了 ——
-            // 看着像「拖丢了」。按下时那个音还亮着，正是用户手上正抓着的那个。
+            // 拖动中不报悬停：读数条说的是模型里的那个音，顺着指针报的话，
+            // 指针一跑出那个音的方块（方块自己没动）读数条就空了，看着像「拖丢了」
             UpdateDrag(e.GetPosition(this));
             return;
         }
@@ -566,8 +440,7 @@ public sealed class PianoRollLane : Control
     {
         base.OnPointerExited(e);
 
-        // 拖动中指针跑出控件是常事（往上拖过了标尺、往左右拖出了窗口），
-        // 这时候把悬停清掉，读数条会在用户还在拖的时候突然空掉
+        // 拖动中指针跑出控件是常事，这时清悬停会让读数条在用户还在拖的时候突然空掉
         if (_drag != DragKind.None) return;
 
         SetHover(NoteId.None);
@@ -580,8 +453,7 @@ public sealed class PianoRollLane : Control
         base.OnPointerReleased(e);
         if (_drag == DragKind.None) return;
 
-        // 先把状态落定，再放开捕获：Capture(null) 会回调到 CaptureLost，
-        // 而那一路是「这次拖动作废」—— 状态还在的话，刚算出来要提交的位移会被它清掉
+        // 先把状态落定再放开捕获：Capture(null) 会回调到 CaptureLost，状态还在的话刚算出的位移会被它清掉
         var kind = _drag;
         _drag = DragKind.None;
 
@@ -590,11 +462,8 @@ public sealed class PianoRollLane : Control
     }
 
     /// <summary>
-    /// 捕获丢了（窗口中途重建、系统弹窗抢走了指针、控件被移出可视树…）。
-    ///
-    /// **这一次拖动不作数。** 拖到一半被打断，谁也不知道用户本来要拖到哪儿，
-    /// 按最后那一帧的位置交一条命令，等于替他做了个他没做完的决定。
-    /// 谱面一个字节都没动，幽灵一收，就是按下之前的样子。
+    /// 捕获丢了（窗口中途重建、系统弹窗抢走指针、控件被移出可视树…）。这一次拖动不作数 ——
+    /// 拖到一半被打断，谁也不知道用户本来要拖到哪儿，谱面一个字节都没动。
     /// </summary>
     protected override void OnPointerCaptureLost(PointerCaptureLostEventArgs e)
     {
@@ -605,12 +474,8 @@ public sealed class PianoRollLane : Control
     // ==================== 拖动 ====================
 
     /// <summary>
-    /// 把锚音在模型里的位置记下来 —— 吸附是「锚的起点 + 原始位移」算的，得有个起点。
-    ///
-    /// 按**身份**在现场扫一遍找它，不存下标：按下那一刻这个号一定在这条轨上，
-    /// 但下一次编辑之后它就可能挪到数组别处去了（见 <see cref="NoteRef"/>）——
-    /// 存下标的话，那个下标会在下一次重画时指着别人。一条轨几千个音，扫一遍是常数级的小事，
-    /// 而且这里一次拖动只走一次（在按下那一刻）。
+    /// 把锚音在模型里的位置记下来 —— 吸附是按「锚的起点 + 原始位移」算的，得有个起点。
+    /// 按身份扫一遍找它、不存下标：下一次编辑之后那个下标可能已经指着别人了。
     /// </summary>
     private void CaptureAnchor(PianoRollController controller)
     {
@@ -624,26 +489,18 @@ public sealed class PianoRollLane : Control
     }
 
     /// <summary>
-    /// 指针动了，把预览的位移重算一遍。
-    ///
-    /// <b>这里一个谱面都不改</b>，只更新那几个增量（以及框选的另一头），
-    /// 然后喊一声让场景重画。真正的编辑在 <see cref="Settle"/> 里一次交出去。
+    /// 指针动了，把预览的位移重算一遍。这里不改谱面，真正的编辑在 <see cref="Settle"/> 里一次交出去。
     /// </summary>
     private void UpdateDrag(Point point)
     {
         if (_scene is not { } scene || Controller is not { } controller) return;
 
-        // 视口**每次现取**，不留按下那一刻的那份：播放中视图会跟着播放头滚，
-        // 拿旧视口算出来的落点会整体偏掉一个滚动量
+        // 视口每次现取：播放中视图会跟着播放头滚，拿旧视口算出来的落点会整体偏掉一个滚动量
         var viewport = scene.Viewport;
 
-        // 手还没挪够一个门槛 —— 这一下是「点」，不是「拖」。
-        //
-        // 三个位移和框选的那一头一起退回按下那一刻的样子，于是松手时 Settle 里
-        // 那三个守卫全都拦得住：不会因为 1px 手抖把一个抢拍的音吸回格线，
-        // 也不会让框选区间从零长度变成几个 tick（那会删掉别行上盖住这几个 tick 的音）。
-        //
-        // 退出前照样喊一声重画：拖出去又拖回门槛以内的话，幽灵和带子得跟着收掉。
+        // 手还没挪够一个门槛 —— 这一下是「点」，不是「拖」：几个位移一起退回按下那一刻的样子，
+        // 松手时 Settle 里的守卫于是全都拦得住（不会因为 1px 手抖把一个抢拍的音吸回格线）。
+        // 退出前照样喊一声重画：拖出去又拖回门槛以内的话，幽灵和带子得跟着收掉
         if (!PianoRollGeometry.ExceedsDragThreshold(
                 point.X - _pressPoint.X, point.Y - _pressPoint.Y))
         {
@@ -652,8 +509,7 @@ public sealed class PianoRollLane : Control
             _pitchDelta = 0;
             _marqueeEnd = _marqueeStart;
 
-            // 划段这一支也要退回去：拖出去又拖回门槛以内的话，留着的那一段得跟着收成零宽
-            //（不退的话，「抽掉」会照着一个手已经收回来的宽度剪下去）
+            // 划段这一支也要退回去，留着的话「抽掉」会照着一个手已经收回来的宽度剪下去
             if (_drag == DragKind.Cut)
             {
                 _cutEnd = _cutStart;
@@ -673,10 +529,7 @@ public sealed class PianoRollLane : Control
         {
             case DragKind.Move:
             {
-                // 吸附**相对锚音原来的位置**算，不是相对「鼠标挪了几格」：
-                // 一个本来就离格的音（抢拍），第一次拖动会被吸回最近的格线上 ——
-                // 那正是吸附的意思。按鼠标位移算的话，它永远只能整格地挪，
-                // 抢的那一点永远修不掉。
+                // 吸附相对锚音原来的位置算：一个抢拍的音第一次拖动会被吸回最近的格线
                 long start = PianoRollGeometry.SnapToGrid(_anchorStart + moved, grid);
                 long delta = start - _anchorStart;
                 int pitch = PianoRollGeometry.PitchAtY(viewport, point.Y) - _pressPitch;
@@ -691,9 +544,7 @@ public sealed class PianoRollLane : Control
 
             case DragKind.ResizeTail:
             {
-                // 只改时值，起点钉住。吸的是**时值**，不是尾巴的绝对位置：
-                // 一个抢拍的音，尾巴本来就落在半格上，吸绝对位置会把它拽回格线 ——
-                // 用户只是想把这一段拉长一点，没打算顺手把抢的那一点抹平。
+                // 只改时值、起点钉住；吸的是时值不是尾巴的绝对位置，否则一个抢拍的音会被拽回格线
                 long length = PianoRollGeometry.SnapToGrid(_anchorLength + moved, grid);
                 if (length < grid) length = grid;   // 时值最小一格
 
@@ -704,13 +555,11 @@ public sealed class PianoRollLane : Control
 
             case DragKind.ResizeHead:
             {
-                // 起点和时值一起改，**尾巴钉住**：新起点 + 新时值 == 老尾巴。
-                // 不钉住的话，拉左边会把这个音整体挪走，而用户要的是「它从哪儿开始响」。
+                // 起点和时值一起改、尾巴钉住：新起点 + 新时值 == 老尾巴
                 long tail = _anchorStart + _anchorLength;
                 long start = PianoRollGeometry.SnapToGrid(_anchorStart + moved, grid);
 
-                // 最多拉到尾巴前一格（给「时值至少一格」留位置），最少到谱面开头 ——
-                // 负 tick 在谱面上不存在，这么夹出来的结果和命令的夹法是一致的
+                // 最多拉到尾巴前一格（给「时值至少一格」留位置），最少到谱面开头 —— 负 tick 不存在
                 if (start > tail - grid) start = tail - grid;
                 if (start < 0) start = 0;
 
@@ -720,17 +569,13 @@ public sealed class PianoRollLane : Control
             }
 
             case DragKind.Marquee:
-                // 框选**不吸附**：框说的是「我框到哪儿了」，而看不看得见格线是另一回事
-                //（十六分的格线压根没画，见 PianoRollGeometry.GridTicks 的说明）。
-                // 吸附一下反而会让「框住的那个音」和画出来的框对不上，那才是真的没法用。
+                // 框选不吸附：框说的是「我框到哪儿了」，吸附会让框住的音和画出来的框对不上
                 _marqueeEnd = rawTick;
                 break;
 
             case DragKind.Cut:
             {
-                // 划段**要吸附**，和框选正相反：这一段是要交给命令的（剪掉多少 tick 就是多少），
-                // 「更精准的切割」正是用户要的那件事。两端都吸到十六分格上，
-                // 于是拖出来的边界一定落在和拖音符同一套格线上 —— 剪完之后的音还在拍上。
+                // 划段要吸附（和框选正相反）：这一段要交给命令，两端吸到十六分格上，剪完之后的音还在拍上
                 var span = PianoRollGeometry.SpanOf(_pressTick, rawTick, grid);
                 if (span is { } cut) (_cutStart, _cutEnd) = (cut.Start, cut.End);
                 else _cutEnd = _cutStart;   // 还没挪过半格：这一段是空的
@@ -747,12 +592,8 @@ public sealed class PianoRollLane : Control
     }
 
     /// <summary>
-    /// 把整组的位移夹到合法范围内。
-    ///
-    /// 为什么界面这一层要算一遍：预览要是画到命令去不了的地方，松手那一下整块会跳回来一次。
-    /// 算法本身不在这儿 —— 它在 <see cref="PianoRollController.ClampMoveDelta"/>，
-    /// 和命令那边的「整组一起夹」是同一份（方向键微调也要用，抄三份迟早走样）。
-    /// 「拖动中不碰命令」仍然是这一片的地基（见类注释）：这里调的是控制器的纯换算，不是编辑命令。
+    /// 把整组的位移夹到合法范围内 —— 预览画到命令去不了的地方，松手那一下整块会跳回来。
+    /// 算法在 <see cref="PianoRollController.ClampMoveDelta"/>，和命令那边是同一份。
     /// </summary>
     private void ClampMove(PianoRollController controller, ref long deltaTicks, ref int deltaPitch)
     {
@@ -762,16 +603,9 @@ public sealed class PianoRollLane : Control
     }
 
     /// <summary>
-    /// 把这一次拖动结算成一条明确的编辑意图。
-    ///
-    /// **一次拖动只发一次事件**（不是每帧一次）：命令那边一次命令 = 撤销栈上的一格，
-    /// 拖一下记几百格的话，用户按 Ctrl+Z 得按到手酸。
-    ///
+    /// 把这一次拖动结算成一条明确的编辑意图。一次拖动只发一次事件（命令那边一次命令 = 撤销栈上一格）；
     /// 位移是 0 的什么都不发 —— 那一次改的只是选中，而选中在按下的那一刻就已经改完了。
-    ///
-    /// **下面三个守卫看的是位移，不是手挪了多远**，所以「点击不会变成编辑」这件事
-    /// 靠的是 <see cref="UpdateDrag"/> 开头那道像素门槛：手没挪够，位移就一直是 0。
-    /// 别把守卫当成「抖动保护」—— 一个抢拍的音，手不动也能有非零位移（见 DragThresholdPixels）。
+    /// 下面几个守卫看的是位移不是手挪了多远，「点击不会变成编辑」靠的是 <see cref="UpdateDrag"/> 开头那道像素门槛。
     /// </summary>
     private void Settle(DragKind kind)
     {
@@ -780,12 +614,10 @@ public sealed class PianoRollLane : Control
         double marqueeStart = _marqueeStart, marqueeEnd = _marqueeEnd;
         var anchor = _anchor;
         long anchorStart = _anchorStart, anchorLength = _anchorLength;
-        // 要挪的那组先拷出来，**必须在 ResetDrag 之前**：它清的就是 _group，
-        // 清完再取就是把一条「挪 0 个音」的命令发出去
+        // 要挪的那组必须在 ResetDrag 之前拷出来 —— 它清的就是 _group
         var group = _group.ToArray();
 
-        // 幽灵和带子先收掉：谱面要么没变（点击），要么马上要变，两种都不该继续画「将要发生」。
-        // 顺手把状态清零 —— 下面这几条命令之间窗口会重画，重画时读到的必须已经是「没在拖」
+        // 幽灵和带子先收掉，状态一并清零 —— 下面几条命令之间窗口会重画，那时读到的必须是「没在拖」
         ResetDrag();
         RaisePreviewChanged();
 
@@ -795,9 +627,7 @@ public sealed class PianoRollLane : Control
         switch (kind)
         {
             case DragKind.Move when startDelta != 0 || pitchDelta != 0:
-                // 快照一份交给窗口：窗口收到它之后会重建控制器，而 `_group` 是这条控件的活字段 ——
-                // 重建那一趟里它可能被下一次按下清掉。从前的理由还有一条「窗口要重新算选中集」，
-                // 31 号工单之后没有这回事了（坐标按身份寻址，命令跑完照样指着同一批音）。
+                // 快照一份交给窗口：窗口收到它之后会重建控制器，而 _group 是这条控件的活字段，那一趟里可能被清掉
                 NotesMoved?.Invoke(this, new NoteMoveRequest(group, startDelta, pitchDelta));
                 break;
 
@@ -811,51 +641,24 @@ public sealed class PianoRollLane : Control
                 long from = (long)Math.Round(Math.Min(marqueeStart, marqueeEnd));
                 long to = (long)Math.Round(Math.Max(marqueeStart, marqueeEnd));
 
-                // 区间左闭右开，且 end <= start 就是空区间 —— 见 NotesInRange 的说明。
-                // 于是「点了下空白」这一次零长度的手势一个音都框不到，而选中集在按下那一刻
-                // 已经清空了，这一次手势于是什么都不做（零长度由 UpdateDrag 的像素门槛保着）。
-                //
-                // **框住只选中，不删。** 19 之前这里是「松手就删」：那个手势没法反悔着调
-                //（框多了只能 Ctrl+Z 整批还回来，还得重新框一遍），而「框住 = 选中」
-                // 才是这个手势在别处的意思。删是另一件事，绑在 Delete / Backspace 上，
-                // 在窗口那一侧（见 <c>MainWindow.DeleteSelection</c>）——
-                // 于是「框一批 → 看一眼 → 删」这条路走得通，「框错了 → 松开手 → 重框」也走得通。
-                //
-                // 顺手补上了多选的第二条路：从前能堆出两个以上选中音的**只有** Shift + 点
-                //（见 OnPointerPressed 的 Body 一支），框选补上正好。
-                //
-                // 仍然**不分音高**：区间只按时间命中（NotesInRange 只认 startTick，纵向拖多高
-                // 结果都一样）。这是现状，这张工单不改。
+                // 区间左闭右开，end <= start 就是空区间（见 NotesInRange 的说明）：零长度的手势一个音都框不到，
+                // 而选中集在按下那一刻已经清空了，于是这一次手势什么都不做。
+                // 框住只选中、不删（删在窗口那侧绑 Delete / Backspace），而且不分音高 —— 区间只按时间命中
                 controller.SetSelection(controller.NotesInRange(TrackIndex, from, to));
                 RaiseSelectionChanged();
                 break;
             }
 
-            // 划段**结算成什么也不发**：那一段已经落在 _cutStart/_cutEnd 上了，
-            // 上面 ResetDrag 不动它们，于是红带子照旧画着、轨道头上那句预览照旧算着。
-            // 真要动谱面的是「抽掉」那颗按钮（它读 Roll.CutRange 发 CutRangeRequest）——
-            // 松手只是把这一段定下来给用户看一眼，这一步**一个撤销格子都不该记**。
+            // 划段结算成什么也不发：那一段已经落在 _cutStart/_cutEnd 上了，动谱面的是「抽掉」那颗按钮
             case DragKind.Cut:
                 break;
         }
     }
 
     /// <summary>
-    /// 这次拖动作废：什么都不提交，把预览和状态一起收掉。
-    ///
-    /// **外面也要用**：窗口每次编辑都会换一份曲子，而这条轨是就地重挂的（不是重建控件）。
-    /// 手上这一份快照（<c>_group</c>、幽灵身份、框选区间）虽然**按身份讲在新曲子上照样成立**，
-    /// 这一次手势本身还是得作废：它是照着旧谱面上的那一帧算出来的，而位移的基准
-    /// （<c>_anchorStart</c>、按下时的 tick）没有跟着新曲子重算 ——
-    /// 接着拖下去，结算出来的会是一条尺寸对不上的命令。
-    /// 另外框选那一段也是 tick，编辑会让它框到另一批音上去。
-    ///
-    /// （从前这里的理由是「快照指的全是旧曲子上的下标」—— 下标那一半随着
-    /// 31 号工单的按身份寻址一起没了，但「这次手势作废」这件事没变。）
-    ///
-    /// **划段那一次按「作废」处理，不是「留着刚划到的宽度」**：捕获丢了谁也不知道
-    /// 用户本来要划到哪儿，那一段收成零宽（= 没划），轨道头上那句预览跟着说回「先拖一段」。
-    /// 编好的那一段（上一次松手定下来的）本来就是这么被覆盖掉的，和按下去那一下同一个结果。
+    /// 这次拖动作废：什么都不提交，把预览和状态一起收掉。窗口每次编辑（就地重挂）也会来收一遍 ——
+    /// 手上的位移基准没有跟着新曲子重算，接着拖会结算出一条尺寸对不上的命令。
+    /// 划段那一次按「作废」处理，那一段收成零宽。
     /// </summary>
     public void CancelDrag()
     {
@@ -875,11 +678,8 @@ public sealed class PianoRollLane : Control
     }
 
     /// <summary>
-    /// 拖动状态清零（预览、寄存器、快照）。<c>_drag</c> 也一起回到 None。
-    ///
-    /// **不碰 <c>_cutArmed</c> / <c>_cutStart</c> / <c>_cutEnd</c>**：那三个不是「这一次拖动」
-    /// 的状态，是「抽掉一段」那一问的状态 —— 松手、作废、重挂都不该把它划好的那一段抹掉，
-    /// 收掉它的是 <see cref="DisarmCut"/>。
+    /// 拖动状态清零（预览、寄存器、快照），<c>_drag</c> 也一起回到 None。
+    /// 不碰 <c>_cutArmed</c> / <c>_cutStart</c> / <c>_cutEnd</c> —— 那是「抽掉一段」那一问的状态，由 <see cref="DisarmCut"/> 收。
     /// </summary>
     private void ResetDrag()
     {
@@ -903,11 +703,7 @@ public sealed class PianoRollLane : Control
     // ==================== 光标与悬停 ====================
 
     /// <summary>
-    /// 光标说实话：头尾给横向拉伸的箭头（那两处只改时值），身体给能抓的手型
-    /// （拖得动，时间和音高两个方向），空白给默认箭头（那儿只能框选，
-    /// 框选是个「划一下」的动作，用不着一个专门的手型来许诺什么）。
-    ///
-    /// Avalonia 没有真正的「抓起」光标（CSS 的 <c>grab</c>），手型是最接近的一个。
+    /// 光标按命中位置换：头尾给横向拉伸的箭头（那两处只改时值），身体给能抓的手型，空白给默认箭头。
     /// </summary>
     private void UpdateCursor(PianoRollGeometry.RollHit hit)
     {
@@ -956,10 +752,8 @@ public sealed class PianoRollLane : Control
     private static void DrawNote(
         DrawingContext context, TokenPalette palette, PianoRollGeometry.NoteBox box, bool selected)
     {
-        // 超出可演奏范围的音标灰（判据来自 NoteMapper，见 PianoRollController）：
-        // 填 ink-faint —— 它和 note 一样是「实心块」的材质，但比四周的网格线还淡，
-        // 一眼就是「这块点不动」。顶边挑 line 而不是 note-edge：后者是正常音符的
-        // 亮边颜色，压在灰块上会让灰音重新长出高光，两种音就看不出区别了。
+        // 超出可演奏范围的音标灰（判据来自 NoteMapper）：填 ink-faint，顶边挑 line 而不是 note-edge，
+        // 否则灰音会重新长出正常音符的亮边，两种音就看不出区别了
         var fill = box.InRange ? palette.Note : palette.InkFaint;
         var edge = box.InRange ? palette.NoteEdge : palette.Line;
 
@@ -967,9 +761,7 @@ public sealed class PianoRollLane : Control
         context.FillRectangle(new ImmutableSolidColorBrush(fill), rect);
         context.FillRectangle(new ImmutableSolidColorBrush(edge), new Rect(box.X, box.Y, box.Width, 1));
 
-        // 选中的那些：一圈 accent 细边，**组里每一个都描**。
-        // 没有它，框选出来的那一组只有主选中（读数条上那个）看着像选中了，
-        // 而拖起来整组一起动 —— 用户没法预料到底会动几个。
+        // 选中的那些：一圈 accent 细边，组里每一个都描 —— 拖起来是整组一起动，只描一个看不出会动几个
         if (selected)
         {
             context.DrawRectangle(
@@ -979,11 +771,9 @@ public sealed class PianoRollLane : Control
     }
 
     /// <summary>
-    /// 拖动中的幽灵：**只描边、不填色**，而且描的是虚线。
-    ///
-    /// 不填色是因为它常常压在别的音（甚至它自己原来那一块）上面 ——
-    /// 填一层实色就等于把底下那块盖掉，而「从哪儿挪到哪儿」正是要看这两块的关系。
-    /// 虚线则是「还不作数」的记号：谱面一个字节都没变，松手之后它才真的落到那儿。
+    /// 拖动中的幽灵：只描边、不填色，而且描的是虚线。
+    /// 不填色是因为它常常压在别的音（甚至它自己原来那一块）上面，填实色就把底下那块盖掉了，
+    /// 而「从哪儿挪到哪儿」正要看这两块的关系。
     /// </summary>
     private static void DrawGhost(
         DrawingContext context, TokenPalette palette, PianoRollGeometry.NoteBox box)
@@ -994,18 +784,8 @@ public sealed class PianoRollLane : Control
     }
 
     /// <summary>
-    /// 框选那根带子。照 wireframe 的 <c>.rangebar</c>：**整条轨那么高**（纵向从标尺下沿到底），
-    /// 底色 accent-soft、左右两条边是 accent。
-    ///
-    /// 纵向铺满是必须的：它会删掉这一段里的所有音，与音高无关 —— 画矮了就是在撒谎
-    /// （只盖住两行的框，凭什么删掉第三行的音）。
-    ///
-    /// 为什么带子是**实底**、幽灵是虚线：两者说的不是一件事。
-    /// 虚线（幽灵）说的是「还不作数，松手才变」；带子说的是「我框住了这一段」——
-    /// 框在手上是真的，用户正盯着里面那几个音决定要不要松手。
-    /// 填色用的是 accent-soft 补一层透明度（wireframe 的 <c>opacity:.7</c>）：
-    /// 令牌是实色，透明度在画的时候配 —— 和 <c>RollNavStrip.WithAlpha</c> 一个做法，
-    /// **不是颜色字面值**（基色仍然只从令牌来）。不补这层透明、实心填满，就把框里的音盖掉了。
+    /// 框选那根带子，照 wireframe 的 <c>.rangebar</c>：整条轨那么高（纵向从标尺下沿到底），底色 accent-soft。
+    /// 纵向铺满是因为它框住的是这一段里的所有音，与音高无关；实底区别于幽灵的虚线，说的是「我框住了这一段」。
     /// </summary>
     private static void DrawMarquee(
         DrawingContext context, TokenPalette palette, PianoRollPresenter.MarqueeRect? marquee)
@@ -1016,8 +796,7 @@ public sealed class PianoRollLane : Control
             new ImmutableSolidColorBrush(WithAlpha(palette.AccentSoft, MarqueeOpacity)),
             new Rect(band.X, band.Y, band.Width, band.Height));
 
-        // 左右两条边（wireframe 的 border-inline）。偏 0.5px 落在带的里侧：
-        // 画在正边界上的话，这 1px 会把带子往两边各撑出去一点，和框住的那段就对不上了
+        // 左右两条边；偏 0.5px 落在带的里侧，画在正边界上的话带子会比框住的那段宽出 1px
         var pen = new Pen(new ImmutableSolidColorBrush(palette.Accent), 1);
         double top = band.Y, bottom = band.Y + band.Height;
         context.DrawLine(pen, new Point(band.X + 0.5, top), new Point(band.X + 0.5, bottom));
@@ -1025,28 +804,17 @@ public sealed class PianoRollLane : Control
         context.DrawLine(pen, new Point(right, top), new Point(right, bottom));
     }
 
-    /// <summary>给令牌色配一个透明度。**不是颜色字面值** —— 基色仍然只从令牌来（同 RollNavStrip）。</summary>
+    /// <summary>给令牌色配一个透明度。基色仍然只从令牌来（同 RollNavStrip）。</summary>
     private static Color WithAlpha(Color color, double alpha)
         => Color.FromArgb((byte)Math.Round(alpha * 255), color.R, color.G, color.B);
 
-    /// <summary>红带子那两条竖边的宽度（像素）。比框选那根粗一倍 —— 见 DrawCutBand。</summary>
+    /// <summary>红带子那两条竖边的宽度（像素），比框选那根粗一倍 —— 见 <see cref="DrawCutBand"/>。</summary>
     private const double CutEdgeWidth = 2;
 
     /// <summary>
-    /// 「抽掉一段」正划着的那一段：**红色**的带子，形状和框选那根一模一样
-    /// （整条轨那么高、左右两条竖边，同一个 <c>MarqueeOf</c> 算出来的像素）。
-    ///
-    /// <b>为什么是红的，而且必须是红的。</b>蓝的那根（<c>AccentSoft</c>）说的是「选中了这一段，
-    /// 留着」；这一根说的是「这一段会**消失**」—— 意思正好相反，画成一个样子，
-    /// 用户按「抽掉」之前那一眼就白看了。颜色只从令牌来：底 <c>StopSoft</c>、边 <c>Stop</c>，
-    /// 就是播放头红线和「删掉这条轨」那个按钮用的同一档（26 条令牌里没有新增一条）。
-    ///
-    /// 边比框选那根粗一倍（2px 对 1px）：红带子多半比框选那根窄得多（十六分一格，
-    /// 一屏 4 小节下只有十几个像素），1px 的边在那么窄的一条上就吃掉大半宽度，
-    /// 看着像一个实心红块而不是「从这儿到那儿」。
-    ///
-    /// 纵向一样铺满是必须的：剪的是这段时间里的**所有**音，与音高无关 ——
-    /// 画矮了就是在撒谎（只盖住两行的带子，凭什么剪掉第三行的音）。
+    /// 「抽掉一段」正划着的那一段：红色的带子，形状和框选那根一模一样（同一个 <c>MarqueeOf</c> 算出来的像素）。
+    /// 红的是令牌里的 <c>StopSoft</c> / <c>Stop</c>，说的是「这一段会消失」，和蓝色的「选中了这一段」正好相反。
+    /// 边比框选那根粗一倍（2px 对 1px）：红带子多半窄得多，1px 的边在那么窄的一条上会吃掉大半宽度。
     /// </summary>
     private static void DrawCutBand(
         DrawingContext context, TokenPalette palette, PianoRollPresenter.MarqueeRect? band)
@@ -1059,7 +827,7 @@ public sealed class PianoRollLane : Control
 
         var pen = new Pen(new ImmutableSolidColorBrush(palette.Stop), CutEdgeWidth);
         double top = cut.Y, bottom = cut.Y + cut.Height;
-        // 和框选那根同一个偏法：边画在带的**里侧**，带子不会比划出来的那一段宽出 1px
+        // 和框选那根同一个偏法：边画在带的里侧，带子不会比划出来的那一段宽
         context.DrawLine(pen, new Point(cut.X + 1, top), new Point(cut.X + 1, bottom));
         double right = cut.X + cut.Width - 1;
         context.DrawLine(pen, new Point(right, top), new Point(right, bottom));
@@ -1068,15 +836,9 @@ public sealed class PianoRollLane : Control
     private static void DrawRulerLabels(
         DrawingContext context, TokenPalette palette, PianoRollPresenter.LaneScene scene)
     {
-        // 颜色从 InkFaint（最浅的那档灰）提到 Ink：标尺上的数字是**读数**，不是背景装饰，
-        // 它没必要跟网格线、灰掉的音去抢那几档浅色。深浅两套主题下 Ink 都是正文那一档，跟着主题走。
+        // 颜色用 Ink（正文那一档）：刻度数字是读数，不必跟网格线去抢那几档浅色
         var brush = new ImmutableSolidColorBrush(palette.Ink);
-        // 刻度数字不追字体令牌：自绘这层的取色桥只送颜色，字体归 XAML 那一层。
-        // 一两位数字的等宽与否，看不出差别。
-        //
-        // 字重**加粗**：小字号下细体的笔画在低分屏上会糊掉半个像素，
-        // 这是「看不清」三样里最不起眼、但少它就不够的一样。
-        // 只加粗、不换字族 —— 字族一换，数字的宽度和对齐都跟着变，而标尺的落点是按字符宽估的。
+        // 字重加粗、不换字族：小字号下细体会糊掉，而换字族会让数字宽度和对齐都变（落点是按字符宽估的）
         var typeface = new Typeface(Typeface.Default.FontFamily, FontStyle.Normal, FontWeight.Bold);
 
         foreach (var label in scene.BarLabels)
@@ -1103,25 +865,13 @@ public sealed class PianoRollLane : Control
 }
 
 /// <summary>
-/// 用户把选中的一组音拖到了别处。<b>参数是整组 + 一个共同的位移</b>（增量，不是目标位置）——
-/// 一组音保住彼此的相对关系，只有「都挪这么远」说得清（和 <c>ISongEditor.MoveNotes</c> 一个形状）。
-///
-/// <see cref="Notes"/> 是一份**快照**：卷帘那边交出来的是它自己的活字段（<c>_group</c>），
-/// 而窗口处理这条命令时会重建控制器 —— 那一趟里下一次按下的手势会把那个字段清掉，
-/// 不拷一份的话，命令可能读到一半就变了。（从前这里还写着「窗口要重新算选中集」，
-/// 那是按值认音那套镜像的活，31 号工单之后没有了：坐标按身份寻址，命令跑完照样指着同一批音。）
-///
-/// 放在命名空间这一层、而不是嵌在 <see cref="PianoRollLane"/> 里：卷帘和轨头**两边都要**喊这条
-/// （<see cref="TrackLaneView.NotesMoved"/> 转发的是同一条），嵌在其中一个里面，
-/// 另一个的事件签名就得写成 <c>PianoRollLane.NoteMoveRequest</c> —— 同一条契约在两个类之间来回指。
+/// 用户把选中的一组音拖到了别处。参数是整组 + 一个共同的位移（增量，不是目标位置）。
+/// <see cref="Notes"/> 是一份快照：卷帘交出来的是它自己的活字段，而窗口处理这条命令时会重建控制器。
 /// </summary>
 public sealed record NoteMoveRequest(IReadOnlyList<NoteRef> Notes, long DeltaTicks, int DeltaPitch);
 
 /// <summary>
-/// 用户把一个音的边缘拖到了别处。收的是**绝对位置**（目标起点 + 目标时值），
-/// 不是增量：拖边缘时尾巴（或起点）是钉住的，界面已经算出目标了，
-/// 让命令再推一遍反而是两处各算一次。
-///
-/// 和 <see cref="NoteMoveRequest"/> 一样放在命名空间这一层，理由见那边。
+/// 用户把一个音的边缘拖到了别处。收的是绝对位置（目标起点 + 目标时值），不是增量 ——
+/// 拖边缘时尾巴（或起点）是钉住的，界面已经算出目标了。
 /// </summary>
 public sealed record NoteResizeRequest(NoteRef Note, long StartTick, long LengthTicks);

@@ -4,13 +4,8 @@ using MidiPerformer.Core.Ports.Outbound;
 namespace MidiPerformer.Adapters.Gateways;
 
 /// <summary>
-/// <see cref="IClock"/> 的真实实现 —— 系统单调时钟。
-///
-/// 用 <see cref="Stopwatch"/> 而不是 <c>DateTime.Now</c>：后者会被对时 / NTP / 夏令时
-/// 往回拨，而 <c>SongWalker</c> 的积分假定时刻单调不减，倒退一下播放头就跟着倒退。
-/// <c>Stopwatch</c> 底层是 QPC，只增不减。
-///
-/// 构造即起表：整个程序共用一个原点，符合端口「同一次运行里只有一个原点」的要求。
+/// <see cref="IClock"/> 的真实实现：构造即起表的系统单调时钟，底层是 <see cref="Stopwatch"/>。
+/// 它只增不减，而 <c>DateTime.Now</c> 会被对时往回拨，播放头也会跟着倒退。
 /// </summary>
 public sealed class SystemClock : IClock
 {

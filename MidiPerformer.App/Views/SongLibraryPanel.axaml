@@ -2,40 +2,23 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              x:Class="MidiPerformer.App.Views.SongLibraryPanel">
   <!--
-    歌曲库：一份列表，40 号工单之后**住在 SongLibraryWindow 里**（从前是主窗口左边那一条，
-    docs/wireframe.html 的 <aside class="lib">）。
+    歌曲库：一份列表，住在 SongLibraryWindow 里。
 
-    房子和家具分开：**这个文件只管「长什么样」，窗口只管「摆在哪、多大」** ——
-    面板自己不知道外面是侧栏还是窗口，所以从侧栏搬进窗口时它一行都没改
-    （只有根上那道右边框撤了，见下）。列表的行是**代码建的**
+    这个文件只管「长什么样」，窗口只管「摆在哪、多大」。列表的行是代码建的
     （曲名 + 改过没改过 + 删除），见 SongLibraryPanel.axaml.cs。
 
-    三块里的两块：标题（「歌曲库」+ 几首）、列表。原来底下还有一句脚注
-    （「导入的曲子存进这个文件夹…」），10 号那条切片把它删了 —— 曲库在哪儿、改名就是改文件名，
-    都是用户点一次「导入」就明白的事，不必常年占着两行。
-    标题这一行在窗口里和窗口自己的标题栏重了一次，留着是因为**「N 首」得有地方待** ——
-    它是这份列表唯一的汇总读数，为了不重复三个字把它砍掉不值。
-
-    底色 / 边框 / 每一行的 hover 与选中态，全部取令牌，这里没有一个颜色字面值。
-    列表用的是 ListBox：Controls.axaml 里那两条 ListBoxItem 规则（透明边框 + hover 换
-    surface-3 + 选中 accent-soft / accent-line / 加粗）就是照着 wireframe 的 .song 写的，
-    选中态、键盘上下键、滚动都不用自己再实现一遍。
-
-    列表自己的底色和边框在这儿被按掉（wireframe 的 .songlist 是一张白纸，不是个框）——
-    面板已经是 surface-2 了，再套一个同色的框只会多出一圈线。
+    两块：标题（「歌曲库」+「N 首」）、列表。「N 首」是这份列表唯一的汇总读数。
+    底色 / 边框 / 每一行的 hover 与选中态全部取令牌。列表用 ListBox —— 选中态、
+    键盘上下键、滚动都不用自己再实现一遍；它自己的底色和边框在这儿被按掉（面板已经是
+    surface-2，再套一个同色的框只会多出一圈线）。
   -->
   <UserControl.Styles>
     <!--
       一行的曲名：占满剩下的宽度，名字太长就省略号（wireframe 的 .song .nm）。
 
-      Background 取透明是**为了让这一格真的能被鼠标碰到**：不设底色的 TextBlock 只在字身上
-      接得到鼠标，而这一格要一件事 —— 悬停出 ToolTip（看被省略号吃掉的完整曲名）。
-      透明底把整格都变成它的地盘，鼠标落在「字与字之间的空隙」里也能看见提示，
-      而不是只有指到笔画上才弹。
-
-      **Cursor 是默认箭头，不是 IBeam**（32 号工单改回来的）：这一格从前点一下就进改名，
-      于是光标做成 IBeam 承诺「这儿可以打字」。现在点它只是选中这一行、双击打开这一首，
-      IBeam 就成了空头支票 —— 光标形状是这一格唯一还会说话的地方，不能让它说谎。
+      Background 取透明是为了让这一格真的能被鼠标碰到：不设底色的 TextBlock 只在字身上接得到
+      鼠标，而这一格要悬停出 ToolTip（看被省略号吃掉的完整曲名）。
+      Cursor 是默认箭头而不是 IBeam：点它只是选中这一行、双击打开这一首，不是「这儿可以打字」。
     -->
     <Style Selector="TextBlock.song-name">
       <Setter Property="VerticalAlignment" Value="Center" />
@@ -43,30 +26,22 @@
       <Setter Property="Background" Value="Transparent" />
     </Style>
 
-    <!--
-      曲名右边那格小字（wireframe 的 .song .mt 那个位置）。
-      那儿画的是时长，这儿画「改过 / 没动过」—— 见 .axaml.cs 里的说明。
-    -->
+    <!-- 曲名右边那格小字（wireframe 的 .song .mt 那个位置）：那儿画的是时长，这儿画「改过 / 没动过」。 -->
     <Style Selector="TextBlock.song-meta">
       <Setter Property="FontSize" Value="11" />
       <Setter Property="Foreground" Value="{DynamicResource TokenInkFaint}" />
       <Setter Property="VerticalAlignment" Value="Center" />
     </Style>
 
-    <!-- 读不出来的那份：这一格换成 warn 色，一眼看得出这份工程有问题 -->
+    <!-- 读不出来的那份：换成 warn 色 -->
     <Style Selector="TextBlock.song-meta.bad">
       <Setter Property="Foreground" Value="{DynamicResource TokenWarn}" />
     </Style>
 
     <!--
-      行里剩下的那一个小动作（删除）。改名既不是一颗按钮、也不在行里 ——
-      32 号之后它只剩顶栏「歌曲名」那一格（改的是当前开着的那首），这个列表里
-      点名字只是选中、双击打开。
-
-      wireframe 里删除是**悬停才显形**的（.song .del{opacity:0}），这里改成**一直在、
-      只是很淡**：这条切片没有能自动点一遍界面的测试，一个平时看不见的按钮，
-      写错了也没人会发现（它是真的没了还是只是没悬停？）。淡色的代价是列表看着热闹一点，
-      换成「按钮其实不在」的代价更大。
+      行里剩下的那一个小动作（删除）。改名只剩顶栏「歌曲名」那一格。
+      删除一直在、只是很淡（wireframe 里是悬停才显形）：平时看不见的按钮写错了也没人会
+      发现，而它到底是没了还是只是没悬停，看的人也分不出来。
     -->
     <Style Selector="Button.row-action">
       <Setter Property="Background" Value="Transparent" />
@@ -78,11 +53,7 @@
       <Setter Property="Foreground" Value="{DynamicResource TokenInkFaint}" />
     </Style>
 
-    <!--
-      删除那一颗：字号大一号当 × 用，颜色交给 Controls.axaml 的 Button.danger
-      （类名在代码里加，就是那条「危险：删轨 / 删曲子」）—— 悬停时变 warn 色，
-      和 wireframe 的 .song .del:hover 一个意思，不在这儿再抄一遍。
-    -->
+    <!-- 删除那一颗：字号大一号当 × 用，颜色交给 Controls.axaml 的 Button.danger（悬停时变 warn 色）。 -->
     <Style Selector="Button.row-action.del">
       <Setter Property="FontSize" Value="14" />
       <Setter Property="Padding" Value="5,0" />
@@ -99,11 +70,7 @@
     </Style>
   </UserControl.Styles>
 
-  <!--
-    底色照旧是 surface-2（比窗口底**深**一层，列表浮在上面）。
-    **右边那道 1px 竖线撤了**：它是「我是一条侧栏、右边是卷帘」的边界线，
-    搬进窗口之后右边没有邻居，留着就是凭空一条线。
-  -->
+  <!-- 底色是 surface-2（比窗口底深一层，列表浮在上面）。右边那道 1px 竖线撤了 —— 搬进窗口之后右边没有邻居。 -->
   <Border Background="{DynamicResource TokenSurface2}">
     <Grid RowDefinitions="Auto,*">
 

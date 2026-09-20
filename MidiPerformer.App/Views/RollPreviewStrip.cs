@@ -7,12 +7,8 @@ using MidiPerformer.App.Theme;
 namespace MidiPerformer.App.Views;
 
 /// <summary>
-/// 卷帘的缩影，纯代码画的 —— 轨道底色、小节/拍网格线、音符块、播放头红线。
-/// dev-only 样板窗口的一部分。
-///
-/// 画的是**卷帘真正要用的那几个令牌**（lane-a/b、grid-bar/beat、note/note-edge、stop），
-/// 所以它同时证明两件事：取色桥对这几个键取得到，以及这几个键在明暗两套下都看得清。
-/// 07 的卷帘是它的放大版，不是另起一套。
+/// 卷帘的缩影，纯代码画：轨道底色、小节/拍网格线、音符块、播放头红线。
+/// dev-only 样板窗口的一部分，用的是卷帘那几个取色令牌（lane-a/b、grid-bar/beat、note/note-edge、stop）。
 /// </summary>
 public sealed class RollPreviewStrip : Control
 {
@@ -23,10 +19,10 @@ public sealed class RollPreviewStrip : Control
     /// <summary>一个轨道放几个音高格。</summary>
     private const int PitchesPerLane = 10;
 
-    /// <summary>音高 0 落在轨道高度的这个位置上，剩下的高度留给更低的音。</summary>
+    /// <summary>音高 0 在轨道高度的这个比例处，其余高度留给更低的音。</summary>
     private const double BaselineFraction = 0.75;
 
-    /// <summary>每格放几个音，只是摆个样子 —— 样板窗口里的示例数据，不是真实曲目。</summary>
+    /// <summary>样板窗口的示例音符，不是真实曲目。</summary>
     private static readonly (int Lane, int Beat, int Step, int Length, int Pitch)[] Notes =
     {
         (0, 0, 0, 2, 0), (0, 0, 2, 2, 2), (0, 1, 0, 3, 4), (0, 1, 3, 1, 3),
@@ -56,8 +52,8 @@ public sealed class RollPreviewStrip : Control
         var laneHeight = Bounds.Height / Lanes;
         var beatWidth = Bounds.Width / (Bars * BeatsPerBar);
 
-        // 音高格铺在轨道顶到基线之间那一段，所以是 3/4 轨道高除以格数，
-        // 不是整条轨道高除以格数 —— 按后者算，负音高会从轨道底下探出去被裁掉半截。
+        // 音高格只铺在轨道顶到基线之间，所以格高按 3/4 轨道高算；
+        // 按整条轨道高算的话，负音高会探出轨道底被裁掉半截。
         var pitchHeight = laneHeight * BaselineFraction / PitchesPerLane;
         var baseline = laneHeight * BaselineFraction;
 
@@ -75,11 +71,7 @@ public sealed class RollPreviewStrip : Control
 
         foreach (var (lane, beat, step, length, pitch) in Notes)
         {
-            // 照 wireframe 的画法来：一块实心方块 + 顶边一条 1px 的亮线。
-            // 没有描边，也不倒圆角 —— wireframe 是
-            //   fillRect(nx, ny + .8, nw, ROW_H - 1.6)  实心块，上下各让 0.8
-            //   fillRect(nx, ny + .8, nw, 1)            顶边
-            // 之前画成四边带描边的圆角药丸，和它对不上，而 07 的卷帘是拿这个当模子的。
+            // 音符 = 实心块（上下各让 0.8px）+ 顶边 1px 亮线，不描边、不倒角。
             var x = (beat * BeatsPerBar + step) * beatWidth;
             var width = Math.Max(2, length * beatWidth - 1);
             var top = lane * laneHeight + baseline - (pitch + 1) * pitchHeight + 0.8;
@@ -91,7 +83,7 @@ public sealed class RollPreviewStrip : Control
                 new ImmutableSolidColorBrush(palette.NoteEdge), new Rect(x, top, width, 1));
         }
 
-        // 播放头：wireframe 里那根红线，压在音符上面
+        // 播放头，画在音符之上
         context.DrawLine(
             new Pen(new ImmutableSolidColorBrush(palette.Stop), 1.5),
             new Point(beatWidth * 6, 0),

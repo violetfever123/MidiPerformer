@@ -6,21 +6,13 @@ using MidiPerformer.Core.UseCases.Project;
 namespace MidiPerformer.App.SelfTest;
 
 /// <summary>
-/// 【开发用】纯逻辑自检：拿几条手写的边界语料跑 <see cref="EventBuilder.Build"/>，
-/// 断言事件表的关键不变量。
-///
-/// **为什么要有它**：exe 开 <c>PublishTrimmed</c>，裁剪会改变行为，而 NUnit 跑的是**没裁剪**的构建，
-/// 证明不了发布产物。只有真拿裁剪后的 exe 跑一次才算数 —— 这就是这个类的全部用途。
-/// 全量用例（S1–S4、对拍）在 MidiPerformer.Tests，这里只留几条冒烟用例，不重复那一千条。
-///
-/// 用法：设环境变量 <c>MIDIPERFORMER_SELFTEST=1</c> 启动程序，或在值里给一个报告文件路径：
-/// <c>MIDIPERFORMER_SELFTEST=E:\tmp\selftest.txt</c>；不给路径就写到
-/// <c>%TEMP%\midiperformer-selftest.txt</c>；报告一律 <c>.txt</c>（环境变量驱动的路径只在开发机上用，
-/// 别写出奇怪的后缀）。取值 <c>0</c> / <c>false</c> / <c>no</c> / <c>off</c> 等于没设，程序照常开窗。
-///
-/// 走这条路时程序**不创建窗口、不注册热键、不碰按键与 MIDI 设备**（只调 Core 里那几个纯函数），
-/// 跑完直接 <c>Environment.Exit</c>，退出码 0 = 全过，1 = 有用例失败。
-/// 外面由 <c>tools/run-selftest.ps1</c> 驱动，脚本按这份报告的 PASS / FAIL 行判定。
+/// 【开发用】纯逻辑自检：拿几条手写的边界语料跑 <see cref="EventBuilder.Build"/>，断言事件表的关键不变量。
+/// 全量用例在 MidiPerformer.Tests，这里只留几条冒烟，用来验裁剪后的发布产物（NUnit 跑的是没裁剪的构建）。
+/// 用法：设环境变量 <c>MIDIPERFORMER_SELFTEST=1</c> 启动程序，或在值里给一个报告文件路径
+/// （不给就写到 <c>%TEMP%\midiperformer-selftest.txt</c>，一律 <c>.txt</c>）；
+/// 取值 <c>0</c> / <c>false</c> / <c>no</c> / <c>off</c> 等于没设，程序照常开窗。
+/// 走这条路时不建窗口、不注册热键、不碰按键与 MIDI 设备，跑完直接 <c>Environment.Exit</c>，
+/// 退出码 0 = 全过，1 = 有用例失败，由 <c>tools/run-selftest.ps1</c> 按报告的 PASS / FAIL 行判定。
 /// </summary>
 internal static class PerformerSelfTest
 {
@@ -29,9 +21,8 @@ internal static class PerformerSelfTest
     private const string ReportName = "midiperformer-selftest.txt";
 
     /// <summary>
-    /// 裁剪时钉住的程序集（<c>TrimmerRootAssembly</c>）。
-    /// **与 MidiPerformer.App.csproj 里那份名单一一对应，改一边就得改另一边** ——
-    /// 这里是"裁剪到底有没有把它们留下来"的运行时一侧证据。
+    /// 裁剪时钉住的程序集（<c>TrimmerRootAssembly</c>），与 MidiPerformer.App.csproj 里那份名单
+    /// 一一对应，改一边就得改另一边；这里是"裁剪有没有把它们留下来"的运行时证据。
     /// </summary>
     private static readonly string[] PinnedAssemblies =
     {
@@ -42,7 +33,7 @@ internal static class PerformerSelfTest
         "Melanchall.DryWetMidi",
     };
 
-    /// <summary>三档时序各跑一遍。标准档是用例自己那条断言的档位，另两档只过不变量。</summary>
+    /// <summary>三档时序各跑一遍；标准档是用例自己那条断言的档位，另两档只过不变量。</summary>
     private static readonly InputTiming[] Timings =
         { InputTiming.Safe, InputTiming.Standard, InputTiming.Aggressive };
 
@@ -59,8 +50,8 @@ internal static class PerformerSelfTest
     }
 
     /// <summary>
-    /// 「明确关掉」的取值：0 / false / no / off（不分大小写）。
-    /// 与仓库其它开关的 <c>=="1"</c> 约定保持一致：设成 0 就是关掉，而不是"不建窗口直接退出"。
+    /// 「明确关掉」的取值：0 / false / no / off（不分大小写）。与仓库其它开关的 <c>=="1"</c>
+    /// 约定一致：设成 0 就是关掉，而不是"不建窗口直接退出"。
     /// </summary>
     private static bool IsOffValue(string value)
     {
@@ -85,7 +76,7 @@ internal static class PerformerSelfTest
         string value = Environment.GetEnvironmentVariable(EnvVar) ?? "";
         string custom = CustomPath(value);
         string path = custom.Length > 0 ? custom : Path.Combine(Path.GetTempPath(), ReportName);
-        // 报告一律写成 .txt：路径是给脚本 grep 的，别写出无从判断的后缀
+        // 报告一律写成 .txt：路径是给脚本 grep 的
         if (!path.EndsWith(".txt", StringComparison.OrdinalIgnoreCase))
             path = Path.Combine(Path.GetTempPath(), ReportName);
 
@@ -124,9 +115,9 @@ internal static class PerformerSelfTest
     }
 
     /// <summary>
-    /// 单文件发布时 <c>Assembly.Location</c> 是空串（程序集不再以文件形式存在），
-    /// 拿它当"这是不是发布产物"的判据。只写进报告，不做断言 —— 开发构建跑同一套自检也得过。
-    /// IL3000 是"别把 Location 当路径用"的裁剪告警，这里要的恰恰是它为空这件事，所以就地关掉。
+    /// 单文件发布时 <c>Assembly.Location</c> 是空串，拿它当"这是不是发布产物"的判据。
+    /// 只写进报告、不做断言 —— 开发构建跑同一套自检也得过。IL3000 是"别把 Location 当路径用"的
+    /// 裁剪告警，这里要的恰恰是它为空这件事。
     /// </summary>
     private static bool IsSingleFile()
     {
@@ -138,11 +129,10 @@ internal static class PerformerSelfTest
     // ================= 语料 =================
 
     /// <summary>一个冒烟用例：手搓的语料 + 建表起点 + 它自己那条断言。</summary>
-    /// <param name="Notes">映射后的音符。手搓，不读文件。</param>
+    /// <param name="Notes">映射后的音符，手搓，不读文件。</param>
     /// <param name="StartMods">建表起点（游戏侧当前的修饰键真实状态）。</param>
     /// <param name="SameInstantPacked">
-    /// 语料里含「同刻起音」：口琴是单音乐器，前音必须让位给后音，
-    /// <c>Build</c> 会把前音压到「跨过一帧」—— 所以这一例的按住时长下限是一帧，不是 MinHoldMs。
+    /// 语料里含「同刻起音」，前音被压到「跨过一帧」，所以这一例的按住时长下限是一帧而非 MinHoldMs。
     /// </param>
     /// <param name="Verify">这一例自己的断言，只跑标准档（免得同一句话在报告里出现三遍）。</param>
     private sealed record SmokeCase(
@@ -176,7 +166,7 @@ internal static class PerformerSelfTest
 
     /// <summary>
     /// 手写边界用例：空轨 / 同刻起音 / 连奏重叠 / 跨八度（修饰键）/ 升半音 / 同键重触发 /
-    /// 超范围空拍 / 起点残留。都在 spec 的 S3 边界清单里，只是**不搬 1000 条**过来。
+    /// 超范围空拍 / 起点残留。
     /// </summary>
     private static List<SmokeCase> Cases() => new()
     {
@@ -190,8 +180,8 @@ internal static class PerformerSelfTest
                 && r.Events[1].T > r.Events[0].T && Math.Abs(r.Events[1].T - 0.5) < 1e-9,
                 Dump(r))),
 
-        // 口琴是单音乐器：同刻起音本来只能吹响一个。靠"缩短前音"腾位置就会产生零时长按键，
-        // 游戏按帧采样时整段被吃掉 → 后音必须顺延，而不是把前音压没。
+        // 口琴是单音乐器，同刻起音只能吹响一个：靠缩短前音腾位置会产生零时长按键，
+        // 游戏按帧采样时整段被吃掉，所以后音顺延，而不是把前音压没。
         new("同刻起音（不同键）", new[] { N(1.0, 1.4, 'Z'), N(1.0, 1.4, 'C') }, EventBuilder.ModState.None, true,
             r => Check("同刻起音：后音顺延到前音之后（Z 松 → C 按，时间不重叠）",
                 r.Events.Count == 4
@@ -210,7 +200,7 @@ internal static class PerformerSelfTest
                 && r.Events[2].T >= r.Events[1].T,
                 Dump(r))),
 
-        // 跨八度走鼠标左右键：拖到旧实现里，这一簇会被挤进 20ms 内被游戏折成一帧 → 漏音。
+        // 跨八度走鼠标左右键
         new("跨八度（修饰键）",
             new[] { N(0, 0.3, 'Z', -1), N(0.4, 0.7, 'Z', 0), N(0.8, 1.1, 'Z', 1), N(1.2, 1.5, 'Z', 0) },
             EventBuilder.ModState.None, false,
@@ -237,8 +227,8 @@ internal static class PerformerSelfTest
                 && Downs(r, 'Z')[1] - Downs(r, 'Z')[0] >= TimeSpan.FromMilliseconds(r.Timing.RetriggerMs).TotalSeconds - 1e-9,
                 Dump(r))),
 
-        // 超范围音（移调后超出 MIDI 音域）在映射那一步就已经是空拍：Build 不过滤 InRange
-        //（过滤在派发侧），这里只保证空拍不会把后面的可演奏音带坏。
+        // 超范围音（移调后超出 MIDI 音域）在映射那一步就已经是空拍，Build 不过滤 InRange
+        //（过滤在派发侧）；这里只保证空拍不会把后面的可演奏音带坏。
         new("超范围空拍", new[] { N(0, 0.4, ' ', pitch: -1, inRange: false), N(0.5, 0.9, 'Z') },
             EventBuilder.ModState.None, false,
             r => Check("超范围：空拍之后的可演奏音仍按时按下",
@@ -246,7 +236,7 @@ internal static class PerformerSelfTest
                                   && Math.Abs(e.T - 0.5) < 1e-9),
                 Dump(r))),
 
-        // 上一轮中断残留：游戏侧还按着左右键。起点必须先把它们全松开，否则这一轮第一个音的八度是错的。
+        // 起点残留：游戏侧还按着左右键，起点必须先把它们全松开，否则第一个音的八度是错的
         new("起点残留（左右键都按着）", new[] { N(0, 0.3, 'Z') },
             new EventBuilder.ModState(true, true, false), false,
             r => Check("起点残留：先把左右键全部松开，再按音键",
@@ -271,14 +261,14 @@ internal static class PerformerSelfTest
         {
             foreach (var timing in Timings)
             {
-                // 每个用例、每档时序都用一个新建的 EventBuilder：它带 _physHeldKey 这类上一轮的状态，
-                // 复用同一个实例会让"起点残留"那一例的语料互相污染。
+                // 每个用例、每档时序都用新建的 EventBuilder：它带 _physHeldKey 这类上一轮的状态，
+                // 复用同一个实例会让语料互相污染。
                 var builder = new EventBuilder { Timing = timing };
                 var (events, total) = builder.Build(c.Notes, c.StartMods);
 
                 Inspect(c, timing, events, report);
 
-                // 用例自己那条断言只跑标准档（默认档，界面默认选的那一档）
+                // 用例自己那条断言只跑标准档
                 if (timing == InputTiming.Standard)
                 {
                     var run = new CaseRun(c.Name, timing, events, total, builder);
@@ -290,8 +280,7 @@ internal static class PerformerSelfTest
 
         Lines.Add("");
 
-        // 不变量按"条"汇总成一行 PASS / FAIL：9 个用例 × 3 档全过才给 PASS，
-        // 失败时明细里带得出是哪一例哪一档 —— 报告要短，也要能定位。
+        // 不变量按"条"汇总成一行 PASS / FAIL，失败时明细里带得出是哪一例哪一档
         Check("不变量：零时长按键为 0", report.ZeroLength.Count == 0, Detail(report.ZeroLength, $"{report.Presses} 次按下"));
         Check("不变量：每个按下都有配对的松开", report.Unpaired.Count == 0, Detail(report.Unpaired, $"{report.Presses} 次按下"));
         Check("不变量：修饰键先松后按，且比音键至少早一帧",
@@ -314,7 +303,7 @@ internal static class PerformerSelfTest
 
     // ================= 不变量 =================
 
-    /// <summary>一次自检里全部不变量违规与观测到的最小值（9 个用例 × 3 档时序累计）。</summary>
+    /// <summary>一次自检里全部不变量违规与观测到的最小值。</summary>
     private sealed class InvariantReport
     {
         public readonly List<string> ZeroLength = new();
@@ -330,7 +319,7 @@ internal static class PerformerSelfTest
         /// <summary>修饰键按下 → 音键按下，两者相隔多少（不变量「比音键至少早一帧」看的量）。</summary>
         public double ObservedMinModLeadMs = double.MaxValue;
 
-        /// <summary>修饰键按下 → 下一次修饰键按下。**和上面那个不是一个量**，别并成一个字段。</summary>
+        /// <summary>修饰键按下 → 下一次修饰键按下，和上面那个不是一个量。</summary>
         public double ObservedMinModGapMs = double.MaxValue;
 
         public double ObservedMinRetriggerMs = double.MaxValue;
@@ -339,16 +328,12 @@ internal static class PerformerSelfTest
     }
 
     /// <summary>
-    /// 逐条过一遍事件表，收集不变量违规。断言的是 spec 里 S3 那五条：
-    /// 零时长按键为 0 / 每个按下都有配对的松开 / 修饰键先松后按且比音键早至少一帧 /
-    /// 同键重触发 ≥ RetriggerMs / 每次按下至少按住一帧。
-    ///
-    /// **按住时长的下限是"一帧 + 1ms"，不是 MinHoldMs**：<c>Build</c> 里那条下限是
-    /// <c>minUpT = frame + 0.001</c>，MinHoldMs 只是配置项；同刻起音时前音必须被压到"跨过一帧"，
-    /// 否则整段音被游戏吃掉。所以 MinHoldMs 只在"没被同刻起音顶掉"的用例上单独断言一条。
-    ///
-    /// 只配对音键（K_Key）：修饰键是"状态"，一轮结束时停在按下状态是正常的（派发侧负责收尾），
-    /// 拿它当"没配对"会误报。
+    /// 逐条过一遍事件表，收集不变量违规。断言的是这五条：零时长按键为 0 /
+    /// 每个按下都有配对的松开 / 修饰键先松后按且比音键早至少一帧 / 同键重触发 ≥ RetriggerMs /
+    /// 每次按下至少按住一帧。
+    /// 按住时长的下限是「一帧 + 1ms」而不是 MinHoldMs（<c>Build</c> 里是 <c>minUpT = frame + 0.001</c>），
+    /// 同刻起音时前音必须被压到"跨过一帧"，否则整段音被游戏吃掉；MinHoldMs 只在"没被同刻起音顶掉"的
+    /// 用例上单独断言一条。只配对音键（K_Key）：修饰键是"状态"，停在按下状态是正常的，拿它当"没配对"会误报。
     /// </summary>
     private static void Inspect(SmokeCase c, InputTiming timing, List<EventBuilder.PhysicalEvent> evs,
         InvariantReport r)
@@ -368,17 +353,17 @@ internal static class PerformerSelfTest
 
             if (e.Kind != EventBuilder.K_Key)
             {
-                // 同刻的修饰键事件：先松开所有不该按的，再按下该按的。
-                // 顺序反了半音/八度切换时按下会被松开吃掉（同刻不依赖排序稳定性，靠的就是这个顺序）。
+                // 同刻的修饰键事件：先松开所有不该按的，再按下该按的。顺序反了，
+                // 半音/八度切换时按下会被松开吃掉（同刻不依赖排序稳定性，靠的就是这个顺序）。
                 for (int j = i + 1; j < evs.Count && Math.Abs(evs[j].T - e.T) < 1e-9; j++)
                     if (evs[j].Kind != EventBuilder.K_Key && e.Down && !evs[j].Down)
                         r.ModOrder.Add($"{where}：{e.T:F4}s 同刻里修饰键「按下」排在了「松开」前面");
 
                 if (e.Down)
                 {
-                    // 两次修饰键按下之间隔多远。**记到自己的字段上**：它不是「提前量」——
+                    // 两次修饰键按下之间隔多远。记到自己的字段上：它不是「提前量」——
                     // 跨八度那一例里左键抬起、右键按下挨得很近，并进 ObservedMinModLeadMs
-                    // 会让报告里那行「最小修饰键提前量」变成一个跟提前量无关的数。
+                    // 会让报告里那行数变得跟提前量无关。
                     if (!double.IsNaN(lastModPressT))
                         Observed(r, ref r.ObservedMinModGapMs, (e.T - lastModPressT) * 1000.0);
                     lastModPressT = e.T;
@@ -389,7 +374,7 @@ internal static class PerformerSelfTest
             if (e.Down)
             {
                 // 修饰键要比音键早至少一帧。只看"按下"：起点残留那一例的清理式"松开"与音键同刻，
-                // 那是启动态的一次性动作，不是每音的调度路径。
+                // 那是启动态的一次性动作。
                 if (!double.IsNaN(lastModPressT))
                 {
                     double leadMs = (e.T - lastModPressT) * 1000.0;
@@ -444,11 +429,8 @@ internal static class PerformerSelfTest
     // ================= 裁剪 =================
 
     /// <summary>
-    /// 钉住的程序集在裁剪后还在不在。
-    ///
-    /// 这一条只有自检能验：NUnit 跑的是没裁剪的构建，那儿的程序集永远都在文件旁边。
-    /// 名字与 csproj 的 <c>TrimmerRootAssembly</c> 名单对应，改一边要改另一边。
-    /// 自检不建窗口，所以这里只验"类型还在、成员没被裁掉"，不验它们跑起来对不对。
+    /// 钉住的程序集在裁剪后还在不在 —— 这一条只有自检能验，NUnit 那儿的程序集永远都在文件旁边。
+    /// 自检不建窗口，所以只验"类型还在、成员没被裁掉"，不验它们跑起来对不对。
     /// </summary>
     private static void TestPinnedAssemblies()
     {
@@ -463,8 +445,7 @@ internal static class PerformerSelfTest
             missing.Count == 0 ? $"{PinnedAssemblies.Length} 个" : string.Join(" | ", missing));
 
         // DryWetMidi 是按"大量用反射"钉住的：类型在，且它的公开方法没被裁掉。
-        // 这里只用反射按名字取，不在 App 里直接引用这个包 —— spec 规定 Core 的 MidiReader / MidiWriter
-        // 是仅有的两个允许出现 DryWetMidi 的地方。
+        // 这里只用反射按名字取，不在 App 里直接引用这个包。
         var t = Type.GetType("Melanchall.DryWetMidi.Core.MidiFile, Melanchall.DryWetMidi");
         bool hasRead = t != null && t.GetMethods().Any(m => m.Name == "Read");
         Check("发布：DryWetMidi 的类型与公开方法没被裁掉", hasRead,
@@ -474,21 +455,12 @@ internal static class PerformerSelfTest
     // ================= 工程文件存取 =================
 
     /// <summary>
-    /// 存一份工程再读回来，逐字段比。
-    ///
-    /// **这是本自检里唯一压到 <c>System.Text.Json</c> 反射的一条。** 发布时 ILLink 对
-    /// <c>SongProjectFile</c> 报了一串 IL2026 / IL2075，全是 STJ 反射；而 csproj 的
-    /// <c>TrimmerRootAssembly</c> 名单里有 App、有 DryWetMidi、有 Avalonia，
-    /// **没有 <c>MidiPerformer.Core</c>** —— Song / Track / Note / TempoMap 这些模型类型的
-    /// 属性与构造器，正是按「入口点可达」会被裁掉的东西。
-    ///
-    /// 导入 .mid 那条路走 DryWetMidi（钉住了，上面那条也验过）；
-    /// **只有「存工程 / 重新打开工程」这条路一直没人验**。NUnit 更验不了这件事：
-    /// 那边跑的是没裁剪的构建，程序集永远躺在文件旁边。
-    ///
-    /// 用内存里的一对（<c>WriteProject</c> / <c>ReadProject</c>）来回走，不碰文件系统：
-    /// 这个自检除了报告本身不该再写盘。语料里塞了要转义的轨名（反斜杠、双引号、中文）、
-    /// 变速变拍、以及音高/力度的上下边界 —— 反射被裁掉时最先露馅的就是这些字段。
+    /// 存一份工程再读回来，逐字段比。这是本自检里唯一压到 <c>System.Text.Json</c> 反射的一条：
+    /// ILLink 对 <c>SongProjectFile</c> 报的 IL2026 / IL2075 全是 STJ 反射，而 csproj 的
+    /// <c>TrimmerRootAssembly</c> 名单里没有 <c>MidiPerformer.Core</c>，Song / Track / Note /
+    /// TempoMap 这些模型的属性与构造器正是会被裁掉的东西；导入 .mid 那条路走 DryWetMidi，
+    /// 只有「存工程 / 重新打开工程」这条没人验。
+    /// 用内存里的一对（<c>WriteProject</c> / <c>ReadProject</c>）来回走，不碰文件系统。
     /// </summary>
     private static void TestProjectRoundTrip()
     {
@@ -500,7 +472,7 @@ internal static class PerformerSelfTest
         var song = new Song(
             new[]
             {
-                // 轨名里放了反斜杠、双引号、中文和逗号：JSON 转义那条路走不到的话这里最先红
+                // 轨名里放了反斜杠、双引号、中文和逗号：JSON 转义走不到的话这里最先红
                 new Track(0, 0, "主旋律 \\ \"引号\" 内测", 24, new[]
                 {
                     new Note(60, 0, 480, 100),
@@ -526,7 +498,7 @@ internal static class PerformerSelfTest
             if (!Equals(want, got)) diffs.Add($"{what} 存的是「{want}」读回来是「{got}」");
         }
 
-        // 防假绿：写出来必须是份像样的文件，"两边都空"不许算通过
+        // 防假绿：写出来必须是份像样的文件，"两边都空"不算通过
         int expectedNotes = song.Tracks.Sum(t => t.Notes.Count);
         Check("工程：写出的是非空 JSON，且音符数对得上",
             json.Length > 0 && expectedNotes == 5,
@@ -546,7 +518,7 @@ internal static class PerformerSelfTest
         Diff("变速条数", tempo.TempoChanges.Count, read.TempoMap.TempoChanges.Count);
         Diff("变拍条数", tempo.TimeSignatureChanges.Count, read.TempoMap.TimeSignatureChanges.Count);
 
-        // 速度表是真正驱动时序的那份数据：按秒比一遍，比只比条数扎实
+        // 速度表是真正驱动时序的数据：按秒比一遍，比只比条数扎实
         foreach (long tick in new long[] { 0, 480, 1920, 3840, 5000 })
             Diff($"第 {tick} tick 处的秒数", tempo.SecondsAt(tick), read.TempoMap.SecondsAt(tick));
 
@@ -575,7 +547,7 @@ internal static class PerformerSelfTest
         }
 
         // 逐字段比完再用 Track 自己的值相等收一遍：那份相等是覆写过的（音符逐个比），
-        // 反射把音符裁成空数组时它会露馅，而上面按 Count 比的写法会跟着一起错过去
+        // 反射把音符裁成空数组时会露馅，而上面按 Count 比的写法会一起错过去
         bool valueEqual = song.Tracks.Count == read.Tracks.Count;
         for (int i = 0; valueEqual && i < song.Tracks.Count; i++)
             valueEqual &= song.Tracks[i].Equals(read.Tracks[i]);
@@ -589,7 +561,7 @@ internal static class PerformerSelfTest
 
     // ================= 小工具 =================
 
-    /// <summary>事件表的一行文本：时间 + 是哪个键/鼠标键 + 按下还是松开。报告里当证据留档。</summary>
+    /// <summary>事件表的一行文本：时间 + 是哪个键/鼠标键 + 按下还是松开，报告里当证据留档。</summary>
     private static string Describe(EventBuilder.PhysicalEvent e)
     {
         string what = e.Kind switch
@@ -614,7 +586,7 @@ internal static class PerformerSelfTest
         => r.Events.Where(e => e.Kind == EventBuilder.K_Key && e.Code == key && e.Down)
                    .Select(e => e.T).ToList();
 
-    /// <summary>观测值 → 一行文字；一次都没观测到就说"本档没有"。</summary>
+    /// <summary>观测值 → 一行文字；一次都没观测到就只说"未观测到"。</summary>
     private static string Observed(double valueMs, string label)
         => double.IsPositiveInfinity(valueMs) || valueMs == double.MaxValue
             ? $"{label} 未观测到"

@@ -8,15 +8,8 @@ namespace MidiPerformer.Tests.PianoRoll;
 
 /// <summary>
 /// 卷帘的脑子：视图位置、选中、音域自适应、标灰判据。
-///
-/// 这些用例跑得起来，是因为 <see cref="PianoRollController"/> **不认识 Avalonia**：
-/// 视口是按控件宽高现算的一份纯数据，所以「某个尺寸下点某个像素」不用起窗口就能写。
-///
-/// 用例里凡是「视图滚到某处」的断言，都拿 16 小节的曲子 —— 8 小节的曲子上「滚到第 6 小节」
-/// 会被合法的上界夹住，测出来的就不是「跳转对不对」，而是「夹取对不对」了（夹取另有专门用例）。
-///
-/// 断言里出现的那一串音符坐标是**身份**（<see cref="NoteRef"/>），不是下标 ——
-/// 见 <c>换了一份曲子之后坐标还落在同一个音上</c> 那条。
+/// <see cref="PianoRollController"/> 不认识 Avalonia，视口是按控件宽高现算的一份纯数据。
+/// 断言里出现的那一串音符坐标是身份（<see cref="NoteRef"/>），不是下标。
 /// </summary>
 public class PianoRollControllerTests
 {
@@ -30,7 +23,7 @@ public class PianoRollControllerTests
     private static Track Bass(int transpose, params Note[] notes)
         => new(1, 1, "贝斯", 33, Numbered(notes), transpose);
 
-    /// <summary>每小节一个音的曲子，够滚、够跳、够算小节数。</summary>
+    /// <summary>每小节一个音的曲子。</summary>
     private static Song BarsOf(int bars)
     {
         var notes = new List<Note>(bars);
@@ -39,12 +32,8 @@ public class PianoRollControllerTests
     }
 
     /// <summary>
-    /// 给没写身份的音按数组顺序发 1..N 号。（<c>NoteIdentity.AssignInOrder</c> 在测试里的替身 ——
-    /// 那个类型是 Core 内部的，测试看不见。）
-    ///
-    /// **一条轨上的音都有身份**，和真曲子一样：卷帘这套东西现在按 <see cref="NoteId"/> 认音，
-    /// 一个没号的音谁都认不出来，测出来的就是「认不出来」那套行为，而不是本来要测的那件事。
-    /// 显式写了号的音一个都不动 —— 冲着号去的那几条用例还在别处。
+    /// 给没写身份的音按数组顺序发 1..N 号（<c>NoteIdentity.AssignInOrder</c> 在测试里的替身）；
+    /// 显式写了号的音一个都不动。卷帘按 <see cref="NoteId"/> 认音，没号的音谁都认不出来。
     /// </summary>
     private static Note[] Numbered(Note[] notes)
     {
@@ -56,10 +45,8 @@ public class PianoRollControllerTests
     }
 
     /// <summary>
-    /// 第 <paramref name="track"/> 条轨上**第 <paramref name="index"/> 个**音（数组序，0 起）的坐标。
-    ///
-    /// 号是 <see cref="Numbered"/> 按位置发的，所以第 i 个音就是 i+1 号。这条近路只活在测试里：
-    /// 真实代码手里的号来自模型（<c>Note.Id</c>），从来不是自己数出来的。
+    /// 第 <paramref name="track"/> 条轨上第 <paramref name="index"/> 个音（数组序，0 起）的坐标。
+    /// 号是 <see cref="Numbered"/> 按位置发的，所以第 i 个音就是 i+1 号。
     /// </summary>
     private static NoteRef Ref(int track, int index) => new(track, new NoteId(index + 1));
 
@@ -137,7 +124,7 @@ public class PianoRollControllerTests
     [Test]
     public void 凑够四小节才允许往后滚()
     {
-        // 只有 5 小节的曲子：视图最远只能到第 2 小节，因为一屏就要 4 小节
+        // 5 小节的曲子、一屏就要 4 小节：视图最远只到第 2 小节
         var controller = new PianoRollController(SongOf(Melody(new Note(60, 0, Bar * 5, 100))));
 
         controller.SetViewStart(Bar * 99);
@@ -174,14 +161,14 @@ public class PianoRollControllerTests
         var controller = new PianoRollController(BarsOf(16));
         controller.SetViewStart(Bar * 4);
 
-        // 播放头退到三分之一线左边：视图不动，否则画面会来回蹭
+        // 播放头在三分之一线左边：视图不动，否则画面会来回蹭
         controller.Follow(Bar * 4, 0.32);
         Assert.That(controller.ViewStartTick, Is.EqualTo(Bar * 4));
 
-        // 播放头跑到前面去：视图跟上，把它留在三分之一处
+        // 播放头跑到前面：视图跟上，把它留在三分之一处
         controller.Follow(Bar * 12, 0.32);
         var viewport = controller.ViewportOf(0, 800, 200);
-        // 视图起点取整到整数 tick，一个 tick 才 0.1px —— 半个像素的容差足够说明「就在三分之一处」
+        // 视图起点取整到整数 tick，一个 tick 才 0.1px，半个像素的容差足够
         Assert.That(PianoRollGeometry.XAtTick(viewport, Bar * 12), Is.EqualTo(800 * 0.32).Within(0.5));
     }
 
@@ -201,8 +188,7 @@ public class PianoRollControllerTests
     [Test]
     public void 方向键只在焦点轨里走()
     {
-        // 第 2 条轨那个音比第 1 条轨的早。从前那版是「在所有轨的音符之间按时间跳」，
-        // 于是第一步就会跳到第 2 条轨上 —— 按着按着莫名其妙换轨，正是 18 要去掉的东西
+        // 第 2 条轨那个音比第 1 条轨的早：按时间跨轨跳的话第一步就会跳过去
         var controller = new PianoRollController(SongOf(
             Melody(new Note(60, Bar, 480, 100)),
             Bass(0, new Note(40, 0, 480, 100))));
@@ -223,8 +209,7 @@ public class PianoRollControllerTests
     [Test]
     public void 同刻的音从上往下走()
     {
-        // 同一个起点上三个音。卷帘上高音画在上头，所以「下一个」是往下走（音高降序）——
-        // 数组故意按音高升序给，好让「照着数组顺序走」那版和这一版分得开
+        // 同一个起点上三个音，数组按音高升序给；卷帘上高音画在上头，所以「下一个」是音高降序
         var controller = new PianoRollController(SongOf(
             Melody(new Note(60, 0, 480, 100), new Note(64, 0, 480, 100), new Note(67, 0, 480, 100))));
 
@@ -242,8 +227,8 @@ public class PianoRollControllerTests
     [Test]
     public void 焦点轨和选中集分家时从这条轨的开头重新起算()
     {
-        // Ctrl+↑/↓ 换焦点不动选中集，于是会出现「焦点在轨 1、选中的音在轨 2」。
-        // 这时候两个方向都该落在**轨 1 的第一个音**上 —— 那正是「回到我正在弄的这条轨」的意思
+        // Ctrl+↑/↓ 换焦点不动选中集，于是会出现「焦点在轨 1、选中的音在轨 2」；
+        // 这时两个方向都该落在轨 1 的第一个音上
         var controller = new PianoRollController(SongOf(
             Melody(new Note(60, Bar, 480, 100), new Note(62, Bar * 2, 480, 100)),
             Bass(0, new Note(40, Bar * 5, 480, 100))));
@@ -265,8 +250,7 @@ public class PianoRollControllerTests
     [Test]
     public void 焦点轨一个音都没有时定位不崩()
     {
-        // 空轨也是能聚焦的（展开、改名、删除都长在轨道头上）。
-        // 这时候按 Ctrl+←/→ 什么都不该发生 —— 尤其不该跳到别的轨上去
+        // 空轨也能聚焦；这时按 Ctrl+←/→ 什么都不该发生，尤其不该跳到别的轨上去
         var controller = new PianoRollController(SongOf(
             Melody(),
             Bass(0, new Note(40, Bar * 3, 480, 100))));
@@ -327,7 +311,7 @@ public class PianoRollControllerTests
     [Test]
     public void 读的是移调之后的音高()
     {
-        // 卷帘上看到的、耳朵听到的、读数条上写的，必须是同一个音高
+        // 卷帘上看到的、听到的、读数条上写的必须是同一个音高
         var controller = new PianoRollController(SongOf(Bass(-12, new Note(60, 0, 480, 100))));
 
         controller.MoveSelection(1);
@@ -343,7 +327,7 @@ public class PianoRollControllerTests
         Assert.Multiple(() =>
         {
             Assert.That(controller.Describe(0, new NoteId(99)), Is.Null, "这条轨上没有这个号");
-            // 轨那头也不作数：号是 1 号（这条轨上真有），但第 9 条轨不存在
+            // 号 1 号在这条轨上真有，但第 9 条轨不存在
             Assert.That(controller.Describe(9, new NoteId(1)), Is.Null, "悬停时轨刚好被换掉就会碰上");
         });
     }
@@ -372,7 +356,7 @@ public class PianoRollControllerTests
     [Test]
     public void 音域算的是移调之后的音高()
     {
-        // 移调只影响听到的音高，而卷帘显示的正是听到的那个
+        // 卷帘显示的是听到的音高，也就是移调之后的
         var controller = new PianoRollController(SongOf(
             Melody(new Note(60, 0, 480, 100)),
             Bass(-12, new Note(60, 0, 480, 100))));
@@ -398,8 +382,7 @@ public class PianoRollControllerTests
     [Test]
     public void 音高0也是合法音域不会被当成还没算()
     {
-        // 移调 -60 把 C4 压到音高 0，最低显示音高正好落在 0 上。
-        // 拿 (0, 0) 当「还没算过」的哨兵，这条轨的音域就会被当成没算过而判错
+        // 移调 -60 把 C4 压到音高 0；若拿 (0, 0) 当「还没算过」的哨兵，这条轨的音域就会判错
         var controller = new PianoRollController(SongOf(Bass(-60, new Note(60, 0, 480, 100))));
 
         var range = controller.PitchRangeOf(0);
@@ -416,7 +399,7 @@ public class PianoRollControllerTests
     [Test]
     public void 灰显判据与可演奏范围一致()
     {
-        // 跨五个八度：口琴只有「基准八度 ±1 加最高两个音」，必然有音弹不出来
+        // 跨五个八度，口琴的音域（基准八度 ±1 加最高两个音）装不下，必然有音弹不出来
         var controller = new PianoRollController(SongOf(Melody(
             new Note(36, 0, 480, 100), new Note(48, 480, 480, 100), new Note(60, 960, 480, 100),
             new Note(72, 1440, 480, 100), new Note(84, 1920, 480, 100))));
@@ -443,8 +426,7 @@ public class PianoRollControllerTests
     [Test]
     public void 标灰的音仍然画在卷帘上()
     {
-        // 「超出可演奏范围」和「音域自适应」是两件事：灰音还在这一屏里，只是画成灰的 ——
-        // 判据来自 NoteMapper（游戏里弹不出来），不是「看不见」
+        // 标灰的判据来自 NoteMapper（游戏里弹不出来），不是「看不见」；灰音仍然画在这一屏里
         var controller = new PianoRollController(SongOf(Melody(
             new Note(36, 0, 480, 100), new Note(48, 480, 480, 100), new Note(60, 960, 480, 100),
             new Note(72, 1440, 480, 100), new Note(84, 1920, 480, 100))));
@@ -480,7 +462,7 @@ public class PianoRollControllerTests
     {
         var controller = new PianoRollController(SongOf(Melody(new Note(60, 0, 480, 100))));
         var viewport = controller.ViewportOf(0, 800, 200);
-        // 落点往音符块里再进 8px：贴着左边缘那一段算「头」，这里要的是「身体」
+        // 往音符块里再进 8px：贴着左边缘那一段算「头」，这里要的是「身体」
         double x = PianoRollGeometry.XAtTick(viewport, 240) + 8;
         double y = PianoRollGeometry.YAtPitch(viewport, 60) + viewport.RowHeight / 2;
 
@@ -515,7 +497,7 @@ public class PianoRollControllerTests
         var viewport = controller.ViewportOf(0, 800, 200);
         double x = PianoRollGeometry.XAtTick(viewport, 240) + 8;
 
-        // 点的是屏幕上 48 那一行（移调之后的音高），不是模型里写的 60
+        // 点的是屏幕上 48 那一行（移调之后的音高），不是模型里的 60
         double y = PianoRollGeometry.YAtPitch(viewport, 48) + viewport.RowHeight / 2;
 
         Assert.Multiple(() =>
@@ -533,8 +515,7 @@ public class PianoRollControllerTests
         var viewport = controller.ViewportOf(0, 800, 200);
         double y = PianoRollGeometry.YAtPitch(viewport, 60) + viewport.RowHeight / 2;
 
-        // 横坐标 1010 已经出了卷帘的右边缘（宽 800）。第 5 小节那个音要是参与判定，
-        // 它的块正好落在这儿 —— 屏幕外的东西点了不该有反应
+        // 1010 已经出了卷帘的右边缘（宽 800），第 5 小节那个音的块正好落在这儿
         Assert.That(controller.HitTestRef(0, viewport, 1010, y, out var note),
             Is.EqualTo(PianoRollGeometry.RollHit.None));
         Assert.That(note, Is.EqualTo(new NoteRef(-1, NoteId.None)));
@@ -561,7 +542,7 @@ public class PianoRollControllerTests
     [Test]
     public void 小节按拍号切而不是按固定格数()
     {
-        // 3/4 拍：一小节 1440 tick。按 4/4 去切的话，音会落到错的小节里
+        // 3/4 拍：一小节 1440 tick，按 4/4 去切音会落到错的小节里
         var song = new Song(
             new[] { Melody(new Note(60, 1440, 480, 100), new Note(62, 1440 * 2, 480, 100)) },
             new TempoMap(TimeDivision.PulsesPerQuarter(480), null,
@@ -707,7 +688,7 @@ public class PianoRollControllerTests
             Assert.That(controller.Selection?.Note, Is.EqualTo(Ref(0, 1).Id), "主选中也不该被它顶掉");
         });
 
-        // 9 号这条轨上没有（三个音是 1、2、3 号）—— 加一个不存在的音等于没加
+        // 9 号在这条轨上没有（三个音是 1、2、3 号）
         controller.ExtendSelection(new NoteRef(0, new NoteId(9)));
 
         Assert.That(controller.SelectedNotes, Has.Count.EqualTo(2), "加一个不存在的音等于没加");
@@ -716,8 +697,7 @@ public class PianoRollControllerTests
     [Test]
     public void 认不出的音符被静默丢掉()
     {
-        // 曲子刚被换掉、轨刚被删掉的时候会碰上 —— 那不是错误，不该抛
-        // （和 SetSelection 一条规矩：认不出来的坐标当没选中，等下一次编辑/重画自己好）
+        // 曲子刚被换掉、轨刚被删掉时会碰上：认不出来的坐标当没选中，不抛
         var controller = new PianoRollController(ThreeNotes());
 
         controller.SelectOnly(new NoteRef(0, new NoteId(99)));
@@ -726,7 +706,7 @@ public class PianoRollControllerTests
         controller.SelectOnly(Ref(9, 0));
         Assert.That(controller.SelectedNotes, Is.Empty, "轨下标越界也一样");
 
-        // 号是从 1 发起的，负数号不可能指到任何音上 —— 但也别抛，那只是个认不出来的坐标
+        // 号从 1 发起，负数号指不到任何音上，但也不该抛
         controller.SelectOnly(new NoteRef(0, new NoteId(-1)));
         Assert.That(controller.SelectedNotes, Is.Empty, "负数号也不是音");
     }
@@ -746,16 +726,9 @@ public class PianoRollControllerTests
     }
 
     /// <summary>
-    /// **编辑换了一份曲子之后，坐标还落在同一个音上** —— 这条是这次工单的命根子。
-    ///
-    /// 界面每次编辑都是这个形状：拿旧坐标去 <c>SongEditor</c> 改出**新的一份 Song**，
-    /// 重开一个控制器，再把坐标原样交回去（<c>MainWindow.ApplySong</c>）。
-    /// 从前靠的是窗口里那套「把选中的音的内容抄下来、改完在新数组里按内容找回来」的镜像，
-    /// 现在不许有那套东西了 —— 坐标自己就得活过这一次编辑。
-    ///
-    /// 按下标认音的话这条必挂：这里挪的第一个音**越过了邻居**，数组重排之后
-    /// 「第 0 个」已经换成了另一个音（音高 64 的那个），交回去的坐标就选错了音，
-    /// 而且一声不吭。
+    /// 换了一份曲子之后，坐标还落在同一个音上：界面每次编辑都是拿旧坐标改出新的一份 Song、
+    /// 重开控制器再把坐标交回去，所以坐标得活过这一次编辑。
+    /// 这里的音挪动后越过了邻居、数组重排，按下标认音就会选错。
     /// </summary>
     [Test]
     public void 换了一份曲子之后坐标还落在同一个音上()
@@ -779,7 +752,7 @@ public class PianoRollControllerTests
 
     // ==================== 聚焦轨 ====================
 
-    /// <summary>三条轨，每条一个音，够上下走；音摆在靠后的小节上，视图也滚得动。</summary>
+    /// <summary>三条轨，每条一个音，音摆在靠后的小节上，视图也滚得动。</summary>
     private static Song ThreeTracks() => SongOf(
         Melody(new Note(60, Bar * 6, 480, 100)),
         Bass(0, new Note(48, Bar * 6, 480, 100)),
@@ -791,13 +764,7 @@ public class PianoRollControllerTests
         Assert.That(new PianoRollController(BarsOf(4)).FocusedTrack, Is.EqualTo(0));
     }
 
-    /// <summary>
-    /// 聚焦挪没挪看得出来。
-    ///
-    /// 卷帘上「点音符 → 焦点跟随」那条路靠这个返回值决定要不要喊一声：
-    /// 点在自己已经聚焦的那条轨上是常事（连着点几个音），每次都喊的话，
-    /// 收到的那一头会把整窗重画一遍。
-    /// </summary>
+    /// <summary>聚焦挪没挪看得出来：「点音符 → 焦点跟随」靠这个返回值决定要不要通知重画。</summary>
     [Test]
     public void 聚焦挪没挪看得出来()
     {
@@ -828,7 +795,7 @@ public class PianoRollControllerTests
         });
     }
 
-    /// <summary>收起来的那几条不落 —— 卷帘是藏着的，高亮挪过去等于挪到一个看不见的地方。</summary>
+    /// <summary>收起来的那几条不落：卷帘是藏着的，高亮挪过去等于挪到看不见的地方。</summary>
     [Test]
     public void 跳过收起来的轨()
     {
@@ -838,7 +805,7 @@ public class PianoRollControllerTests
             "中间那条收着，直接落到第 3 条");
     }
 
-    /// <summary>到头就停住，不绕回另一头（和 MoveSelection 同一条规矩）。</summary>
+    /// <summary>走到头就停住，不绕回另一头。</summary>
     [Test]
     public void 走到头不绕回去()
     {
@@ -862,10 +829,7 @@ public class PianoRollControllerTests
         Assert.That(controller.MoveFocusedTrack(1, new[] { false, true, true }), Is.EqualTo(0));
     }
 
-    /// <summary>
-    /// 聚焦正好落在一条收起来的轨上时（用户先聚焦、再把它收起来）照样走得开：
-    /// 走的是「从当前位置往这个方向找第一条没收起来的」，所以不需要先把聚焦挪开。
-    /// </summary>
+    /// <summary>聚焦落在一条收起来的轨上（先聚焦再收起）也走得开：从当前位置往这个方向找第一条没收起来的。</summary>
     [Test]
     public void 从一条收起来的轨上也能走开()
     {
@@ -897,7 +861,7 @@ public class PianoRollControllerTests
         });
     }
 
-    /// <summary>一条轨都没有时落在 0：没轨可指，但读数得有个值（删光所有轨那一下会碰上）。</summary>
+    /// <summary>一条轨都没有时聚焦落在 0（删光所有轨那一下会碰上）。</summary>
     [Test]
     public void 零轨时聚焦落在零()
     {
@@ -907,7 +871,7 @@ public class PianoRollControllerTests
         Assert.That(controller.FocusedTrack, Is.EqualTo(0));
     }
 
-    /// <summary>折叠表比轨数短时，缺的那些当没收起来 —— 表是控件给的，短了不该炸。</summary>
+    /// <summary>折叠表比轨数短时，缺的那些当没收起来。</summary>
     [Test]
     public void 折叠表比轨数短时缺的当没收起来()
     {
@@ -931,12 +895,7 @@ public class PianoRollControllerTests
         });
     }
 
-    /// <summary>
-    /// 换聚焦**只管「手搭在哪条轨上」**：选中集、视图、播放头一个都不动。
-    ///
-    /// 这条是刻意的（见 <see cref="PianoRollController.FocusedTrack"/>）：想改哪条和想听哪条
-    /// 是两个意思，绑在一起的话，为了改一条轨就得先把别的静音。
-    /// </summary>
+    /// <summary>换聚焦只改「手搭在哪条轨上」：选中集、视图、播放头一个都不动。</summary>
     [Test]
     public void 换聚焦不动选中集也不动视图()
     {
@@ -957,7 +916,7 @@ public class PianoRollControllerTests
     // ==================== 区间查询 ====================
 
     /// <summary>
-    /// 一条轨五个音，起点严格递增，专门把「贴边」的几种情形摆出来。
+    /// 一条轨六个音，起点严格递增，覆盖「贴边」的几种情形。
     /// 索引与占用的半开区间：
     /// 0:[0,1920) 1:[480,4320) 2:[1920,2400) 3:[2160,2400) 4:[2400,2880) 5:[2880,3360)
     /// </summary>
@@ -1011,8 +970,7 @@ public class PianoRollControllerTests
 
         Assert.Multiple(() =>
         {
-            // 空白处横拖删音时，「点了空白但没拖」是一次零长度的手势。
-            // 要是让它把光标底下那个音算进来，一次误点就删掉了一个音
+            // 「点了空白但没拖」是零长度的手势，不能把光标底下那个音算进来
             Assert.That(controller.NotesInRange(0, Bar + 240, Bar + 240), Is.Empty, "零长度的框");
             Assert.That(controller.NotesInRange(0, Bar + 480, Bar), Is.Empty, "endTick < startTick");
         });
@@ -1050,12 +1008,8 @@ public class PianoRollControllerTests
     // ==================== 选中那一段（「抽掉一段」的预填） ====================
 
     /// <summary>
-    /// 本轨上选中的音**整体盖住**的那一段 —— 装备「抽掉一段」时先替用户划出来的就是它。
-    ///
-    /// 量的是「最小的起点到最大的末尾」，不是「第一个音到最后一个音」：
-    /// 选中的两个音一前一后、中间隔着一个没选中的，那一段仍然只盖到这两个音各自的两端
-    /// （用户点的是这两个音，中间那个是顺带的还是别人，他不一定想过；
-    /// 而**多盖**一节就是把没选中的音也剪了进去）。
+    /// 本轨上选中的音整体盖住的那一段（「抽掉一段」的预填）：
+    /// 量的是最小的起点到最大的末尾，不是第一个音到最后一个音。
     /// </summary>
     [Test]
     public void 选中那一段是最小起点到最大末尾()
@@ -1068,7 +1022,7 @@ public class PianoRollControllerTests
             "第 3 个音 [1920,2400) 和第 5 个音 [2400,2880)：中间那个第 4 个音没选中，但它本来就在这一段里");
     }
 
-    /// <summary>没选中任何音 → null（调用方退回「播放头那一小节」），不抛也不给一段空的。</summary>
+    /// <summary>没选中任何音时是 null，不抛也不给一段空的。</summary>
     [Test]
     public void 没选中音时预填不出来()
     {
@@ -1083,14 +1037,11 @@ public class PianoRollControllerTests
         });
     }
 
-    /// <summary>
-    /// 两端都吸到十六分格上（一屏 480 PPQ ⇒ 一格 120）：预填出来的那一段和用户自己拖出来的
-    /// 走的是同一个 <c>SpanOf</c>，于是他拖一下能吸到的那条线，预填也一定落在上面。
-    /// </summary>
+    /// <summary>两端都吸到十六分格（480 PPQ ⇒ 一格 120）：预填和手拖走的是同一个 <c>SpanOf</c>。</summary>
     [Test]
     public void 预填的那一段也吸到格线上()
     {
-        // 第一个音起在 0、长 100 tick（远不到一格），末尾 100 → 吸成 120
+        // 音起在 0、长 100 tick（远不到一格），末尾 100 吸成 120
         var controller = new PianoRollController(SongOf(Melody(new Note(60, 0, 100, 100))));
         controller.SelectOnly(Ref(0, 0));
 
@@ -1101,10 +1052,8 @@ public class PianoRollControllerTests
     // ==================== 命中判定的边角 ====================
 
     /// <summary>
-    /// 没命中时给出来的坐标**是个明确不存在的坐标**，不是「随便填个默认值」。
-    ///
-    /// <c>default(NoteRef)</c> 是 <c>(0, 0 号)</c> —— 在一条真有 0 号音的轨上那是个完全合法的音，
-    /// 谁忘了判这一下，就会默默选中第一个音。
+    /// 没命中时给出来的是明确不存在的坐标：<c>default(NoteRef)</c> 是 (0, 0 号)，
+    /// 在一条真有 0 号音的轨上那是个完全合法的音。
     /// </summary>
     [Test]
     public void 没命中时的坐标是个明确不存在的坐标()
@@ -1127,10 +1076,8 @@ public class PianoRollControllerTests
     [Test]
     public void 音叠在一起时命中的是数组里靠前的那个()
     {
-        // 同一条轨里两个同音高的音叠着（后一个在前一个结束前就起）。
-        // 这条不是「对」，是**钉住现状**：命中判定一直取的是数组里靠前的那个。
-        // 要改成「取视觉上压在最上面的那个」，得连命令那头一起改 ——
-        // 不然界面高亮的那个和命令动的那个会是两个音。
+        // 两个同音高的音叠着（后一个在前一个结束前就起）；命中判定取数组里靠前的那个，
+        // 界面高亮的和命令动的是同一个音
         var controller = new PianoRollController(SongOf(Melody(
             new Note(60, 0, 960, 100), new Note(60, 480, 960, 100))));
         var viewport = controller.ViewportOf(0, 800, 200);
@@ -1149,10 +1096,8 @@ public class PianoRollControllerTests
     // ==================== 整组位移的夹法 ====================
 
     /// <summary>
-    /// 这一组用例盯的是**界面和命令共用的那一份**夹法：拖动预览、方向键微调、
-    /// <c>SongEditor.MoveNotes</c> 三处说的是同一件事，走样了就会「预览画到东、落点在西」。
-    ///
-    /// 尤其是**整组一起夹**而不是逐个夹 —— 逐个夹会把拖到边界的一组音压成一摞。
+    /// 界面和命令共用的那一份夹法：拖动预览、方向键微调、<c>SongEditor.MoveNotes</c> 三处一致；
+    /// 整组一起夹而不是逐个夹。
     /// </summary>
     [Test]
     public void 没顶到边界时位移原样放过()
@@ -1173,7 +1118,7 @@ public class PianoRollControllerTests
     [Test]
     public void 往左顶到头时整组按最小的那个音缩住()
     {
-        // 靠前的那个音在 100，靠后的在 500 —— 想整组左移 480，只有 100 能让
+        // 靠前的音在 100、靠后的在 500，整组左移 480 只有 100 能让
         var controller = new PianoRollController(
             SongOf(Melody(new Note(60, 100, 480, 100), new Note(64, 500, 480, 100))));
 
@@ -1241,8 +1186,7 @@ public class PianoRollControllerTests
             var empty = controller.ClampMoveDelta(Array.Empty<NoteRef>(), -500, 9);
             Assert.That(empty, Is.EqualTo((-500L, 9)));
 
-            // 认不出来的（这条轨上没这个号、轨越界）：这一份曲子里没有这个音，当它不在组里 ——
-            // 于是剩下的那个音说了算，而不是整组一起被一个不存在的音夹住
+            // 认不出来的（没这个号、轨越界）当它不在组里，剩下的那个音说了算
             var stale = controller.ClampMoveDelta(
                 new[] { new NoteRef(0, new NoteId(99)), Ref(5, 0), Ref(0, 0) }, -500, 0);
             Assert.That(stale.DeltaTicks, Is.EqualTo(-500), "1000 够让 500，认不出的那些不参与");
@@ -1262,7 +1206,7 @@ public class PianoRollControllerTests
 
     // ==================== 零轨 ====================
 
-    /// <summary>一条轨都没有的曲子：把轨全删光之后就是这个样子。</summary>
+    /// <summary>一条轨都没有的曲子（把轨全删光之后的样子）。</summary>
     private static Song NoTracks() => SongOf();
 
     [Test]
@@ -1311,8 +1255,7 @@ public class PianoRollControllerTests
     [Test]
     public void 没有这条轨时按中性音域画一张空谱面()
     {
-        // 删轨之后界面手里那张控制器这一帧还会被问一次（重画那条轨）——
-        // 那不是错误，是「谱面空了」，所以给答案而不是抛
+        // 删轨后界面手里那张控制器这一帧还会被问一次（重画那条轨）：给答案而不是抛
         var controller = new PianoRollController(SongOf(Melody(new Note(60, 0, 480, 100))));
 
         var viewport = controller.ViewportOf(7, 800, 200);
@@ -1328,10 +1271,8 @@ public class PianoRollControllerTests
     // ==================== 折叠让整曲小节数跟着变 ====================
 
     /// <summary>
-    /// 折叠起来的那条轨**不算整曲长度**：伴奏比主旋律长的时候，收起来听，
-    /// 卷帘右侧那一截什么也不出声的地方要当场消失（用户 2026-09-20 的原话：
-    /// 「减掉末尾两个小节我希望是直接消失，而不是空着小节继续播放」）。
-    /// 见 <c>AudibleLength</c>。
+    /// 折叠起来的那条轨不算整曲长度（见 <c>AudibleLength</c>）：
+    /// 伴奏比主旋律长时收起来听，末尾那一截不出声的地方当场消失。
     /// </summary>
     [Test]
     public void 折叠起来的那条不算整曲长度()
@@ -1353,17 +1294,14 @@ public class PianoRollControllerTests
         Assert.That(controller.BarCount, Is.EqualTo(8), "展开回来长度也回来");
     }
 
-    /// <summary>建控制器的那一刻就带上这份名单：窗口重建卷帘时走的是这条（<c>SyncLanes</c>）。</summary>
+    /// <summary>建控制器时就带上折叠名单（窗口重建卷帘走这条，<c>SyncLanes</c>）。</summary>
     [Test]
     public void 建控制器时就能带上折叠名单()
     {
         Assert.That(new PianoRollController(长短两条轨(), 静音(1)).BarCount, Is.EqualTo(2));
     }
 
-    /// <summary>
-    /// 收起短的（本来就不是决定长度的）那条：小节数不动，**那张密度表也不重算** ——
-    /// 长度没变的折叠是常事，而数一遍音符是整曲扫一趟，没必要白扫。
-    /// </summary>
+    /// <summary>收起短的那条（本来就不是决定长度的）：小节数不动，密度表也不重算。</summary>
     [Test]
     public void 折叠短的那条长度和那张表都不动()
     {
@@ -1379,10 +1317,7 @@ public class PianoRollControllerTests
         });
     }
 
-    /// <summary>
-    /// 缩到 2 小节之后，原来停在末尾的视口会落到曲子外面 —— 得拉回来。
-    /// 2 小节的曲子一屏（4 小节）装得下，所以合法位置只剩开头那一个。
-    /// </summary>
+    /// <summary>缩到 2 小节后，原来停在末尾的视口落到曲子外面，得拉回来。</summary>
     [Test]
     public void 曲子变短之后视图位置拉回曲子里面()
     {
@@ -1395,10 +1330,7 @@ public class PianoRollControllerTests
         Assert.That(controller.ViewStartTick, Is.EqualTo(0), "2 小节的曲子装不下一屏，只能从第 1 小节起");
     }
 
-    /// <summary>
-    /// 折叠**不动选中与焦点轨**：它们是「哪些音」「哪条轨」，不是「曲子多长」。
-    /// 顺手清掉的话，折叠一下就得重新选一遍音。
-    /// </summary>
+    /// <summary>折叠不动选中集与焦点轨。</summary>
     [Test]
     public void 折叠不动选中与焦点轨()
     {
@@ -1416,10 +1348,7 @@ public class PianoRollControllerTests
         });
     }
 
-    /// <summary>
-    /// 那张密度表跟着新长度重算：落在**新曲子外面**的音不进表（它们本来也画不出来），
-    /// 表长就等于新小节数。
-    /// </summary>
+    /// <summary>密度表跟着新长度重算：落在新曲子外面的音不进表，表长等于新小节数。</summary>
     [Test]
     public void 缩短之后密度表只数曲子之内的小节()
     {
@@ -1435,10 +1364,7 @@ public class PianoRollControllerTests
         });
     }
 
-    /// <summary>
-    /// 全折叠退回整份谱面（见 <c>AudibleLength</c>）—— 「这几条我都不想听」不等于「曲子是空的」，
-    /// 卷帘缩成一小节、播放头被拉回开头都不是用户那句话的意思。
-    /// </summary>
+    /// <summary>全折叠退回整份谱面（见 <c>AudibleLength</c>）。</summary>
     [Test]
     public void 全折叠退回整份谱面()
     {
@@ -1452,13 +1378,10 @@ public class PianoRollControllerTests
         Melody(new Note(60, 0, 480, 100), new Note(62, Bar, 480, 100)),
         Bass(0, new Note(40, 6 * Bar, 480, 100), new Note(42, 7 * Bar, 480, 100)));
 
-    /// <summary>
-    /// 按**轨块号**写一份折叠名单：这两条轨的轨块号刚好是 0 号和 1 号，读起来比写 (轨块, 声道) 省事。
-    /// （身份那一对的语义在 <c>AudibleLengthTests</c> 里另有用例盯着。）
-    /// </summary>
+    /// <summary>按轨块号写一份折叠名单：这两条轨的轨块号刚好是 0 号和 1 号。</summary>
     private static IReadOnlySet<(int TrackIndex, int Channel)> 静音(params int[] trackIndexes)
         => trackIndexes.Select(i => (i, i)).ToHashSet();
 
-    /// <summary>每小节一个音的短曲子 —— 多选那几条用例只关心「第几个音」。</summary>
+    /// <summary>每小节一个音的短曲子（多选那几条用例只关心「第几个音」）。</summary>
     private static Song ThreeNotes() => BarsOf(3);
 }

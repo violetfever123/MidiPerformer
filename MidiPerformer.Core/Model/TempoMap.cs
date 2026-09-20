@@ -1,12 +1,9 @@
 namespace MidiPerformer.Core.Model;
 
-/// <summary>
-/// 时间分辨率：曲子里一个四分音符切成多少 tick。
-/// </summary>
+/// <summary>时间分辨率：曲子里一个四分音符切成多少 tick。</summary>
 /// <remarks>
-/// 两种模式二选一。PPQ（<see cref="TicksPerQuarterNote"/>）是绝大多数文件的写法，速度表说了算；
-/// SMPTE（<see cref="SmpteFramesPerSecond"/> × <see cref="SmpteTicksPerFrame"/>）按秒切，
-/// 与速度无关。SMPTE 文件极少，但读到了不该崩。
+/// 两种模式二选一：PPQ（<see cref="TicksPerQuarterNote"/>）是绝大多数文件的写法、速度表说了算；
+/// SMPTE（<see cref="SmpteFramesPerSecond"/> × <see cref="SmpteTicksPerFrame"/>）按秒切、与速度无关。
 /// </remarks>
 public sealed record TimeDivision
 {
@@ -46,9 +43,8 @@ public sealed record TimeDivision
 
 /// <summary>一次变速：从 <paramref name="Tick"/> 起，一个四分音符占 <paramref name="MicrosecondsPerQuarterNote"/> 微秒。</summary>
 /// <remarks>
-/// 存的是**微秒**而不是 BPM 小数。MIDI 文件里本来就是微秒，存 BPM 要先除再乘，
-/// 一个来回就可能把 tick → 秒 算歪最后一两个微秒 —— 而全链对拍是逐条比事件时间的。
-/// BPM 只是给人看的显示形式，见 <see cref="BeatsPerMinute"/>。
+/// 存微秒而不是 BPM 小数：MIDI 文件里本来就是微秒，存 BPM 要先除再乘，一个来回就可能把
+/// tick → 秒 算歪最后一两个微秒。BPM 只是显示形式，见 <see cref="BeatsPerMinute"/>。
 /// </remarks>
 public sealed record TempoChange(long Tick, long MicrosecondsPerQuarterNote)
 {
@@ -60,15 +56,10 @@ public sealed record TempoChange(long Tick, long MicrosecondsPerQuarterNote)
 public sealed record TimeSignatureChange(long Tick, int Numerator, int Denominator);
 
 /// <summary>
-/// 速度表 —— 唯一负责 tick ⇄ 秒 换算的地方。
+/// 速度表 —— 唯一负责 tick ⇄ 秒 换算的地方。音符只存 tick，「这首曲子多快」完整地住在这里。
 ///
-/// 音符只存 tick，所以「这首曲子多快」这件事完整地住在这里。改 BPM 就是改这张表，
-/// 音符数组一个字节都不动。
-///
-/// **算法是照着 DryWetMidi 的 <c>MetricTimeSpanConverter</c> 复刻的**，不是自己推的公式。
-/// 原因：全链对拍要求我们这边的秒数与原版**逐位相同**，而原版走的就是 DryWetMidi 那条换算路径。
-/// 两处刻意的形状差异（下面 <see cref="BuildPpq"/> 里逐条注了）看着像笔误，其实是在对齐浮点舍入：
-/// 累积段是「先乘后除」，末段是「先除后乘」，DryWetMidi 就是这么写的，换一种写法最后一两位会飘。
+/// 算法照 DryWetMidi 的 <c>MetricTimeSpanConverter</c> 复刻，只求秒数与原版逐位相同：
+/// <see cref="BuildPpq"/> 里那两处形状差异（累积段先乘后除、末段先除后乘）是在对齐浮点舍入。
 /// </summary>
 public sealed class TempoMap
 {
@@ -76,8 +67,8 @@ public sealed class TempoMap
     public const long DefaultMicrosecondsPerQuarterNote = 500_000;
 
     /// <summary>
-    /// 换算结果的上限（微秒）。<see cref="SecondsAt"/> 最后要交给
-    /// <c>new TimeSpan(微秒 * 10)</c>，所以微秒数不能超过 <see cref="long.MaxValue"/> 的十分之一。
+    /// 换算结果的上限（微秒）：<see cref="SecondsAt"/> 最后要交给 <c>new TimeSpan(微秒 * 10)</c>，
+    /// 所以微秒数不能超过 <see cref="long.MaxValue"/> 的十分之一。
     /// </summary>
     private const double MaxMicroseconds = long.MaxValue / 10.0;
 
@@ -87,7 +78,7 @@ public sealed class TempoMap
     private readonly long[] _changeTicks;
     private readonly double[] _accumulatedMicros;   // 每个变速点之前的累计微秒
     private readonly double[] _microsPerTick;       // 该变速点起生效的微秒/tick
-    private readonly double[] _ticksPerMicro;       // 上者的倒数（DryWetMidi 单独算并存下来）
+    private readonly double[] _ticksPerMicro;       // 上者的倒数
     private readonly double _defaultMicrosPerTick;
     private readonly double _defaultTicksPerMicro;
 
@@ -105,12 +96,8 @@ public sealed class TempoMap
         var byTick = new SortedDictionary<long, TempoChange>();
         foreach (var c in tempoChanges ?? Enumerable.Empty<TempoChange>())
             byTick[c.Tick] = c;
-        // 只处理「tick 0 上的默认速度」这一种冗余。说明白一点：DryWetMidi 的 ValueLine 实际会丢掉
-        // **任何**与当前值相同的变速（不只 tick 0），我们没跟这一条。
-        // 这不算失真 —— 读进来的文件走的是 ReadTempoMap，拿到的本来就是 ValueLine 去重过的表，
-        // 我们这行只是让手工构造 TempoMap（编辑器那条路）的行为跟它一致。
-        // 就算漏了，多个冗余变速点也只是让分段表多一个斜率相同的段，算出来的秒数不变
-        // （实测：12 种 PPQ × 4 种变速形状 × 20000 个 tick，与 DryWetMidi 逐位相同）。
+        // 只处理「tick 0 上是默认速度」这一种冗余（DryWetMidi 的 ValueLine 会丢掉任何与当前值相同的
+        // 变速，我们没跟）：漏了也只是让分段表多一个斜率相同的段，算出来的秒数不变。
         if (byTick.TryGetValue(0, out var atZero) &&
             atZero.MicrosecondsPerQuarterNote == DefaultMicrosecondsPerQuarterNote)
         {
@@ -153,7 +140,7 @@ public sealed class TempoMap
         for (int i = 0; i < _changeTicks.Length; i++)
         {
             // 先乘后除：DryWetMidi 的 GetMicroseconds 是 `time * usPerQuarter / (double)tpqn`，
-            // 乘法在 long 上完成再转 double，换成 `delta * (us / (double)tpqn)` 会差最后一两位。
+            // 乘法在 long 上完成再转 double，换成先除会差最后一两位。
             accumulated += (double)((_changeTicks[i] - lastTick) * lastMicrosPerQuarter) / PulsesPerQuarter;
 
             lastMicrosPerQuarter = TempoChanges[i].MicrosecondsPerQuarterNote;
@@ -169,9 +156,8 @@ public sealed class TempoMap
     /// <summary>该 tick 时刻生效的速度（显示/输入用）。</summary>
     public double BeatsPerMinuteAt(long tick)
     {
-        // 注意这里是「**不晚于**该 tick 的最后一条」，比 SecondsAt 里的「严格早于」松一格。
-        // 两者不是笔误：变速点的语义是「从这一 tick 起改成新速度」，所以换算累计值时
-        // 该 tick 之前的段用旧速度（严格早于），而「此刻速度是多少」就该答新速度（不晚于）。
+        // 这里是「不晚于该 tick 的最后一条」，比 SecondsAt 里的「严格早于」松一格：变速点的语义是
+        //「从这一 tick 起改成新速度」，所以换算累计值时该 tick 用旧速度，而「此刻速度是多少」答新速度。
         int i = LastChangeAtOrBefore(tick);
         long micros = i >= 0
             ? TempoChanges[i].MicrosecondsPerQuarterNote
@@ -195,14 +181,12 @@ public sealed class TempoMap
 
         double totalMicros = accumulated + (tick - lastTick) * microsPerTick;
 
-        // DryWetMidi 的 TicksToMicroseconds 在这儿有一道 "Time span is too big." 的越界检查，照搬过来。
-        // 少了它，一个被改坏的 tick（比如 1e17）会静默地算出 long 溢出后的垃圾值，
-        // 一首「0 秒长」的曲子会一路装成正常结果混进界面；宁可在这儿炸出中文错误。
-        // 写成 `!(x < max)` 而不是 `x >= max` 是为了把 NaN 一起拦下。
+        // DryWetMidi 的 TicksToMicroseconds 在这儿有一道 "Time span is too big." 的越界检查，照搬过来：
+        // 少了它，一个被改坏的 tick 会静默地算出 long 溢出后的垃圾值。写成 `!(x < max)` 是为了把 NaN 一起拦下。
         if (!(Math.Abs(totalMicros) < MaxMicroseconds)) throw TooBig();
 
-        // 与 DryWetMidi 同一条路：舍入到整微秒 → 交给 TimeSpan → 取 TotalSeconds。
-        // 自己写 `micros / 1e6` 会在最后一两位 ULP 上飘，全链对拍就红了。
+        // 与 DryWetMidi 同一条路：舍入到整微秒 → 交给 TimeSpan → 取 TotalSeconds，
+        // 自己写 `micros / 1e6` 会在最后一两位 ULP 上飘。
         long rounded = (long)Math.Round(totalMicros, MidpointRounding.AwayFromZero);
         return new TimeSpan(rounded * (TimeSpan.TicksPerMillisecond / 1000)).TotalSeconds;
     }
@@ -211,8 +195,7 @@ public sealed class TempoMap
     /// <exception cref="InvalidOperationException"><paramref name="seconds"/> 不是有限数，或大到 tick 装不进 <see cref="long"/>。</exception>
     public long TickAt(double seconds)
     {
-        // 非有限数会被下面的 `(long)` 转换变成未定义值（实测是 -8854437155380584 这种垃圾），
-        // 而且一旦进了播放器就再也出不来：Finished 永远是 false，TickNow 永远是垃圾。
+        // 非有限数会被下面的 `(long)` 转换变成未定义值，而且一旦进了播放器就再也出不来。
         if (!double.IsFinite(seconds)) throw TooBig();
 
         if (Division.IsSmpte)
@@ -231,8 +214,8 @@ public sealed class TempoMap
         long micros = (long)Math.Round(microsRaw, MidpointRounding.AwayFromZero);
         if (micros == 0) return 0;
 
-        // 找最后一个「累计微秒 < micros」的变速点。注意比的是**累计微秒**，不是 tick —— 与
-        // DryWetMidi 的 MetricTimeSpanToTicks 一致（它的 TakeWhile 判的是 Microseconds）。
+        // 找最后一个「累计微秒 < micros」的变速点：比的是累计微秒而不是 tick，
+        // 与 DryWetMidi 的 MetricTimeSpanToTicks 一致。
         int i = LastAccumulatedBelowMicros(micros);
         double accumulated = i >= 0 ? _accumulatedMicros[i] : 0;
         long lastTick = i >= 0 ? _changeTicks[i] : 0;

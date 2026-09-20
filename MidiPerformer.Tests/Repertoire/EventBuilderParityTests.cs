@@ -5,28 +5,16 @@ using Ported = MidiPerformer.Core.UseCases.Perform.Repertoire;
 namespace MidiPerformer.Tests.Repertoire;
 
 /// <summary>
-/// 移植保真度对拍 —— 这是「逐字复刻」这句话的**证明**。
-///
-/// 同一个音符序列喂给两边：一边是原版 <c>harmonica-auto-player@a14335c</c> 的代码本体
-/// （测试工程直接 ProjectReference 引用原版工程，跑的不是副本），一边是我们
-/// <c>Core/UseCases/Perform/Repertoire/</c> 里那份。逐条比事件的**时间 / 键 / 按下还是松开**。
-///
-/// 谁改动了移植文件，这里立刻变红。
-///
-/// **对拍全程不发任何按键**：两边都只调"建表"入口（原版的 <c>BuildScheduleForTest</c>、
-/// 我们的 <c>EventBuilder.Build</c>），它们是纯函数，没有一行碰到 SendInput。
-/// 原版的 <c>Play</c> / <c>Execute</c> 一次都没有被调用。
-///
-/// 语料是**手工构造的音符，不是 MIDI 文件** —— 这一层验的是移植切得对不对，
-/// 真实 MIDI 语料的全链对拍在 02。
+/// 移植保真度对拍：同一个音符序列喂给原版工程本体（ProjectReference 引用，不是副本）
+/// 和 <c>Core/UseCases/Perform/Repertoire/</c> 里那份，逐条比事件的时间 / 键 / 按下还是松开。
+/// 两边都只调建表入口（原版的 <c>BuildScheduleForTest</c>、我们的 <c>EventBuilder.Build</c>），
+/// 它们不发任何按键。语料是手工构造的音符，不是 MIDI 文件。
 /// </summary>
 public class EventBuilderParityTests
 {
     /// <summary>与两边类型都无关的中立音符描述，喂之前各自 materialize 一份。</summary>
     public readonly record struct NoteSpec(
         int Pitch, double Start, double End, char Key, bool Sharp, int Slot, bool InRange);
-
-    // ============================ 语料 ============================
 
     private static NoteSpec N(double start, double end, char key,
         int slot = 0, bool sharp = false, int pitch = 60)
@@ -42,35 +30,35 @@ public class EventBuilderParityTests
 
         yield return C("单音", N(0, 0.5, 'Z'));
 
-        // 口琴是单音乐器：同刻起音本来只能吹响一个，后一个要顺延而不是把前音压没。
+        // 同刻起音：单音乐器只能吹响一个，后一个顺延而不是把前音压没
         yield return C("同刻起音（不同键）", N(1.0, 1.4, 'Z'), N(1.0, 1.4, 'C'));
         yield return C("同刻起音（同键）", N(1.0, 1.4, 'Z'), N(1.0, 1.4, 'Z'));
         yield return C("三音同刻", N(1.0, 1.2, 'Z'), N(1.0, 1.5, 'X'), N(1.0, 1.1, 'C'));
 
-        // 连奏：前音还在响、后音才起 —— 不算多声部，靠槽位排开。
+        // 连奏：前音还在响、后音才起，靠槽位排开
         yield return C("连奏重叠", N(0, 0.5, 'Z'), N(0.3, 0.8, 'X'));
         yield return C("前音长后音短且被包住", N(0, 2.0, 'Z'), N(0.5, 0.6, 'X'));
         yield return C("零时长音", N(0.5, 0.5, 'Z'));
         yield return C("一毫秒音", N(0, 0.001, 'Z'), N(0.002, 0.5, 'X'));
         yield return C("长休止", N(0, 0.5, 'Z'), N(5.0, 5.4, 'X'));
 
-        // 跨八度：修饰键（鼠标左/右）的按下与松开必须排在音键之前。
+        // 跨八度：修饰键（鼠标左/右）的按下与松开必须排在音键之前
         yield return C("跨八度 低→基准→高→基准",
             N(0, 0.3, 'Z', -1), N(0.4, 0.7, 'Z', 0), N(0.8, 1.1, 'Z', 1), N(1.2, 1.5, 'Z', 0));
         yield return C("跨八度同刻起音", N(0, 0.4, 'Z', -1), N(0, 0.4, 'X', 1));
 
-        // 升半音：鼠标中键。
+        // 升半音：鼠标中键
         yield return C("升半音切换",
             N(0, 0.3, 'C', 0, true), N(0.4, 0.7, 'C', 0, false), N(0.8, 1.1, 'D', 0, true));
         yield return C("升半音 + 跨八度同时切换",
             N(0, 0.3, 'C', -1, true), N(0.4, 0.7, 'C', 1, false), N(0.8, 1.1, 'D', 0, true));
 
-        // 最高两个音：高高音 do / #do 都用逗号键，落在 High 槽位。
+        // 最高两个音：高高音 do / #do 都用逗号键，落在 High 槽位
         yield return C("最高两个音", N(0, 0.3, ',', 1, false), N(0.4, 0.7, ',', 1, true));
         yield return C("最高两个音夹在跨八度中间",
             N(0, 0.3, 'Z', 0), N(0.4, 0.7, ',', 1, false), N(0.8, 1.1, ',', 1, true));
 
-        // 超出可演奏范围（InRange=false）：建表这一段不按 InRange 过滤，两边必须一致地处理。
+        // 超出可演奏范围（InRange=false）：建表这一段不按 InRange 过滤
         yield return C("超范围（无键位，移调后超出 MIDI 音域）",
             new NoteSpec(-1, 0, 0.4, ' ', false, 0, false), N(0.5, 0.9, 'Z'));
         yield return C("超范围（有键位，最高只能到高高音#do）",
@@ -79,7 +67,7 @@ public class EventBuilderParityTests
             new NoteSpec(0, 0, 0.3, 'Z', false, -1, false),
             new NoteSpec(127, 0.4, 0.7, ',', false, 1, false));
 
-        // 挤到下限：同键极密，会走"时值被压到下限"那条分支。
+        // 挤到下限：同键极密，会走「时值被压到下限」那条分支
         {
             var dense = new NoteSpec[12];
             for (int i = 0; i < dense.Length; i++)
@@ -94,7 +82,7 @@ public class EventBuilderParityTests
         }
     }
 
-    /// <summary>随机生成语料：同刻、重叠、长音盖短音、修饰键来回切，都按概率出现。</summary>
+    /// <summary>随机语料：同刻、重叠、长音盖短音、修饰键来回切都按概率出现。</summary>
     public static IEnumerable<TestCaseData> RandomCorpus()
     {
         for (int seed = 0; seed < 200; seed++)
@@ -130,8 +118,6 @@ public class EventBuilderParityTests
         return specs;
     }
 
-    // ============================ 断言 ============================
-
     [TestCaseSource(nameof(BoundaryCorpus))]
     public void 手写边界用例_两边事件表逐条相等(NoteSpec[] specs) => AssertParity(specs);
 
@@ -146,7 +132,7 @@ public class EventBuilderParityTests
             var expected = BuildWithOriginal(specs, originalTiming);
             var actual = BuildWithPorted(specs, portedTiming);
 
-            // 防止"两边都建出空表 → 相等 → 绿"的假绿
+            // 防「两边都建出空表 → 相等 → 绿」的假绿
             if (specs.Count > 0)
                 Assert.That(expected, Is.Not.Empty,
                     $"{name}：原版对 {specs.Count} 个音符建出了空事件表，语料本身有问题");
@@ -163,7 +149,7 @@ public class EventBuilderParityTests
         yield return ("极限", Original.InputTiming.Aggressive, Ported.InputTiming.Aggressive);
     }
 
-    /// <summary>原版：直接跑原版工程本体导出的公开测试入口。</summary>
+    /// <summary>原版：跑原版工程本体导出的公开测试入口。</summary>
     private static (double T, int Kind, char Code, bool Down)[] BuildWithOriginal(
         IReadOnlyList<NoteSpec> specs, Original.InputTiming timing)
     {
@@ -171,7 +157,7 @@ public class EventBuilderParityTests
         return engine.BuildScheduleForTest(MaterializeOriginal(specs), timing);
     }
 
-    /// <summary>我们这边：走移植进来的 EventBuilder。</summary>
+    /// <summary>我们这边：走移植进来的 <c>EventBuilder</c>。</summary>
     private static (double T, int Kind, char Code, bool Down)[] BuildWithPorted(
         IReadOnlyList<NoteSpec> specs, Ported.InputTiming timing)
     {

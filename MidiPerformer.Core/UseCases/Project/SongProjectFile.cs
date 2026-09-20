@@ -10,53 +10,33 @@ using MidiPerformer.Core.Model;
 namespace MidiPerformer.Core.UseCases.Project;
 
 /// <summary>
-/// 工程文件进出：<see cref="Song"/> + <see cref="ProjectHeader"/> ⇄ .mproj。
+/// 工程文件进出：<see cref="Song"/> + <see cref="ProjectHeader"/> ⇄ .mproj，逐字段精确 ——
+/// 轨数与每轨的轨块序号/声道/名字/音色/移调、每个音的五个字段（含 <see cref="Note.Id"/>）、
+/// 速度表的分辨率与两张事件表，一个都不能变。MIDI 那一半在 <see cref="MidiReader"/> / <see cref="MidiWriter"/>。
 ///
-/// **S1 缝的另一半**（见 spec「Testing Decisions」）：<see cref="Song"/> ⇄ .mproj。要的也是逐字段精确：
-/// SaveProject → LoadProject 之后，轨数、每轨的轨块序号/声道/名字/音色/移调、
-/// 每个音的五个字段（身份 <see cref="Note.Id"/> 也在里面，见 <see cref="Converters.NoteConverter"/>）、
-/// 速度表的分辨率与两张事件表，一个都不能变。
-/// （MIDI 那半在 <see cref="MidiReader"/> / <see cref="MidiWriter"/>。）
-///
-/// **文件格式**：JSON，平铺成一个对象 —— 文件头那几个字段就是文件最上面那几行：
-///     {
-///       "Version": 1,
-///       "Name": "起风了",
-///       "Edited": true,
-///       "ImportedFrom": "C:\\下载\\起风了.mid",
-///       "Song": { "Tracks": [ … ], "TempoMap": { … } }
-///     }
-/// 头和信息平铺在一层，是因为它们确实是「这份文件的头」；于是「缺 Song」也就成了
-/// 读取端要单独认的一种坏文件。
-///
-/// **实体直接序列化，没有 DTO 层**（spec「文件与存储」）：只有一个消费者的文件格式，
-/// 多一层映射是纯仪式。代价是模型上那几个「算出来的属性」得挡住不写 —— 见 <see cref="DropDerivedProperties"/>。
+/// 格式是 JSON，文件头与谱面平铺在同一层，于是「缺 Song 字段」是读取端要单独认的一种坏文件。
+/// 实体直接序列化，没有 DTO 层；模型上算出来的属性由 <see cref="DropDerivedProperties"/> 挡住不写。
 /// </summary>
 public static class SongProjectFile
 {
-    /// <summary>当前 .mproj 的版本。读到比它大的版本就报错，不猜着读 —— 猜出来的谱面比读不出来更坏。</summary>
+    /// <summary>当前 .mproj 的版本。读到比它大的版本就报错，不猜着读。</summary>
     public const int ProjectVersion = 1;
 
     /// <summary>
     /// <see cref="Song"/> + 文件头 → .mproj 的 JSON 文本。
-    ///
-    /// 这里**不校验谱面**：JSON 里没有「装不下」的值，MIDI 导出那边的越界检查（分辨率上限之类）
-    /// 在这儿一条都不适用。什么 <see cref="Song"/> 都写得出来，空曲（0 轨）也一样。
+    /// 不校验谱面：JSON 里没有「装不下」的值，什么 <see cref="Song"/> 都写得出来（空曲也一样）。
     /// </summary>
     public static string WriteProject(Song song, ProjectHeader header)
     {
         ArgumentNullException.ThrowIfNull(song);
         ArgumentNullException.ThrowIfNull(header);
 
-        // 先整体序列化进内存再交给调用方，和 MIDI 的 Write 是对称的：序列化中途出错
-        // 不会在盘上留下半截文件（那半截会被当成本地文件损坏，更难查）。
+        // 先整体序列化进内存再交给调用方：中途出错不会在盘上留下半截文件。
         using var stream = new MemoryStream();
         using (var writer = new Utf8JsonWriter(stream, WriterOptions))
         {
             writer.WriteStartObject();
-            // 字段名一律从 record 上取（nameof），改了属性名这里跟着改，不会两边对不上。
-            // 版本号**不取 header 里的那个值**：写出去的只有当前这一种格式，
-            // 照着调用方手里那个数写，等于让文件声称自己是另一种格式。
+            // 字段名一律从 record 上取（nameof）。版本号不取 header 里的值：写出去的只有当前这一种格式。
             writer.WriteNumber(nameof(ProjectHeader.Version), ProjectVersion);
             writer.WriteString(nameof(ProjectHeader.Name), header.Name);
             writer.WriteBoolean(nameof(ProjectHeader.Edited), header.Edited);
@@ -74,9 +54,7 @@ public static class SongProjectFile
 
     /// <summary>
     /// .mproj 的 JSON 文本 → <see cref="Song"/> + 文件头。
-    ///
-    /// 读不回来时抛 <see cref="InvalidDataException"/>，消息是给人看的中文 ——
-    /// 和 MIDI 的读取端（<see cref="MidiReader.Read"/>）同一条规矩：宁可说清楚哪儿坏了，不给英文异常。
+    /// 读不回来时抛 <see cref="InvalidDataException"/>，消息是给人看的中文（与 <see cref="MidiReader.Read"/> 同一条规矩）。
     /// </summary>
     public static (ProjectHeader Header, Song Song) ReadProject(string json)
     {
@@ -100,8 +78,7 @@ public static class SongProjectFile
                 throw new InvalidDataException("工程文件的内容不是一个 JSON 对象，多半不是 .mproj 文件。");
 
             int version = ReadVersion(root);
-            // 比当前新：不猜着读。将来真加了版本 2，迁移就写在下面这一行之后
-            //（「版本 1 → 2 要补什么」是那个版本的事，现在没有）
+            // 比当前新：不猜着读
             if (version > ProjectVersion)
             {
                 throw new InvalidDataException(
@@ -119,20 +96,14 @@ public static class SongProjectFile
 
     /// <summary>
     /// <see cref="Song"/> + 文件头 → 盘上的 .mproj。
-    ///
-    /// 先整体序列化进内存再一次落盘，和 <see cref="MidiWriter.Write"/> 同一个理由：不落半截文件。
-    /// 文件是 **UTF-8 无 BOM**（<see cref="File.WriteAllText(string, string)"/> 的默认），
-    /// 中文因此原样在里面，diff 工具和编辑器都读得懂。
+    /// 先整体序列化进内存再一次落盘，不落半截文件；文件是 UTF-8 无 BOM。
     /// </summary>
     public static void SaveProject(Song song, ProjectHeader header, string path) =>
         File.WriteAllText(path, WriteProject(song, header));
 
     /// <summary>
     /// 盘上的 .mproj → <see cref="Song"/> + 文件头。
-    ///
-    /// 文件不在 / 读不动（被别的程序占着、路径不允许）也抛 <see cref="InvalidDataException"/>：
-    /// 这个特性里「读不回来」只有一种异常，调用方 catch 一处就够，
-    /// 提示语里带着路径和系统给的原因，照样查得出是什么事。
+    /// 文件不在或读不动（被占着、路径不允许）也抛 <see cref="InvalidDataException"/>：「读不回来」只有一种异常。
     /// </summary>
     public static (ProjectHeader Header, Song Song) LoadProject(string path)
     {
@@ -151,15 +122,13 @@ public static class SongProjectFile
 
     /// <summary>
     /// 只问文件头，不碰谱面 —— 曲库列表为每一首读一次的就是它。
-    ///
-    /// 所以它**不抛**：坏了、不是 JSON、读不动，一律返回 null。
-    /// 一首读不出来的曲子不能让整个曲库列表消失 —— 用户得有机会把那首从列表里删掉。
+    /// 不抛：坏了、不是 JSON、读不动，一律返回 null，免得一首坏曲子让整个曲库列表消失。
     /// </summary>
     public static ProjectHeader? TryReadProjectHeader(string path)
     {
         try
         {
-            // 只解析、不建对象：谱面那棵树（每个音符一个对象）一个都不造。
+            // 只解析、不建对象：谱面那棵树一个都不造。
             using var stream = File.OpenRead(path);
             using var document = JsonDocument.Parse(stream);
             var root = document.RootElement;
@@ -183,12 +152,8 @@ public static class SongProjectFile
     private const string SongFieldName = "Song";
 
     /// <summary>
-    /// 工程文件的写法：缩进 + 中文不转义。
-    ///
-    /// 缩进是给 diff 工具的（工程文件会跟着 git 走，一行到底的 JSON 一比就是整文件重写）；
-    /// 中文不转义是给人看的 —— 默认转义会把曲名和导入路径写成一片 <c>\u8D77\u98CE</c>。
-    /// 用 <see cref="UnicodeRanges.All"/> 而不是那个名字很吓人的 Relaxed：
-    /// 中文照样原样写出去，而 <c>&lt;</c>、<c>&amp;</c> 该转义还是转义。
+    /// 工程文件的写法：缩进 + 中文不转义（默认转义会把曲名和路径写成一片转义序列）。
+    /// 用 <see cref="UnicodeRanges.All"/> 而不是 Relaxed：中文原样写出去，<c>&lt;</c>、<c>&amp;</c> 照样转义。
     /// </summary>
     private static readonly JsonWriterOptions WriterOptions = new()
     {
@@ -196,7 +161,7 @@ public static class SongProjectFile
         Encoder = JavaScriptEncoder.Create(UnicodeRanges.All)
     };
 
-    /// <summary>读写共用的序列化设置。写法见 <see cref="WriterOptions"/>，读这边只用到转换器与类型信息。</summary>
+    /// <summary>读写共用的序列化设置，写法见 <see cref="WriterOptions"/>。</summary>
     private static readonly JsonSerializerOptions ProjectJson = CreateProjectJson();
 
     private static JsonSerializerOptions CreateProjectJson()
@@ -206,7 +171,6 @@ public static class SongProjectFile
             WriteIndented = true,
             Encoder = JavaScriptEncoder.Create(UnicodeRanges.All),
             TypeInfoResolver = new DefaultJsonTypeInfoResolver { Modifiers = { DropDerivedProperties } },
-            // 工程文件里不写 null 之外的东西 —— 默认行为就够，这里不额外开任何开关
         };
         options.Converters.Add(new Converters.TimeDivisionConverter());
         options.Converters.Add(new Converters.TempoMapConverter());
@@ -215,25 +179,11 @@ public static class SongProjectFile
     }
 
     /// <summary>
-    /// **只留构造器收得到的那些属性**，公开属性里其余的（= 算出来的派生视图）直接从类型信息里摘掉。
-    ///
-    /// 为什么要摘掉：模型上那些算出来的东西 —— <c>Song.EndTick</c> / <c>TotalSeconds</c>、
-    /// <c>Track.NoteCount</c> / <c>EndTick</c> —— 写进文件就是给同一个事实开了第二个真相源：
-    /// 改一个字段忘改另一个，文件里就自相矛盾；而**读**回来时它们本该由构造器重新算出来，
-    /// 一旦被当成「必填」，字段缺一个就整份工程读不回来。
-    ///
-    /// 为什么是「摘掉」而不是把 <c>ShouldSerialize</c> 设成 false —— 那是这个坑踩出来的：
-    /// STJ 写一个成员时是**先取值、再问要不要写**（<c>GetMemberAndWriteJson</c> 里
-    /// <c>Get(obj)</c> 在 <c>ShouldSerialize</c> 之前），所以设 false 只挡住了写出去，
-    /// 挡不住取值这个动作本身。而派生属性的 getter 是**会抛的**：<c>Song.TotalSeconds</c> 对
-    /// 一个大到不现实的 tick 会抛「时间跨度太大」—— 于是「存一份 tick 很大的工程」会当场炸，
-    /// 而它本该只是一个数字。摘掉之后取值这一步根本不存在。
-    ///
-    /// 用「构造器参数以外的一律不留」这条笼统的规矩，而不是逐个点名：
-    /// 以后模型上再加派生属性（或者加一个真字段）不用回来补名单，规矩自己就成立。
-    /// 这些类型上**没有加任何序列化特性** —— 模型不该知道文件格式这回事。
-    /// （<c>TimeDivision</c> / <c>TempoMap</c> / <c>Note</c> 走各自的转换器，不经过这里，
-    /// 见 <c>Converters</c>。）
+    /// 只留构造器收得到的那些属性，公开属性里其余的（算出来的派生视图）从类型信息里摘掉：
+    /// 写出去会给同一个事实开第二个真相源，读回来时它们本该由构造器重算。
+    /// 摘掉而不是把 <c>ShouldSerialize</c> 设成 false —— STJ 写成员时先取值再问要不要写，
+    /// 而派生属性的 getter 会抛（<c>Song.TotalSeconds</c> 对一个大到不现实的 tick 就抛）。
+    /// 用「构造器参数以外的一律不留」这条笼统规矩，以后加派生属性不用回来补名单。
     /// </summary>
     private static void DropDerivedProperties(JsonTypeInfo info)
     {
@@ -259,8 +209,7 @@ public static class SongProjectFile
             Song song = element.Deserialize<Song>(ProjectJson)
                 ?? throw new InvalidDataException("工程文件里的 Song 字段是空的。");
 
-            // 身份是盘上的数据，进来之前得盘一遍（见下面那个方法：老工程没有这个字段、
-            // 手改过的文件可能两个音一个号，两种都不能往下传）
+            // 身份是盘上的数据，进来之前得盘一遍：老工程没有这个字段，手改过的文件可能两个音一个号。
             return NormalizeIdentities(song);
         }
         catch (JsonException ex)
@@ -274,29 +223,11 @@ public static class SongProjectFile
     }
 
     /// <summary>
-    /// 把读进来的身份盘一遍：合规（互不相同、都不是 0 号）的原样留着，不合规的整轨重发
-    /// （判据与理由都在 <see cref="NoteIdentity.Normalized"/> 上）。
-    ///
-    /// 谁不合规：版本 1 的老工程（存的时候还没有这个字段，读出来全是 0 号）和被人手改过的文件
-    /// （两个音抄成同一个号）。这两种都得在进内存之前修掉 —— 修不掉的坏值一路走下去
-    /// 只会变成「按身份认音认到两个音上」，而且不报错。
-    ///
-    /// <b>身份进了文件，但格式版本号不动</b>（<see cref="ProjectVersion"/> 仍然是 1）：
-    /// <see cref="Converters.NoteConverter"/> 把这个字段**当可选的读**，缺了就整轨重发，
-    /// 所以老文件照样读得进来；老程序读新文件也只是多看见一个不认识的字段，当没看见。
-    /// 两边都没有「得先知道对方是哪个版本」的地方，版本号就没有理由动 ——
-    /// 它是「读到更大的就不猜着读」的那道闸，白抬一下只会把老程序关在门外。
-    ///
-    /// <b>走的是 <see cref="Track"/> 的复制构造，不是 <see cref="Track.WithNotes"/>：</b>
-    /// 那一扇门会顺手按起点排一遍，而这里是在**读文件** —— 文件里写的什么顺序就还是什么顺序，
-    /// 和这个文件一直以来的行为一致（它从头到尾没有替文件重排过）。身份也跟着文件的顺序发，
-    /// 而正常存出来的文件本来就是有序的（按起点升序是模型的承诺），
-    /// 于是「读一份没有身份的老工程」和「重新导入那个 MIDI」发出的号是同一套。
-    ///
-    /// 轨对象**无条件重建**（不合规才换号，但换不换都走同一个循环）：这里比的是
-    /// 「哪个身份该换」这种细节，多一层「没变就别建」的判断，读的人得先把两层条件都想清楚
-    /// 才知道一个音的身份是从哪来的 —— 一份曲子里这些轨各有一个对象，省不下什么。
-    /// 重建出来的轨与原来值相等（<see cref="Track.Equals(Track?)"/> 不比引用）。
+    /// 把读进来的身份盘一遍：合规的（互不相同、都不是 0 号）原样留着，不合规的整轨重发
+    /// （判据见 <see cref="NoteIdentity.Normalized"/>）。版本 1 的老工程和手改过的文件都会落到这里。
+    /// 身份进了文件但格式版本号不动，<see cref="Converters.NoteConverter"/> 把这个字段当可选的读。
+    /// 走 <see cref="Track"/> 的复制构造而不是 <see cref="Track.WithNotes"/>：这里是读文件，
+    /// 文件里什么顺序就还是什么顺序，不替它重排。
     /// </summary>
     private static Song NormalizeIdentities(Song song)
     {
@@ -308,9 +239,8 @@ public static class SongProjectFile
     }
 
     /// <summary>
-    /// 读版本号。**只认数字**：<c>TryGetInt32</c> 对字符串元素是抛异常而不是返回 false
-    /// （见 <c>Converters.TimeDivisionConverter.Field</c> 的注释），不先判一下，
-    /// 「版本号写成字符串」这种坏文件冒出去的就是一句英文的 InvalidOperationException。
+    /// 读版本号，只认数字：<c>TryGetInt32</c> 对字符串元素是抛异常而不是返回 false，
+    /// 不先判一下，「版本号写成字符串」这种坏文件冒出去的就是英文异常。
     /// </summary>
     private static int ReadVersion(JsonElement root)
     {
@@ -324,11 +254,8 @@ public static class SongProjectFile
     }
 
     /// <summary>
-    /// 曲名 / 是否改过 / 从哪导入的，缺了或类型不对**都当没有**，不算坏文件。
-    ///
-    /// 它们只是给人看的信息：曲名本来就从文件名来（见 <c>SongLibrary</c>），
-    /// 「改过没改过」缺省就是没动过，导入来源丢了顶多看不到出处。
-    /// 为这仨字段把一份读得出来的谱面拦在门外，是拿用户的时间换格式的洁癖。
+    /// 曲名 / 是否改过 / 从哪导入的，缺了或类型不对都当没有，不算坏文件 ——
+    /// 它们只是给人看的信息，不值得为它们把一份读得出来的谱面拦在门外。
     /// </summary>
     private static string ReadName(JsonElement root) =>
         root.TryGetProperty(nameof(ProjectHeader.Name), out var element) &&
@@ -353,13 +280,6 @@ public static class SongProjectFile
 /// </summary>
 /// <param name="Version">格式版本，见 <see cref="SongProjectFile.ProjectVersion"/>。</param>
 /// <param name="Name">曲名。也就是它存进曲库后的文件名（去扩展名）。</param>
-/// <param name="Edited">
-/// **粘性**标记：这首曲子被编辑过并且存过盘。
-///
-/// 它是**进度指示**（「这首我动过」），**不是**和原始导入的逐字节比较 ——
-/// 撤销回初始状态也不会把它变回 <c>false</c>，再存一版照样是 <c>true</c>。
-/// 这是有意的，别当 bug 查：要「和刚导入时一模一样」就得留一份原始 MIDI 逐字节比对，
-/// 既费盘又答非所问 —— 用户要看的是「我记得这首还没弄完」，不是文件的哈希。
-/// </param>
+/// <param name="Edited">粘性标记：这首曲子被编辑过并且存过盘。撤销回初始状态也不会变回 <c>false</c>。</param>
 /// <param name="ImportedFrom">当初从哪个文件导入的（原始 MIDI 的全路径）。没导入过的工程是 null。</param>
 public sealed record ProjectHeader(int Version, string Name, bool Edited, string? ImportedFrom);

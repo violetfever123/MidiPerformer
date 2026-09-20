@@ -11,25 +11,18 @@ using NUnit.Framework;
 namespace MidiPerformer.Tests.Perform;
 
 /// <summary>
-/// 整条演奏链拼起来跑一遍：**曲子 → 秒 → 键位 → 事件表 → 派发**。
-///
-/// 各段自己都有测试（02 的 <c>EventBuilderParityTests</c>、这里的 DispatcherTests），
-/// 这一条守的是**接缝**：单位换得对不对（tick 只在这里变成秒）、
-/// 走子的锚点和看门狗的截止点是不是同一个原点、空轨和越界音会不会把链条打断。
-///
-/// 窗口里的编排逻辑（06 起搬进了用例层 <c>StartPerformance</c>）就是照这个顺序写的，
-/// 所以这一条同时是那块编排的可执行说明。
+/// 整条演奏链拼起来跑一遍：曲子 → 秒 → 键位 → 事件表 → 派发。
+/// 各段自己都有测试，这一条守的是接缝：单位换得对不对（tick 只在这里变成秒）、
+/// 走子的锚点和看门狗的截止点是不是同一个原点、空轨会不会把链条打断。
 /// </summary>
 public class PerformChainTests
 {
-    /// <summary>假时钟每被读一次前进的秒数。见 DispatcherTests 关于容差的说明。</summary>
+    /// <summary>假时钟每被读一次前进的秒数。</summary>
     private const double Step = 0.005;
 
     /// <summary>
-    /// 比 DispatcherTests 宽一档：这条链上**看门狗线程也在读同一个假时钟**，
-    /// 而假时钟每被读一次就前进一步 —— 它的读会和派发器自己的读交错，
-    /// 于是记账时刻会比「派发器自己读两次」再多跨一两步。
-    /// 这不是实现的问题，是自动步进时钟被两个线程共用时必然的噪声。
+    /// 比 DispatcherTests 宽一档：这条链上看门狗线程也在读同一个假时钟，
+    /// 它的读会和派发器自己的读交错，记账时刻就会再多跨一两步。
     /// </summary>
     private const double Tol = 4 * Step + 0.001;
 
@@ -37,8 +30,7 @@ public class PerformChainTests
     public void 整曲放完后每个音都发到了并且收好了尾()
     {
         // 240BPM、480 tick/四分音符 → 480 tick = 0.25 秒。
-        // 三个音从 0.25s 起，各 0.125s —— 刻意不摆在 0 秒：目标时刻落在过去的事件
-        // 是「一上来就直接发」的另一条路径，这里要测的是正常的时间轴。
+        // 三个音从 0.25s 起、各 0.125s，不摆在 0 秒：目标时刻落在过去的事件走的是另一条路。
         var song = MidiReader.ReadBytes(SmfWriter.Build(1, 480,
             SmfTrack.Named("旋律")
                 .Tempo(0, 250_000)
@@ -58,7 +50,7 @@ public class PerformChainTests
 
         Assert.That(events, Is.Not.Empty, "三个音一个都没映射成事件");
 
-        // 锚点定在物理 0 秒：走子、看门狗、派发器三者共用这一个原点。
+        // 锚点定在物理 0 秒：走子、看门狗、派发器共用这一个原点
         var walker = new SongWalker(song);
         walker.Start(0.0);
 
@@ -93,8 +85,8 @@ public class PerformChainTests
     }
 
     /// <summary>
-    /// 一条空轨（或者整轨都超出口琴音域）不该把链条打断：事件表是空的，
-    /// 但收尾照样发生。演奏器上「选了一条没音可弹的轨」是正常操作，不是异常。
+    /// 一条空轨不该把链条打断：事件表是空的，但收尾照样发生 ——
+    /// 演奏器上选一条没音可弹的轨是正常操作。
     /// </summary>
     [Test]
     public void 空事件表也走得完()

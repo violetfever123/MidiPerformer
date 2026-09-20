@@ -11,15 +11,8 @@ using ModelTimeDivision = MidiPerformer.Core.Model.TimeDivision;
 namespace MidiPerformer.Tests.Project;
 
 /// <summary>
-/// S1 缝的 .mproj 半边：<see cref="Song"/> + 文件头 ⇄ 工程文件的 JSON。
-///
-/// 断言的口径和 MIDI 那半（<see cref="SongProjectWriteTests"/>）完全一样：
-/// **逐字段、精确、无容差** —— 用同一个 <see cref="SongAssert"/>。
-/// 缝的两半比的是同一个东西，比法也该是同一份实现。
-///
-/// 这里还多盯一件事：文件里**不许出现算出来的属性**
-/// （EndTick / TotalSeconds / NoteCount / BeatsPerMinute / IsSmpte / 那两张表）。
-/// 它们是构造器参数的派生视图，写进去就是第二个真相源，读回来当成必填就更糟。
+/// 工程文件（.mproj）的 <see cref="Song"/> + 文件头与 JSON 之间的往返，逐字段精确比对
+/// （用同一个 <see cref="SongAssert"/>）；并盯住文件里不许出现算出来的派生属性。
 /// </summary>
 public class SongProjectFileTests
 {
@@ -28,7 +21,7 @@ public class SongProjectFileTests
 
     // ==================== 手工拼的曲子：逐字段往返 ====================
 
-    /// <summary>最简的一份：一轨一个音。</summary>
+    /// <summary>一轨一个音。</summary>
     [Test]
     public void 最简的曲子往返逐字段相等()
     {
@@ -39,7 +32,7 @@ public class SongProjectFileTests
         SongAssert.Same(song, SongProjectFile.ReadProject(SongProjectFile.WriteProject(song, Header())).Song, "最简的曲子");
     }
 
-    /// <summary>空曲（0 轨）：速度表和分辨率得有地方待，谱面可以是空的。</summary>
+    /// <summary>0 轨的空曲：速度表和分辨率仍在，谱面是空的。</summary>
     [Test]
     public void 空曲往返逐字段相等()
     {
@@ -60,7 +53,7 @@ public class SongProjectFileTests
         });
     }
 
-    /// <summary>变速曲：速度事件表逐条相等。tick → 秒只认这张表，丢一条整曲都跟着歪。</summary>
+    /// <summary>变速曲的速度事件表逐条相等。</summary>
     [Test]
     public void 变速曲的速度事件表逐条相等()
     {
@@ -80,14 +73,13 @@ public class SongProjectFileTests
         Assert.Multiple(() =>
         {
             SongAssert.Same(song, again, "变速曲");
-            // 500000（120 BPM）是默认速度，构造器会把它从表里去掉 —— 这不是丢数据，
-            // 往返之后两边都不该有它
+            // 500000（120 BPM）是默认速度，构造器会把它从表里去掉，两边都不该有它
             Assert.That(again.TempoMap.TempoChanges.Select(c => c.MicrosecondsPerQuarterNote),
                 Is.EqualTo(new long[] { 400_000, 300_000 }));
         });
     }
 
-    /// <summary>中途变拍：变拍事件只影响显示的小节线，但也得逐条留下。</summary>
+    /// <summary>变拍事件逐条相等，一条都不能少。</summary>
     [Test]
     public void 中途变拍的变拍表逐条相等()
     {
@@ -111,10 +103,7 @@ public class SongProjectFileTests
         });
     }
 
-    /// <summary>
-    /// SMPTE 分辨率。它与 PPQ 是两种模式（帧率 × 每帧 tick，和速度表无关），
-    /// 读回来**不许退化成 PPQ** —— 那是把整首曲子的时间轴换了一根。
-    /// </summary>
+    /// <summary>SMPTE 分辨率（帧率 × 每帧 tick）往返不变，读回来不许退化成 PPQ。</summary>
     [TestCase(24, 40)]
     [TestCase(25, 40)]
     [TestCase(29, 40)]     // 29.97 drop-frame 按 29 存（模型表达不了小数帧率）
@@ -136,7 +125,7 @@ public class SongProjectFileTests
         });
     }
 
-    /// <summary>PPQ 分辨率：从 1（每拍一格）到 32767（MIDI 文件的上限）都得原样。</summary>
+    /// <summary>PPQ 分辨率从 1 到 32767（MIDI 文件的上限）都原样保留。</summary>
     [TestCase(1)]
     [TestCase(96)]
     [TestCase(480)]
@@ -158,10 +147,7 @@ public class SongProjectFileTests
         });
     }
 
-    /// <summary>
-    /// 超长 tick。JSON 里的数字是十进制文本，64 位整数原样写原样读 ——
-    /// 中途若走过 double（很多序列化器这么干），最后几位就会飘，而 tick 一飘整首曲子就错位。
-    /// </summary>
+    /// <summary>超长 tick 一位不差：JSON 数字是十进制文本，64 位整数不经过 double。</summary>
     [Test]
     public void 超长tick往返一位不差()
     {
@@ -184,7 +170,7 @@ public class SongProjectFileTests
         });
     }
 
-    /// <summary>移调是轨的属性，不是音符的 —— 存进文件再读回来还是轨的属性，音符一个字节没动。</summary>
+    /// <summary>移调存在轨上，音符一个字节没动。</summary>
     [TestCase(12)]
     [TestCase(-12)]
     [TestCase(3)]
@@ -206,7 +192,7 @@ public class SongProjectFileTests
         });
     }
 
-    /// <summary>多轨、轨块序号跳号、零时长的音、中文轨名 —— 一份文件里的各种形状一起来。</summary>
+    /// <summary>多轨、跳号的轨块序号、零时长的音、中文轨名一起往返。</summary>
     [Test]
     public void 多轨与跳号的轨块序号往返不变()
     {
@@ -230,7 +216,7 @@ public class SongProjectFileTests
         });
     }
 
-    /// <summary>没有音符的轨往返之后还是「在」，而不是被当成空轨块丢掉 —— 这是 .mproj 与 MIDI 的一处不同。</summary>
+    /// <summary>没有音符的轨往返之后还在，不被当成空轨块丢掉（.mproj 与 MIDI 的一处不同）。</summary>
     [Test]
     public void 没有音符的轨往返之后还在()
     {
@@ -254,12 +240,7 @@ public class SongProjectFileTests
 
     // ==================== 真实语料整体扫一遍 ====================
 
-    /// <summary>
-    /// 每一份真实语料都走一遍「导入 → 存工程 → 读工程 → 逐字段相等」。
-    ///
-    /// 这一条是 .mproj 那半最值钱的一条：真实 MIDI 里的分辨率、变速、变拍、轨名（含 GBK 的）、
-    /// 大 tick 全是实测出来的形状，比手写的边界用例更歪。
-    /// </summary>
+    /// <summary>每一份真实语料都走一遍「导入 → 存工程 → 读工程 → 逐字段相等」。</summary>
     [TestCaseSource(typeof(MidiCorpus), nameof(MidiCorpus.TestFiles))]
     public void 语料存成工程再读回来是同一首曲子(string path)
     {
@@ -273,7 +254,7 @@ public class SongProjectFileTests
         });
     }
 
-    /// <summary>存在盘上再读回来也一样（<see cref="SongProjectFile.SaveProject"/> / <see cref="SongProjectFile.LoadProject"/> 那条路）。</summary>
+    /// <summary>经 <see cref="SongProjectFile.SaveProject"/> / <see cref="SongProjectFile.LoadProject"/> 落盘再读回来也一样。</summary>
     [TestCaseSource(typeof(MidiCorpus), nameof(MidiCorpus.TestFiles))]
     public void 语料落盘成mproj再读回来是同一首曲子(string path)
     {
@@ -299,10 +280,7 @@ public class SongProjectFileTests
         }
     }
 
-    /// <summary>
-    /// 语料整体上这条往返不是空转 —— 和 MIDI 那半同样的理由：
-    /// 逐条比对的测试对空壳文件是空转的（两边都是零条轨）。
-    /// </summary>
+    /// <summary>语料整体上往返不是空转：逐条比对对空壳文件是空转的。</summary>
     [Test]
     public void 语料整体上工程往返不是空转()
     {
@@ -346,7 +324,7 @@ public class SongProjectFileTests
         });
     }
 
-    /// <summary>没导入过的工程（从头新建的）没有来源，读回来还该是没有。</summary>
+    /// <summary>没导入来源的工程读回来仍是空。</summary>
     [Test]
     public void 没有导入来源时往返还是空()
     {
@@ -359,7 +337,7 @@ public class SongProjectFileTests
         });
     }
 
-    /// <summary>中文曲名与中文路径要原样躺在文件里（转义成 \uXXXX 的话 diff 就没法看了）。</summary>
+    /// <summary>中文曲名与路径原样写在文件里，不转义成 \uXXXX。</summary>
     [Test]
     public void 中文在文件里是原样的字()
     {
@@ -368,16 +346,13 @@ public class SongProjectFileTests
         Assert.Multiple(() =>
         {
             Assert.That(json, Does.Contain("夜空中最亮的星"));
-            // 路径里那条反斜杠被 JSON 转义成两个（"\\"）是 JSON 本身的规矩，不是中文的问题
+            // 路径里的反斜杠被 JSON 转义成两个（"\\"）是 JSON 的规矩，与中文无关
             Assert.That(json, Does.Contain(@"我的谱子\\星.mid"));
             Assert.That(json, Does.Not.Contain("\\u"), "不该有 \\uXXXX 转义");
         });
     }
 
-    /// <summary>
-    /// 写文件时**用当前版本**，不照调用方手里那个数写：我们只写得出一种格式，
-    /// 照抄一个别的数字等于让文件声称自己是另一种格式。
-    /// </summary>
+    /// <summary>写文件一律用当前版本，不照调用方手里那个数写。</summary>
     [Test]
     public void 版本号一律写当前版本()
     {
@@ -386,9 +361,7 @@ public class SongProjectFileTests
         Assert.That(json, Does.Contain($"\"Version\": {SongProjectFile.ProjectVersion}"));
     }
 
-    /// <summary>
-    /// 工程文件是给人看的：缩进过的，diff 工具一比就是几行改动，而不是整文件重写。
-    /// </summary>
+    /// <summary>写出来的是缩进过的 JSON。</summary>
     [Test]
     public void 写出来的是缩进过的JSON()
     {
@@ -405,15 +378,8 @@ public class SongProjectFileTests
     // ==================== 文件里不许出现算出来的属性 ====================
 
     /// <summary>
-    /// 模型上那些**算出来的**属性一个都不许写进文件。
-    ///
-    /// 它们全是构造器参数的派生视图（EndTick 是起点加时值算的、BeatsPerMinute 是微秒除出来的、
-    /// IsSmpte 是帧率判出来的、NoteCount 就是音符的条数）。写进文件 = 第二个真相源：
-    /// 改一个忘改另一个文件就自相矛盾，而读回来当成必填就更糟 —— 缺一个字段整份工程就读不回来。
-    ///
-    /// 反过来，**构造器的参数一个都不能少**：速度表的两张表就是参数本身
-    /// （<c>TempoChanges</c> / <c>TimeSignatureChanges</c>），少了它们整首曲子就变回 120 BPM。
-    /// 这一条是那份「不许写」名单的边界，所以下面正反两面都点一遍。
+    /// 派生属性（EndTick / TotalSeconds / NoteCount / BeatsPerMinute / IsSmpte）一个都不写进文件；
+    /// 而速度表的两张表（<c>TempoChanges</c> / <c>TimeSignatureChanges</c>）是构造器参数，必须在。
     /// </summary>
     [Test]
     public void 文件里没有算出来的属性()
@@ -427,18 +393,13 @@ public class SongProjectFileTests
             foreach (var name in derived)
                 Assert.That(json, Does.Not.Contain($"\"{name}\""), $"{name} 是算出来的，不该进文件");
 
-            // 这两样名字看着像派生属性，其实是 TempoMap 的构造器参数 —— 它们是数据本身，必须在
+            // 这两个名字看着像派生属性，其实是 TempoMap 的构造器参数，是数据本身
             Assert.That(json, Does.Contain("\"TempoChanges\""), "速度表是数据，得写进文件");
             Assert.That(json, Does.Contain("\"TimeSignatureChanges\""), "变拍表是数据，得写进文件");
         });
     }
 
-    /// <summary>
-    /// 反过来：把派生属性**塞进**文件也得读得回来 —— 它们不是必填，也不该被当数据收下。
-    ///
-    /// 这条模拟「别人手改过 / 别的版本多写了一个字段」的文件：
-    /// 读取端得照着构造器参数把谱面重建出来，多出来的字段当没看见。
-    /// </summary>
+    /// <summary>文件里多出派生字段也读得回来，多出来的字段当没看见。</summary>
     [Test]
     public void 文件里多出派生字段也能读回来()
     {
@@ -450,12 +411,7 @@ public class SongProjectFileTests
         SongAssert.Same(SingleNoteSong(), song, "多写了派生字段的工程");
     }
 
-    /// <summary>
-    /// 写的是不是模型本身：模型上多一个公开字段就该跟着进文件（不靠名单，靠构造器）。
-    ///
-    /// 音符那一串里现在多了 <c>Id</c>（身份，见这条工单的说明）—— 它也是构造器参数，
-    /// 所以按这条规矩它就该在文件里，而这个断言跟着加一个名字，不是给它开例外。
-    /// </summary>
+    /// <summary>文件里的字段就是构造器的参数：轨、音符、速度表各写出的名字逐一对上。</summary>
     [Test]
     public void 文件里的字段就是构造器的参数()
     {
@@ -474,7 +430,7 @@ public class SongProjectFileTests
                 new[] { "TrackIndex", "Channel", "Name", "Program", "Notes", "Transpose" }));
             Assert.That(noteFields, Is.EquivalentTo(
                 new[] { "Pitch", "StartTick", "LengthTicks", "Velocity", "Id" }));
-            // 速度表只留「分辨率 + 两张表」三样，没有第四样
+            // 速度表只有「分辨率 + 两张表」三样
             Assert.That(mapFields, Is.EquivalentTo(
                 new[] { "Division", "TempoChanges", "TimeSignatureChanges" }));
             Assert.That(songNode.EnumerateObject().Select(p => p.Name), Is.EquivalentTo(
@@ -482,7 +438,7 @@ public class SongProjectFileTests
         });
     }
 
-    /// <summary>顶层的形状：文件头四个字段 + Song，平铺在一层。</summary>
+    /// <summary>文件头四个字段 + Song，平铺在顶层。</summary>
     [Test]
     public void 顶层是文件头加Song()
     {
@@ -494,13 +450,7 @@ public class SongProjectFileTests
 
     // ==================== 身份 ====================
 
-    /// <summary>
-    /// 存盘再打开，身份一个都不换。
-    ///
-    /// 号刻意不是 1..N（7、9、11）：这条测试因此同时证明「读取端不会顺手把身份重发一遍」——
-    /// 合规的身份（互不相同、都不是 0）原样留着，只有坏的那些才重发。
-    /// 比身份得单独比：它不算内容，<see cref="SongAssert"/> 那条路比不到它（见下面那个帮手的说明）。
-    /// </summary>
+    /// <summary>存盘再打开身份一个都不换：号取 7、9、11 而非 1..N，以证明合规的身份原样留着、不重发。</summary>
     [Test]
     public void 存盘再打开身份不变()
     {
@@ -515,15 +465,7 @@ public class SongProjectFileTests
             "身份写出去、读回来还是原来那三个号");
     }
 
-    /// <summary>
-    /// 版本 1 的老工程（那时候还没有身份这个字段）读回来照样是一份有身份的谱面：
-    /// 缺了就按文件里的顺序整轨重发。
-    ///
-    /// 「身份可选」那一半的兑现就在这儿 —— 老文件读得进来，而且进来的不是一轨 0 号
-    /// （0 号在模型里是「没有身份」，一路传到界面上就成了个认不出来的音）。
-    /// 手工拼的曲子（<see cref="SingleNoteSong"/> 那种，Id 是默认的 0）走的是同一条路：
-    /// 文件里写着 <c>"Id": 0</c>，读出来同样是 0 号，同样整轨重发。
-    /// </summary>
+    /// <summary>老工程没有 Id 字段时，按文件里的顺序整轨重发，号从 1 开始而不是留 0 号。</summary>
     [Test]
     public void 老工程里没有身份时按位置重发()
     {
@@ -532,8 +474,7 @@ public class SongProjectFileTests
             new ModelNote(62, 480, 480, 100, new NoteId(9)),
             new ModelNote(64, 960, 480, 100, new NoteId(11))), Header());
 
-        // 模拟版本 1 写出来的文件：把身份字段整行删掉。前面那个逗号要一起删 ——
-        // 留着的话 JSON 里就有个悬空逗号，文件连解析都过不去，那测的就不是这条了。
+        // 模拟老文件：连前面的逗号一起删，否则 JSON 里留下悬空逗号，文件连解析都过不去
         json = Regex.Replace(json, @",\s*""Id"": \d+", "");
 
         var (_, song) = SongProjectFile.ReadProject(json);
@@ -546,13 +487,7 @@ public class SongProjectFileTests
         });
     }
 
-    /// <summary>
-    /// 文件里的身份重号了（人手动改过、或者哪天写坏了）：整轨重发，而不是硬着头皮往下传。
-    ///
-    /// 为什么不容忍：身份在轨内唯一是这份数据唯一要保证的事。重号之后「按身份认音」会认到两个音上，
-    /// 而且不报错 —— 正是这条工单要消灭的那种坏。为什么是整轨重发、不是给重复的那个补个号，
-    /// 理由写在 <c>NoteIdentity.Normalized</c> 上。
-    /// </summary>
+    /// <summary>文件里的身份重号时整轨重发，不硬着头皮往下传。</summary>
     [Test]
     public void 文件里的身份重号时整轨重发()
     {
@@ -576,7 +511,7 @@ public class SongProjectFileTests
         Assert.That(ex!.Message, Does.Contain("空的"), "错误消息得是给人看的中文");
     }
 
-    /// <summary>截断的 JSON：写到一半断掉的文件就长这样。</summary>
+    /// <summary>截断的 JSON（写到一半断掉的文件）。</summary>
     [Test]
     public void 截断的JSON报清楚的错不崩()
     {
@@ -606,7 +541,7 @@ public class SongProjectFileTests
         Assert.That(ex!.Message, Does.Contain("不是一个 JSON 对象"));
     }
 
-    /// <summary>版本比当前新：不猜着读。猜出来的谱面比读不出来更坏。</summary>
+    /// <summary>版本比当前新时报错，不猜着读。</summary>
     [Test]
     public void 版本比当前新时报清楚的错不崩()
     {
@@ -631,11 +566,11 @@ public class SongProjectFileTests
         Assert.That(ex!.Message, Does.Contain("版本号"));
     }
 
-    /// <summary>缺 Song：这不是 .mproj，或者保存时没写完。</summary>
+    /// <summary>缺 Song 字段（不是 .mproj，或保存时没写完）。</summary>
     [Test]
     public void 缺Song字段时报清楚的错不崩()
     {
-        // 版本号是好的、就是没有谱面 —— 得说「没有 Song」，而不是笼统地说文件坏了
+        // 版本号是好的、只是没有谱面
         string json = $"{{\"Version\": {SongProjectFile.ProjectVersion}, \"Name\": \"只有文件头\"}}";
 
         var ex = Assert.Throws<InvalidDataException>(() => SongProjectFile.ReadProject(json));
@@ -651,7 +586,7 @@ public class SongProjectFileTests
         Assert.That(ex!.Message, Does.Contain("Song"));
     }
 
-    /// <summary>分辨率缺字段 / 值非法 —— 走的是 <c>TimeDivisionConverter</c> 那条路。</summary>
+    /// <summary>分辨率缺字段，走的是 <c>TimeDivisionConverter</c> 那条路。</summary>
     [Test]
     public void 分辨率缺字段时报清楚的错不崩()
     {
@@ -662,7 +597,7 @@ public class SongProjectFileTests
         Assert.That(ex!.Message, Does.Contain("分辨率"), "错误消息得是给人看的中文");
     }
 
-    [TestCase(0)]      // 除以零没有意义（MIDI 读取端也拦这一条）
+    [TestCase(0)]      // 除以零没有意义
     [TestCase(-480)]
     public void 分辨率是非法值时报清楚的错不崩(int ticksPerQuarterNote)
     {
@@ -673,7 +608,7 @@ public class SongProjectFileTests
         Assert.That(ex!.Message, Does.Contain("分辨率"));
     }
 
-    /// <summary>分辨率不是个整数（被手改成了小数或字符串）也要说清楚，而不是崩在转换里。</summary>
+    /// <summary>分辨率不是整数（小数或字符串）也要报清楚的错。</summary>
     [TestCase("480.5")]
     [TestCase("\"480\"")]
     public void 分辨率不是整数时报清楚的错不崩(string written)
@@ -696,7 +631,7 @@ public class SongProjectFileTests
         Assert.That(ex!.Message, Does.Contain("分辨率"));
     }
 
-    /// <summary>音符里少一个字段：这是一份被改坏的工程，得说清是谱面读不出来。</summary>
+    /// <summary>音符里少一个字段时报清楚的错，并说清少的是哪个。</summary>
     [Test]
     public void 音符缺字段时报清楚的错不崩()
     {
@@ -713,14 +648,8 @@ public class SongProjectFileTests
     }
 
     /// <summary>
-    /// 音符里写着物理上不可能的值。
-    ///
-    /// 为什么这类也要拦：STJ 对**缺字段**是悄悄补 0 的（所以 <c>Note</c> 有自己的转换器），
-    /// 而 0 力度 / 0 时值 / 负数 tick 都是「读出来了一个错的谱面还告诉用户没问题」。
-    ///
-    /// 身份也在这个筐里：负数身份不是「没有身份」而是个坏值，放过去会一路混进按身份认音的地方
-    /// （那条路认错了不报错，只是认到别的音上）；写成字符串同理 —— 它连数都不是。
-    /// 但身份**缺失**不算坏值：老工程就是那样，缺了整轨重发（见上面那条测试）。
+    /// 音符里写着不可能的值（越界音高、0 力度、负数 tick、负数或非数字的身份）时报清楚的错；
+    /// 身份缺失不算坏值，走整轨重发。
     /// </summary>
     [TestCase("\"Pitch\": 60", "\"Pitch\": 128", "音高")]
     [TestCase("\"Pitch\": 60", "\"Pitch\": -1", "音高")]
@@ -743,7 +672,7 @@ public class SongProjectFileTests
         });
     }
 
-    /// <summary>文件头缺字段**不算坏文件**：曲名从文件名来，改过没改过缺省就是没动过。</summary>
+    /// <summary>文件头缺字段不算坏文件，用缺省值补齐。</summary>
     [Test]
     public void 文件头缺字段照样读得出来()
     {
@@ -849,10 +778,7 @@ public class SongProjectFileTests
         }
     }
 
-    /// <summary>
-    /// 坏文件返回 null，**不抛** —— 曲库列表为每一首读一次头，
-    /// 一首读不出来的不能让整个列表消失：用户得有机会把它删掉。
-    /// </summary>
+    /// <summary>坏文件返回 null 不抛：曲库列表为每首读一次头，一首读不出来不该让整个列表消失。</summary>
     [TestCase("")]
     [TestCase("{")]                                             // 截断
     [TestCase("不是 JSON")]                                       // 压根不是 JSON
@@ -882,12 +808,7 @@ public class SongProjectFileTests
         Assert.That(SongProjectFile.TryReadProjectHeader(missing), Is.Null);
     }
 
-    /// <summary>
-    /// 只读头，不碰谱面：把 Song 换成一坨垃圾，头照样问得出来。
-    ///
-    /// 这一条盯的是「曲库列表不必为了显示曲名把整首曲子反序列化一遍」——
-    /// 列表要为每一首读一次，读整棵树是白花的钱。
-    /// </summary>
+    /// <summary>只读头不碰谱面：把 Song 换成一坨垃圾，头照样问得出来。</summary>
     [Test]
     public void 问文件头时不碰谱面()
     {
@@ -912,23 +833,17 @@ public class SongProjectFileTests
 
     // ==================== 帮手 ====================
 
-    /// <summary>一轨一个音的最小曲子，好几条测试拿它当素材。</summary>
+    /// <summary>一轨一个音的最小曲子。</summary>
     private static Song SingleNoteSong() => new(
         new[] { new Track(0, 0, "主旋律", 0, new[] { new ModelNote(60, 0, 480, 100) }) },
         new ModelTempoMap(ModelTimeDivision.PulsesPerQuarter(480)));
 
-    /// <summary>一轨多音的小曲子，音符（含身份）由调用方给 —— 身份那几条测试要的是「号不是 1..N」的形状。</summary>
+    /// <summary>一轨多音的小曲子，音符（含身份）由调用方给。</summary>
     private static Song SongOf(params ModelNote[] notes) => new(
         new[] { new Track(0, 0, "主旋律", 0, notes) },
         new ModelTempoMap(ModelTimeDivision.PulsesPerQuarter(480)));
 
-    /// <summary>
-    /// 逐条比身份。
-    ///
-    /// 为什么不并进 <see cref="SongAssert.Same"/>：那个帮手比的是**内容**，而 <c>Note</c> 的值相等
-    /// 刻意不比身份（见 <c>Note.Equals</c> 的说明）。两件事分开写，谁要哪一件一目了然 ——
-    /// 缝上那几条测试要比的是「同一份谱面」，而存盘往返这条路径还得额外保证「同一套身份」。
-    /// </summary>
+    /// <summary>逐条比身份：<see cref="SongAssert.Same"/> 比的是内容，不含身份。</summary>
     private static void AssertSameIds(Song expected, Song actual, string because)
     {
         Assert.That(actual.Tracks, Has.Count.EqualTo(expected.Tracks.Count), $"{because}：轨数");
