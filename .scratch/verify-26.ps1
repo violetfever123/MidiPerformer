@@ -358,7 +358,7 @@ function 曲名格($行) { (行里的文字 $行)[0] }
 # 26 号工单要量的东西
 #
 # 七条验收里，**六条能在这台机器上量**（提示行的字、窄窗出省略号、悬停看全文、
-# 播放/暂停与 ■ 停止 的 ToolTip、撤销重做的键位只在一处、改名按钮连 ToolTip 一起没了），
+# 播放/暂停与 ↻ 重头播放 的 ToolTip、撤销重做的键位只在一处、改名按钮连 ToolTip 一起没了），
 # 第七条「和实际键位**逐条**对得上」的**语义**那一半不在这儿量：它在
 # `ShortcutHintTests.提示里的每个手势在按键那一段里都真的绑着`（拿提示里每个手势
 # 去 `OnWindowKeyDown` 的方法体里找绑定，9 对）—— 那是机器测过的。
@@ -467,7 +467,10 @@ function 找音符 {
 
 $预期 = '空格 播放/暂停 · ← → 移时间（一格 = 十六分）· ↑ ↓ 移音高 · Shift + ← → 改时值 · Ctrl + ← → 同轨前后跳 · Ctrl + ↑ ↓ 换轨 · Delete 删除 · Ctrl+Z 撤销 / Ctrl+Y 重做'
 $预期播放 = '播放 / 暂停：从播放头当前位置开始，再按停在原地、再按从那儿接着放（空格键同效）'
-$预期停止 = '停下来（急停是 F6）'
+# 33 号工单把 `■ 停止` 换成了 `↻ 重头播放` —— 26 号当年钉的是前者那句
+# 「停下来（急停是 F6）」，那句话连着那颗按钮一起作废了。这儿按**新的事实**改：
+# 元素名、Content、ToolTip 三样都换掉，判据一条不少（还是「逐字相等」）。
+$预期重播 = '重头播放：播放头回开头、视野回第一小节，立刻开始放'
 $读数栏 = @('ReadoutTrackText', 'ReadoutPitchText', 'ReadoutBarText', 'ReadoutBeatText', 'ReadoutLengthText')
 function 读数元素 { @($读数栏 | ForEach-Object { 按编号 $_ }) }
 function 提示行 { (按编号 'HintText') }
@@ -684,18 +687,21 @@ $别走 = @([V25]::Others($脚本PID, $h))
 断言真 '鼠标移开之后那张纸收起来了（不是赖着不走的浮层）' ($别走.Count -eq $别前.Count) "从 $($别后.Count) 回到 $($别走.Count)"
 
 # ---------- 5. 恢复全宽，量三处 ToolTip ----------
-Write-Host "`n=== 5. 播放/暂停、■ 停止 的 ToolTip ==="
+Write-Host "`n=== 5. 播放/暂停、↻ 重头播放 的 ToolTip ==="
 $r回 = 摆窗 405 300 2360 1300
 Write-Host "  窗口回 $([int]$r回.Width)x$([int]$r回.Height)"
 $播 = 按编号 'PlayButton'
-$停 = 按编号 'StopButton'
+$停 = 按编号 'StopButton'          # 33 号拆掉的那颗：下面断言它**找不到**（这就是「真的拆了」）
+$重播 = 按编号 'RestartButton'
 断言真 '播放键只有一个' ($播.Count -eq 1) "找到 $($播.Count) 个"
-断言真 '■ 停止 键只有一个' ($停.Count -eq 1) "找到 $($停.Count) 个"
+断言真 '走带条上没有 ■ 停止 了（33 号换掉了）' ($停.Count -eq 0) "找到 $($停.Count) 个"
+断言真 '↻ 重头播放 键只有一个' ($重播.Count -eq 1) "找到 $($重播.Count) 个"
 if ($播.Count -eq 1) {
   断言真 '播放/暂停的 ToolTip 逐字是那一句' ($播[0].Current.HelpText -ceq $预期播放) "读到「$($播[0].Current.HelpText)」"
 }
-if ($停.Count -eq 1) {
-  断言真 '■ 停止 的 ToolTip 一个字都没动' ($停[0].Current.HelpText -ceq $预期停止) "读到「$($停[0].Current.HelpText)」"
+if ($重播.Count -eq 1) {
+  断言真 '↻ 重头播放 的按钮字逐字是那一句' ($重播[0].Current.Name -ceq '↻ 重头播放') "读到「$($重播[0].Current.Name)」"
+  断言真 '↻ 重头播放 的 ToolTip 逐字是那一句' ($重播[0].Current.HelpText -ceq $预期重播) "读到「$($重播[0].Current.HelpText)」"
 }
 
 # ---------- 6. 撤销/重做的键位只在一处 ----------

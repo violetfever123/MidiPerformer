@@ -329,7 +329,7 @@ public partial class MainWindow : Window
         JumpBox.Text = "1";
 
         // 走带条跟着新曲子回位。**就这一处规矩**（RefreshTransport），
-        // 手写 PlayButton/StopButton 那两行的地方从前有三处，改一处漏两处
+        // 手写 PlayButton/RestartButton 那两行的地方从前有三处，改一处漏两处
         RefreshTransport();
         JumpBox.IsEnabled = true;
         // 有谱面就写得出，哪怕一个音都没有 —— 速度表和分辨率也值得留下来，
@@ -1292,7 +1292,31 @@ public partial class MainWindow : Window
         RefreshView();
     }
 
-    private void OnStopClick(object? sender, RoutedEventArgs e) => StopPlayback();
+    private void OnRestartClick(object? sender, RoutedEventArgs e) => RestartPlayback();
+
+    /// <summary>
+    /// 重头播放（33 号工单把走带条右边那颗 `■ 停止` 换成了它）：
+    /// **播放头回开头、视野回第一小节，然后立刻开始放。**
+    ///
+    /// 「开头」照抄 <see cref="OnNavSeek"/> 的算法（`TickOfBarClamped(0)` 那条），
+    /// 不硬写 <c>SeekSeconds(0)</c>：两处对「开头在哪」必须是同一个定义。
+    ///
+    /// 这一步**不做 <c>Stop()</c>**。正在播的时候按它，<see cref="PreviewPlayback.Play"/>
+    /// 那句 <c>Seek(MusicNow)</c> 拿到的就是刚寻过去的开头，于是自然变成「从头重放」——
+    /// 中间插一次 <c>Stop</c> 只会多改一次状态（它顺带把暂停态清掉），对结果没有任何影响，
+    /// 却会让人以为「必须先停一下才敢重放」。
+    /// </summary>
+    private void RestartPlayback()
+    {
+        if (_controller is null) return;
+
+        _controller.CenterOnBar(0);
+        _playback.SeekSeconds(_controller.Song.TempoMap.SecondsAt(_controller.TickOfBarClamped(0)));
+        // 之后的事全归 StartPlayback：它 RefreshTransport（按钮亮灭 / 字）+ RefreshView
+        // （红线、「位置」读数、缩略图都在里面）。这儿不额外补那两下 ——
+        // 补了就是第二处规矩，迟早和第一处不一样。
+        StartPlayback();
+    }
 
     /// <summary>停下：松掉所有正在响的音，并把视图对齐到小节线（标注 4）。</summary>
     private void StopPlayback()
@@ -1330,9 +1354,11 @@ public partial class MainWindow : Window
 
         // 判据和换曲子那儿一致：**有轨才放得响**，一条轨都没有的谱面按了也是白按
         PlayButton.IsEnabled = _song is { Tracks.Count: > 0 };
-        // ■ 始终可用（有谱面就能按）：它是「这段我听完了，视野回小节」，
-        // 没在放的时候按一下也有意义 —— 而灰着会让人以为「停了就不能再停」
-        StopButton.IsEnabled = _song is not null;
+        // ↻ 的判据跟播放键**一模一样**（33 号工单改的）：它的意义就是「放」，
+        // 没东西可放时亮着等于承诺一件做不到的事。
+        // 从前这儿是 `_song is not null`（■ 始终可用）—— 那是「停下」的判据：
+        // 「我听完了、视野回小节」对空谱面也讲得通。换了语义，判据跟着换。
+        RestartButton.IsEnabled = _song is { Tracks.Count: > 0 };
     }
 
     /// <summary>

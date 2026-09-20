@@ -539,13 +539,14 @@
         走带条是**两颗**（21 把「位置」「时长」两栏搬走了）：
         左边一颗切换 —— 播放中写「⏸ 暂停」、暂停中写「▶ 继续」、其余写「▶ 播放」，
         字问状态要（见 refreshTransport），不记「上次点了什么」；
-        右边一颗 ■ 停止。合成一颗是不行的：「我就停在这，等下接着听」和「这段我听完了」
-        是两件事，后者顺带把视野拉回小节线，前者一个像素都不动。
+        右边一颗 **↻ 重头播放** —— 播放头回开头、视野回第一小节、立刻开始放。
+        （33 号之前这儿是「■ 停止」：停下来 + 视野对齐小节线。那颗按钮的两件事
+        ——「停在这」归暂停、「我听完了」归这一颗顺带把视野送回第一小节 —— 都有人管了。）
         最右边那句是**没有循环**的意思：放完自动停止并松开所有按键。
       -->
       <div class="transport">
         <button class="tbtn play" id="btnplay" aria-pressed="false">▶ 播放</button>
-        <button class="tbtn" id="btnstop">■ 停止</button>
+        <button class="tbtn" id="btnrestart">↻ 重头播放</button>
         <span class="bpm">速度 <input type="text" id="bpm" class="mono" value="76"> <span class="unit">拍/分</span></span>
         <span class="noloop">放完自动停止并松开所有按键</span>
       </div>
@@ -566,7 +567,7 @@
       </div>
       <div class="annot">
         <span class="n">4</span><span class="t">按播放看它自己流过去</span>
-        <p>播放时视图连续滚动，把播放头保持在屏幕左侧约 1/3 处（留出前瞻）。停止时视图自动对齐到小节线——你按停止就是要改东西，不该让你面对半截小节。把速度改成 152 再按播放，播放头会走两倍快。</p>
+        <p>播放时视图连续滚动，把播放头保持在屏幕左侧约 1/3 处（留出前瞻）。放完自动停止时视图自动对齐到小节线——收尾就该收在整小节上，不该让你面对半截小节。（从前还有一颗「■ 停止」也做这件事，33 号换成了 <b>↻ 重头播放</b>：回开头、回第一小节、立刻重放。）把速度改成 152 再按播放，播放头会走两倍快。</p>
       </div>
       <div class="annot">
         <span class="n">5</span><span class="t">垂直方向也固定</span>
@@ -849,7 +850,7 @@
   var jumpInput = document.getElementById("jump");
   var bpmInput  = document.getElementById("bpm");
   var btnPlay   = document.getElementById("btnplay");
-  var btnStop   = document.getElementById("btnstop");
+  var btnRestart = document.getElementById("btnrestart");
 
   var rollEls = Array.prototype.slice.call(document.querySelectorAll(".roll"));
 
@@ -1061,7 +1062,16 @@
   }
 
   btnPlay.addEventListener("click", startPlay);
-  btnStop.addEventListener("click", function(){ stopPlay(false); });
+  // ↻ 重头播放（33 号）：播放头回开头、视野回第一小节，**立刻开始放**。
+  // 不走 stopPlay —— 那一停清掉「暂停」、还把视野 snap 到**当前**小节，
+  // 而这里要的是「不管此刻是什么状态，都从 0 重来」。
+  btnRestart.addEventListener("click", function(){
+    if (playing) cancelAnimationFrame(rafId);
+    playing = false; paused = false;
+    posStep = 0; viewStep = 0;
+    renderAll();
+    startPlay();
+  });
 
   bpmInput.addEventListener("change", function(){
     var v = parseFloat(bpmInput.value);

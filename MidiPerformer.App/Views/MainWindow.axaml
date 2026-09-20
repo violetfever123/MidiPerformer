@@ -362,8 +362,8 @@
         -->
         <!--
           走带条是**两颗**：左边一颗切换（▶ 播放 / ⏸ 暂停 / ▶ 继续，字在 RefreshTransport 里换），
-          右边一颗 ■ 停止。合成一颗是不行的 —— 「我就停在这，等下接着听」和「这段我听完了」
-          是两件事，后者顺带把视野拉回小节线，前者一个像素都不动。
+          右边一颗 ↻ 重头播放。
+          从前右边是 ■ 停止 —— 33 号工单换掉了，理由写在那颗按钮上面。
         -->
         <!--
           播放那颗的 ToolTip 说的是**它是一个切换键**（20 号工单）——
@@ -375,16 +375,22 @@
                 ToolTip.Tip="播放 / 暂停：从播放头当前位置开始，再按停在原地、再按从那儿接着放（空格键同效）"
                 Click="OnPlayClick" />
         <!--
-          ■ 的 ToolTip **保留不动**（26 号工单点名）：它说的「急停是 F6」是另一件事 ——
-          那个 F6 是全局低层键盘钩子（见 GlobalHotkeys），装/摘都在演奏器窗口，
-          26 号这一票一个字节都没碰它，所以这句话此刻依然准确。
-          （生效范围有一点要知道：钩子只在演奏器窗口开着的时候装着，见
-          MainWindow.axaml.cs 里那句「本窗口不 new 那个窗」。）
+          这一颗 33 号工单换过：从前是 `■ 停止`（停下来 + 视野对齐小节线），现在是
+          **`↻ 重头播放`**（回开头 + 立刻放）。
+          换掉的理由：那颗按钮的两件事，「停在这」早已归暂停（空格）、
+          「我听完了」也能由「回开头顺带把视野送回第一小节」做掉 —— 而留着一颗语义和暂停
+          大半重叠的按钮，只会让人在「我到底该按哪个」上停一下。
+          `↻` 是字符（U+21BB），跟旁边的 `▶ ⏸` 一个做法，不引图标依赖。
+
+          那一句「急停是 F6」**跟着按钮一起没了**，不是丢了提示：F6 的提示本来就在
+          演奏器窗口（`PerformerWindow.axaml` 的「F6 急停」、悬浮层里两处），
+          而全局钩子只在演奏器窗口开着的时候才装着 —— 摆在编辑窗口这儿本来就是第二处，
+          还容易让人以为这个小窗口上也管着 F6。
         -->
-        <Button Grid.Column="1" x:Name="StopButton" Classes="transport"
-                Content="■ 停止" IsEnabled="False" IsTabStop="False" Margin="12,0,0,0"
-                ToolTip.Tip="停下来（急停是 F6）"
-                Click="OnStopClick" />
+        <Button Grid.Column="1" x:Name="RestartButton" Classes="transport"
+                Content="↻ 重头播放" IsEnabled="False" IsTabStop="False" Margin="12,0,0,0"
+                ToolTip.Tip="重头播放：播放头回开头、视野回第一小节，立刻开始放"
+                Click="OnRestartClick" />
 
         <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="7" Margin="12,0,0,0">
           <TextBlock Classes="label" Text="速度" />

@@ -15,7 +15,7 @@ namespace MidiPerformer.Tests.Visual;
 ///
 /// 1. 提示行（<see cref="Format.ReadoutHint"/>）里点名的每个手势，<c>OnWindowKeyDown</c> 里都真的绑着
 /// 2. 提示行单行 + 省略号，全文从 ToolTip 看，而 ToolTip 喂的是**同一个常量**（不是抄的第二份）
-/// 3. 三处 ToolTip 各有各的着落：播放按钮改口、撤销 / 重做删掉、■ 停止原样留着
+/// 3. 三处 ToolTip 各有各的着落：播放按钮改口、撤销 / 重做删掉、■ 停止 换成 ↻ 重头播放（33 号）
 /// 4. 轨头的「改名」按钮确实没了（25 号工单留下的空档，这条只在 26 的验收单上收口）
 ///
 /// **不起 Avalonia。** 这里量的是「文件里写着什么」，不是「控件摆成了什么样」——
@@ -211,16 +211,38 @@ public class ShortcutHintTests
     }
 
     /// <summary>
-    /// `■ 停止` 的 ToolTip **原样不动**，连一个字都不改 —— 它说的「急停是 F6」是另一件事
-    /// （全局低层键盘钩子，见 <c>GlobalHotkeys</c>），26 号这一票没碰过那条路。
+    /// `■ 停止` **整个没了**（33 号工单把它换成了 `↻ 重头播放`），它那句 ToolTip
+    /// 「停下来（急停是 F6）」跟着一起走。
     ///
-    /// 逐字钉住是故意的：这一票的其余三处都在改口，唯一没改的那一处恰恰最容易被顺手「统一」掉。
+    /// 26 号钉的是「这句话一个字都没动」；33 号改了那颗按钮的语义，那句话就作废了 ——
+    /// 但这条测试**不删**，改钉新事实：
+    ///
+    /// - 走带条上没有 `■ 停止` 了（谁把它加回来，先在这里红）
+    /// - 顶上那颗是 `↻ 重头播放`，提示语说的是它真做的事
+    ///
+    /// 「急停是 F6」这句提示没丢：它本来就在**演奏器窗口**
+    /// （`PerformerWindow.axaml` 的「F6 急停」、悬浮层里两处），而全局钩子只在那个窗口
+    /// 开着的时候才装着 —— 编辑窗口里这句是第二处，撤掉它反而更准。
     /// </summary>
     [Test]
-    public void 停止的提示一个字都没动()
+    public void 停止那颗按钮换成了重头播放()
     {
-        Assert.That(Attr(Element("StopButton"), "ToolTip.Tip"), Is.EqualTo("停下来（急停是 F6）"),
-            "F6 这次没被改过，这句话此刻依然准确（钩子只在演奏器窗口开着时装着）");
+        var buttons = XDocument.Load(MainWindowAxaml).Descendants()
+            .Where(e => e.Name.LocalName == "Button")
+            .ToList();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(buttons.Any(b => (string?)b.Attribute(Xaml + "Name") == "StopButton"), Is.False,
+                "`■ 停止` 归 33 号删掉了，别加回来");
+
+            var restart = buttons.Single(b => (string?)b.Attribute(Xaml + "Name") == "RestartButton");
+            Assert.That((string?)restart.Attribute("Content"), Is.EqualTo("↻ 重头播放"),
+                "图标是 ↻（U+21BB）：和旁边的 ▶ ⏸ 一样是字符，不引图标依赖");
+            Assert.That((string?)restart.Attribute("ToolTip.Tip"),
+                Is.EqualTo("重头播放：播放头回开头、视野回第一小节，立刻开始放"),
+                "提示语得说清按下去会发生什么（26 号的口径）——「回开头」和「立刻放」两件都要在");
+        });
     }
 
     // ==================== 4. 轨头没有「改名」按钮 ====================
