@@ -17,6 +17,12 @@
     <LangVersion>latest</LangVersion>
     <RootNamespace>MidiPerformer.App</RootNamespace>
     <AssemblyName>MidiPerformer</AssemblyName>
+    <!--
+      标题栏左上角、以及任务栏应用列表里那个小图标 —— 只在这两处用，别处不摆。
+      **不带开关**：Debug 跑起来也该长这张脸，不然开发时看到的和交付的不是同一个东西。
+      Assets\appicon.ico 由 tools\make-appicon.py 生成（手写光栅器，不依赖 ImageMagick/Pillow）。
+    -->
+    <ApplicationIcon>Assets\appicon.ico</ApplicationIcon>
     <InvariantGlobalization>false</InvariantGlobalization>
     <SatelliteResourceLanguages>zh-Hans</SatelliteResourceLanguages>
     <AvaloniaUseCompiledBindingsByDefault>false</AvaloniaUseCompiledBindingsByDefault>
