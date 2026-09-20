@@ -29,12 +29,16 @@ namespace MidiPerformer.App.Views;
 ///
 /// 能改谱面的入口只有三处，都从这里出去：速度框（回车）、移调步进器、撤销 / 重做。
 ///
-/// **曲库（10）的活也在这儿收口。** <see cref="SongLibraryPanel"/> 自己**不动盘**，
-/// 只把「点了哪一首 / 要删掉」喊上来，读写文件的是本窗口 —— 因为那两件事
-/// 都会反过来影响窗口手上的状态（删掉的正好是当前这首怎么办？），
-/// 而面板不知道窗口手上有什么。
+/// **曲库（10）的活也在这儿收口。** 曲库列表自己**不动盘**，只把「点了哪一首 / 要删掉」喊上来
+/// （面板 → <see cref="SongLibraryWindow"/> → 本窗口，两级二传），读写文件的是本窗口 ——
+/// 因为那两件事都会反过来影响窗口手上的状态（删掉的正好是当前这首怎么办？），
+/// 而列表和那个窗口都不知道本窗口手上有什么。
 /// （**改名不在那条路上**：32 号把曲库列表里的改名整条拆了，它现在只有
 /// <see cref="OnSongNameKeyDown"/> 这一个入口 —— 顶栏那格「歌曲名」框，改当前开着的那首。）
+///
+/// **40 号工单之后，曲库不再是一个常驻子控件**：它是工具栏上一颗按钮开出来的模态窗口
+/// （<see cref="OnLibraryClick"/>）。从前那句「谁动了盘谁负责推一把刷新」的四处调用
+/// 因此全没了 —— 模态期间本窗口动不了，那份列表不会过期。
 ///
 /// 演奏器那条走组装点给的工厂，本窗口不 new 那个窗。
 /// </summary>
@@ -55,8 +59,9 @@ public partial class MainWindow : Window
     private readonly SongLibrary? _library;
     private readonly List<TrackLaneView> _lanes = new();
 
-    /// <summary>左边那条曲库。组装点没给曲库时（设计器、或将来某个不要曲库的壳）就是 null。</summary>
-    private SongLibraryPanel? _libraryPanel;
+    // 曲库面板**不再是本窗口的一个常驻子控件**（40 号工单）：它住在 SongLibraryWindow 里，
+    // 而那个窗口是模态的、按一下「歌曲库」才存在一会儿。所以本窗口手上一个面板引用都不用留 ——
+    // 从前那个 _libraryPanel 字段连带它的四处「推一把刷新」一起没了，见 OnLibraryClick。
 
     /// <summary>
     /// 编辑脊柱。撤销是装饰器加的能力，界面拿到的就是装饰器 ——
@@ -110,7 +115,7 @@ public partial class MainWindow : Window
     /// <param name="clock">墙上钟，喂给试听的时间积分。</param>
     /// <param name="sink">出声的出口（winmm）。</param>
     /// <param name="performerFactory">
-    /// 「演奏器…」按下时去要那个独立窗口。给的是工厂不是现成的窗口：
+    /// 工具栏上「演奏」按下时去要那个独立窗口。给的是工厂不是现成的窗口：
     /// 演奏器一建出来就装低层键盘钩子，所以它必须到用户真要用的那一刻才存在。
     /// 复用与单例都在组装点里管，本窗口只管要、然后 Show。
     /// </param>
@@ -129,7 +134,6 @@ public partial class MainWindow : Window
         _library = library;
         _playback = new PreviewPlayback(sink, clock);
 
-        BuildLibraryPanel();
         AllowImportByDrop();
 
         NavStrip.Tokens = _tokens;
@@ -343,7 +347,6 @@ public partial class MainWindow : Window
         // 换曲子了：悬停那个音说的是上一份谱面，清掉。清完读数自己回落到选中（多半也是空的）
         ShowHover(null);
         RefreshEditState();
-        RefreshLibrary(null);
 
         // 这一趟多半算不出场景（控件刚建出来，宽度还是 0），但位置读数、导航条这些要它。
         // 卷帘自己会在尺寸落定那一帧补上 —— 那条线挂在 TrackLaneView 的 Roll.SizeChanged 上
@@ -521,41 +524,94 @@ public partial class MainWindow : Window
     // ==================== 曲库 ====================
 
     /// <summary>
-    /// 把曲库那条装进左边那一格。
+    /// 「歌曲库」那颗按钮：开曲库窗口（模态）。
     ///
-    /// 面板是**代码建**的（它要曲库和取色桥两样构造参数，XAML 只能调无参构造）。
-    /// 这里只挂事件、不碰盘 —— 点开、删除的落地全在本窗口，理由见类注释。
-    /// （改名的事件在 32 号工单拆了：曲库列表不再改名，只剩顶栏那一格。）
+    /// 从前曲库是左边一条常驻侧栏，本窗口在启动时把它建出来、之后四处「推一把刷新」
+    /// （导入完、存完、改完名、删完）。40 号工单把入口挪到工具栏上之后，那套推法
+    /// **整条都不需要了** —— 模态窗口摆着的期间主窗口动不了，列表因此不会过期，
+    /// 开窗那一刻现列一遍就够。这也是这一趟改动里唯一真正的简化。
+    ///
+    /// 两件会改盘的事（打开、删除）落在**本窗口**，因为只有本窗口知道
+    /// 「正开着的是哪一首、曲名框里写着什么、提示行上那句话要不要换」——
+    /// 曲库窗口手上只有一份列表。
+    ///
+    /// 打开那一支要**先关窗再装曲子**：装曲子会走一遍 <see cref="LoadSong"/>（重建全部控件、
+    /// 重算场景），而模态框还压在头上时去做这件事，用户看到的是一个卡住的对话框。
+    /// 关掉之后底下那个窗口才现出来，正好赶上它变样。
     /// </summary>
-    private void BuildLibraryPanel()
+    private async void OnLibraryClick(object? sender, RoutedEventArgs e)
     {
         if (_library is not { } library) return;
 
-        _libraryPanel = new SongLibraryPanel(library, _tokens);
-        _libraryPanel.OpenRequested += OnOpenLibrarySong;
-        _libraryPanel.DeleteRequested += OnDeleteRequested;
+        var dialog = new SongLibraryWindow(library, _tokens, _currentName);
 
-        LibraryHost.Content = _libraryPanel;
+        dialog.OpenRequested += (s, name) =>
+        {
+            if (s is not SongLibraryWindow window) return;
+
+            // 读不出来：那句话写进**窗口的**页脚、窗口留着 —— 它压在头上，主窗口提示行看不见。
+            // 装上了才关窗（关掉之后底下那个窗口现出来，正好赶上它变样）
+            if (TryOpenLibrarySong(name) is { } error) window.ShowMessage(error);
+            else window.Close();
+        };
+
+        dialog.DeleteRequested += OnLibraryDeleteRequested;
+
+        await dialog.ShowDialog(this);
     }
 
     /// <summary>
-    /// 重新列一遍曲库，并把某首标成「正开着」。
+    /// 曲库里某一首确认要删（判据：面板已经问过一句了，这里收到就是真的要删）。
     ///
-    /// 曲库本身**不会喊「我变了」**（它就是个目录），所以谁动了盘谁负责喊这一声：
-    /// 导入完、存完、改完名、删完，四处。
+    /// 删掉的要是**当前正开着的那一首**，手上这份**留着**：它还在内存里、可能还有没存过的编辑。
+    /// 把它一起清掉，等于让「删掉列表里那一行」顺手动用户正在编辑的东西 ——
+    /// 那比留着更让人措手不及。留着的代价只是跟曲库脱了钩，按保存会重新问个名字。
+    ///
+    /// <paramref name="sender"/> 就是那个曲库窗口（事件是它转出来的），
+    /// 回话因此走**它**的页脚，不是主窗口那条提示行 —— 模态框压在头上时，
+    /// 主窗口上写什么都看不见。
     /// </summary>
-    private void RefreshLibrary(string? current)
-    {
-        if (_libraryPanel is null) return;
-
-        _libraryPanel.Refresh();
-        _libraryPanel.MarkCurrent(current);
-    }
-
-    /// <summary>曲库列表里点开了某一首：把工程读出来装上。</summary>
-    private void OnOpenLibrarySong(object? sender, string name)
+    private void OnLibraryDeleteRequested(object? sender, string name)
     {
         if (_library is not { } library) return;
+        if (sender is not SongLibraryWindow dialog) return;
+
+        try
+        {
+            library.Delete(name);
+        }
+        catch (InvalidDataException ex)
+        {
+            dialog.ShowMessage(ex.Message);
+            return;
+        }
+
+        if (_currentName == name)
+        {
+            _currentName = null;
+            dialog.ShowMessage($"「{name}」已从曲库删掉。手上这份还在，按「保存」可以再存回去。");
+        }
+        else
+        {
+            dialog.ShowMessage($"「{name}」已从曲库删掉。");
+        }
+
+        // 那一行得当场消失。没删成的那一支在上头已经 return 了，不会走到这儿
+        dialog.RefreshLibrary(_currentName);
+    }
+
+    /// <summary>
+    /// 曲库窗口里双击了某一首：把工程读出来装上。
+    ///
+    /// **装上了返回 null，没装上返回那句要报的中文。** 报错不在这儿写进提示行，
+    /// 是因为这一趟十有八九是模态框底下那次点击引起来的 —— 提示行写了也看不见。
+    /// 交给调用方，它知道该往哪块屏幕上放（现在是曲库窗口的页脚），
+    /// 也顺手回答了「窗口关不关」：读不出来就留着，不然用户只看见窗口一闪。
+    /// （从前侧栏那一版没有这个问题：面板一直摆着，报错写主窗口的提示行就行。）
+    /// </summary>
+    private string? TryOpenLibrarySong(string name)
+    {
+        if (_library is not { } library) return null;
 
         try
         {
@@ -568,15 +624,14 @@ public partial class MainWindow : Window
             _importedFrom = header.ImportedFrom;
             _edited = header.Edited;
 
-            // 只挪高亮，**不再列一遍**：LoadSong 里已经 RefreshLibrary(null) 过一趟了，
-            // 而列表的内容这一路根本没变（我们只是读了一个文件）。再列一遍等于把曲库里
-            // 每一首的工程文件重新读出来解析一次 —— 200 首的曲库上就是白白卡一下。
-            _libraryPanel?.MarkCurrent(name);
+            // 不用去挪列表的高亮：这一支成功就走到底，调用方紧接着把窗口关了。
+            // （从前那句 MarkCurrent 是因为侧栏一直摆着才需要的。）
+            return null;
         }
         catch (InvalidDataException ex)
         {
-            // 读不出来的工程：报一句中文，**不动**手上正开着的那一份
-            ShowError(ex.Message);
+            // 读不出来的工程：把那句中文交出去，**不动**手上正开着的那一份
+            return ex.Message;
         }
     }
 
@@ -683,7 +738,6 @@ public partial class MainWindow : Window
         _currentName = name;
         _title = name;
         SongNameBox.Text = name;
-        RefreshLibrary(name);
         ShowNotice($"「{name}」已存进曲库：{library.Directory}");
     }
 
@@ -721,42 +775,7 @@ public partial class MainWindow : Window
             SongNameBox.Text = newName;
         }
 
-        RefreshLibrary(_currentName);
         ShowNotice($"「{oldName}」改成了「{newName}」。");
-    }
-
-    /// <summary>
-    /// 曲库那条上确认要删（判据：面板已经问过一句了，这里收到就是真的要删）。
-    ///
-    /// 删掉的要是**当前正开着的那一首**，手上这份**留着**：它还在内存里、可能还有没存过的编辑。
-    /// 把它一起清掉，等于让「删掉列表里那一行」顺手动用户正在编辑的东西 ——
-    /// 那比留着更让人措手不及。留着的代价只是跟曲库脱了钩，按保存会重新问个名字。
-    /// </summary>
-    private void OnDeleteRequested(object? sender, string name)
-    {
-        if (_library is not { } library) return;
-
-        try
-        {
-            library.Delete(name);
-        }
-        catch (InvalidDataException ex)
-        {
-            ShowError(ex.Message);
-            return;
-        }
-
-        if (_currentName == name)
-        {
-            _currentName = null;
-            ShowNotice($"「{name}」已从曲库删掉。手上这份还在，按「保存」可以再存回去。");
-        }
-        else
-        {
-            ShowNotice($"「{name}」已从曲库删掉。");
-        }
-
-        RefreshLibrary(_currentName);
     }
 
     /// <summary>
@@ -901,6 +920,9 @@ public partial class MainWindow : Window
         // 合并时取了菜单项这一半，**没有**把那句 `DurationText` 带回来 —— main 上已经没有这个控件了。
         SaveMenuItem.IsEnabled = _song is not null && _library is not null;
         SaveAsMenuItem.IsEnabled = SaveMenuItem.IsEnabled;
+        // 「歌曲库」那颗按钮的判据**只有曲库这一半**（存不存得了要看装没装曲子，看曲库不用）——
+        // 没曲库时按下去会开出一个空窗口，灰着比那诚实
+        LibraryButton.IsEnabled = _library is not null;
     }
 
     private void OnUndoClick(object? sender, RoutedEventArgs e) => Undo();
@@ -1236,7 +1258,11 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// 「演奏器…」—— 另开一个独立窗口，把选中的轨弹到别的程序里去。
+    /// 工具栏上「演奏」—— 另开一个独立窗口，把选中的轨弹到别的程序里去。
+    ///
+    /// **40 号工单之前它叫「演奏器…」、坐在右上角，是那颗蓝框的 `launch` 按钮。**
+    /// 现在它和左边那三样并排、长相一样（`Button.menubar`）—— 用户要的是「表述形式统一」。
+    /// 代价说清楚：它不再「自己跳出来」了，变成需要找一下的第三个入口。
     ///
     /// 本窗口不 new 它、也不知道它要什么（钟和键鼠出口都在组装点手里）：
     /// 要一个过来、挂到自己名下、Show。挂了 owner 之后主窗口一关它就跟着关 ——

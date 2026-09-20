@@ -136,7 +136,13 @@
               <StackPanel Orientation="Horizontal" Spacing="8">
                 <Button Content="保存" />
                 <Button Classes="primary" Content="导入 MIDI…" />
-                <Button Classes="launch" Content="演奏器…" />
+                <!--
+                  `launch` 那一格从前写的是「演奏器…」—— 40 号工单把工具栏上那颗按钮
+                  换成了素的 `<c>menubar</c>` 长相，产品里**现在没有一处用 `launch` 了**。
+                  样式本身留着（它是一条正经的令牌组合，样式册的活儿就是把它们列出来），
+                  但样张上的字不该再指着一颗已经不存在的按钮，所以换成一句中性的话。
+                -->
+                <Button Classes="launch" Content="打开" />
                 <Button Classes="danger" Content="删除" />
                 <Button Content="不可用" IsEnabled="False" />
                 <Button Classes="primary" Content="不可用" IsEnabled="False" />

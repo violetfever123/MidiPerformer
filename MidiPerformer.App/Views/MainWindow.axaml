@@ -14,16 +14,23 @@
       · 保存 / 另存为… → 写进曲库（SongProjectFile.WriteProject），装了曲子才亮
       · 导出 → 本窗口写回一个标准 MIDI 文件（MidiWriter.Write），装了曲子才亮
       · 撤销 / 重做 → 08 的编辑脊柱（UndoableSongEditor），没有可撤的就置灰
-      · 演奏器… → 组装点给的工厂，另开一个独立窗口（04）
+      · 演奏 → 组装点给的工厂，另开一个独立窗口（04）
+      · 歌曲库 → 组装点给的曲库，另开一个独立窗口（40）
 
     前四条和撤销 / 重做收在工具栏那两组菜单里（23 号工单）：
-      「文件」= 进出盘的几件，「操作」= 动谱面的那些，演奏器留在右上角当独立按钮。
+      「文件」= 进出盘的几件，「操作」= 动谱面的那些。
       快捷键写在菜单项**右边**（InputGesture），真按键由本窗口的 OnWindowKeyDown 接 ——
       它的说明在 MainWindow.axaml.cs 里。
 
     能改谱面的有两处，都走同一条脊柱：走带条上的速度框（回车提交）和轨道头上的移调步进器。
 
-    左边那条曲库（10）是代码塞进来的，不走 XAML —— 它要曲库和取色桥两样构造参数。
+    工具栏左边那一排四样（文件 ▾ | 歌曲库 | 操作 ▾ | 演奏）是 40 号工单的样子：
+      · 曲库**不再是左边那条常驻侧栏**，改成一个和「文件」平齐的按钮，按一下开窗口（10 + 40）。
+        侧栏一撤，卷帘白得 212px。
+      · 右上的「演奏器…」挪到「操作」旁边、改名「演奏」——两处入口从两种长相变成一种
+        （`Button.menubar`，见下面的 Window.Styles）。
+    两个窗口都是**代码开出来的**，不走 XAML：它们要曲库 / 工厂和取色桥这些构造参数，
+    而 XAML 只能调无参构造。见 MainWindow.axaml.cs 的 OnLibraryClick / OnPerformerClick。
 
     样式全部写在这儿的 Window.Styles 里：Styles/Controls.axaml 归 03，本切片不动它，
     而新增的容器（工具栏 / 导航条 / 读数条 / 走带条）总得有长相。
@@ -63,6 +70,51 @@
       <Setter Property="FontSize" Value="12.5" />
       <Setter Property="Foreground" Value="{DynamicResource TokenInk}" />
       <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+
+    <!--
+      工具栏上那两个「按一下就开一个窗口」的入口（歌曲库 / 演奏）。
+      它们和左右两组菜单**长得一样、并排站**（用户 2026-09-20：「增加一个与文件平齐的按钮」、
+      「将「演奏器」改名为「演奏」，并放在「操作」旁边」）——
+      尺子照抄上面那条 `MenuItem.toolbar`：12.5 号字、11,5 的内边距、MinHeight 0。
+      差的只有底色与描边：`MenuItem` 自己就是平的，而 `Button` 底下压着 `Styles/Controls.axaml`
+      那条基础样式（底色 TokenSurface、1px 描边）—— **不抹掉，这两颗会比菜单高出一圈**。
+
+      **要抹两处，不是一处**：Fluent 的悬停 / 按下底色画在模板里那个 ContentPresenter 上，
+      只设 Button 自己的 Background / BorderThickness 挡不住它（同一个坑见 Button.launch）。
+      所以底下照 Button.launch 的样子把 ContentPresenter 那一条也写出来，连 :pointerover 一起 ——
+      悬停给一层 TokenSurface3，让鼠标知道这儿能按；**Foreground 也要重新钉回 TokenInk**，
+      否则 Fluent 会在悬停时把它换成自己的强调色 —— 鼠标一掠过，并排那四样就不是一家人了。
+    -->
+    <Style Selector="Button.menubar">
+      <Setter Property="Padding" Value="11,5" />
+      <Setter Property="MinHeight" Value="0" />
+      <Setter Property="FontSize" Value="12.5" />
+      <Setter Property="Foreground" Value="{DynamicResource TokenInk}" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+    </Style>
+
+    <Style Selector="Button.menubar /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="Foreground" Value="{DynamicResource TokenInk}" />
+      <Setter Property="CornerRadius" Value="{DynamicResource TokenRadiusButton}" />
+    </Style>
+
+    <Style Selector="Button.menubar:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource TokenSurface3}" />
+      <Setter Property="Foreground" Value="{DynamicResource TokenInk}" />
+    </Style>
+
+    <Style Selector="Button.menubar:pressed /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource TokenSurface3}" />
+      <Setter Property="Foreground" Value="{DynamicResource TokenInk}" />
+    </Style>
+
+    <Style Selector="Button.menubar:disabled /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Foreground" Value="{DynamicResource TokenInkFaint}" />
     </Style>
 
     <Style Selector="Border.navbar">
@@ -154,21 +206,32 @@
     <!-- ==================== 顶部工具栏 ==================== -->
     <Border Grid.Row="0" Classes="toolbar">
       <StackPanel Spacing="8">
-        <Grid ColumnDefinitions="Auto,Auto,*">
+        <Grid ColumnDefinitions="Auto,*">
           <!--
-            两组菜单。「导入 / 保存 / 另存为 / 导出」收进「文件」，「撤销 / 重做」进「操作」。
-            分组按的是**这件事是什么**，不是「谁常用」：一组进出盘，一组动谱面 ——
-            以后新增的编辑类动作往「操作」里加，工具栏的宽度一分都不用再让。
+            工具栏左边这一排四样，**平起平坐、间距一样（8px）、长相一样**：
+              文件 ▾ | 歌曲库 | 操作 ▾ | 演奏
 
-            导入不再是 `primary`（工具栏上那颗蓝按钮）：菜单项没有「推荐」这个概念，
-            这是菜单化明码标价的代价，接受它 —— 启动第一件事有两处指着（「文件」菜单本身，
-            以及空状态那句「从「文件」菜单导入」），不会找不到。
+            分组按的是**这件事是什么**，不是「谁常用」：两组菜单一组进出盘、一组动谱面，
+            以后新增的编辑类动作往「操作」里加，工具栏的宽度一分都不用再让。
+            中间那两颗**不是菜单**（按一下直接开一个窗口，没有下拉），所以是 Button 不是 MenuItem ——
+            但长相照抄菜单头（见 Window.Styles 里的 `Button.menubar`），
+            不然一排里混着两种字号两种内边距，看着像没对齐。
+
+            2026-09-20 这两处改动（40 号工单）：
+              · **歌曲库从左边那条常驻侧栏搬到了这儿**。用户原话是「增加一个与文件平齐的按钮」——
+                不是塞进「文件」的下拉里，是和「文件」并排。侧栏一撤，卷帘白得 212px。
+              · **右上的「演奏器…」挪到了「操作」旁边，并改名「演奏」**
+                （用户：「将「演奏器」与「文件操作」的表述形式统一」「放在「操作」旁边」）。
+                它从前是 `launch` 那颗蓝框按钮、靠右独占一列；现在和别的入口一样是素的 ——
+                这个代价是明码标价的：它不再「自己跳出来」了，变得和「歌曲库」一样需要找一下。
+                换来的是右边那一列 `*` 整个还给了「歌曲名」，名字框可以更长。
 
             快捷键写在菜单项右边（InputGesture），不是 ToolTip：菜单的标准做法，
             鼠标不用停下来等 ToolTip。注意它**只负责显示** —— 真按键是窗口级的
             OnWindowKeyDown 接的（那一层还管着「焦点在输入框里就让开」）。
           -->
-          <Menu Grid.Column="0" Classes="toolbar">
+          <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8">
+          <Menu Classes="toolbar">
             <MenuItem Header="文件" Classes="toolbar">
               <!-- 导入排第一：它本来就是打开这个程序第一件要做的事 -->
               <MenuItem x:Name="ImportMenuItem" Header="导入 MIDI…"
@@ -187,7 +250,17 @@
                         Click="OnExportClick"
                         ToolTip.Tip="把这时的谱面写回一个标准 MIDI 文件" />
             </MenuItem>
+          </Menu>
 
+          <!--
+            歌曲库：按一下开一个窗口（SongLibraryWindow），挑一首打开、或者把不要的删掉。
+            没配曲库时置灰（组装点没给曲库，或者设计器里）—— 见 RefreshEditState。
+          -->
+          <Button x:Name="LibraryButton" Classes="menubar" Content="歌曲库"
+                  IsEnabled="False" Click="OnLibraryClick"
+                  ToolTip.Tip="打开曲库窗口：双击一首打开，或者按右边的 × 把它删掉" />
+
+          <Menu Classes="toolbar">
             <!--
               撤销 / 重做：栈空的时候置灰（没得撤就别让人点）。
 
@@ -198,7 +271,8 @@
               （`Ctrl+Shift+Z` 这个别名跟着一起删掉了：它的第二个落点在提示行里也没写，
               两处都不说 —— 按了照样管用，见 OnWindowKeyDown。这是删 ToolTip 明码标价的代价。）
             -->
-            <MenuItem Header="操作" Classes="toolbar" Margin="8,0,0,0">
+            <!-- Margin 不用写：外面的 StackPanel 用 Spacing 统一给间距 -->
+            <MenuItem Header="操作" Classes="toolbar">
               <MenuItem x:Name="UndoMenuItem" Header="撤销" IsEnabled="False"
                         InputGesture="Ctrl+Z"
                         Click="OnUndoClick" />
@@ -208,7 +282,19 @@
             </MenuItem>
           </Menu>
 
-          <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" Margin="14,0,0,0">
+          <!--
+            演奏：和「歌曲库」一样的素按钮，紧挨着「操作」右边（用户要的「放在「操作」旁边」）。
+            x:Name 照旧叫 `PerformerButton` —— 有一个测试按这个名字找它
+            （OverlaySurfaceTests.工具栏上的演奏入口是接上的），名字是那颗按钮和测试之间的契约，
+            改文案不该顺手把它一起改了。
+          -->
+          <Button x:Name="PerformerButton" Classes="menubar" Content="演奏"
+                  Click="OnPerformerClick"
+                  ToolTip.Tip="另开一个窗口，把选中的轨弹到别的程序里去" />
+          </StackPanel>
+
+          <!-- 6 而不是 14：外面那个 StackPanel 自己给了 8px 间距，加起来还是原来那 14 -->
+          <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" Margin="6,0,0,0">
             <TextBlock Classes="label" Text="歌曲名" />
             <!--
               名字框就是曲名：改名 = 改曲库里的文件名（wireframe 脚注那句「改名就是改文件名」）。
@@ -220,14 +306,6 @@
                      ToolTip.Tip="回车改名（改名就是改曲库里的文件名）；还没进曲库的，回车就存进去" />
           </StackPanel>
 
-          <!--
-            演奏器**不进菜单**，留在右上角当独立按钮：它是「去另一个窗口」，不是文件操作，
-            塞进「操作」反而不好找；而且它是常驻入口，不该让人多点一次。
-            （它坐在那个 * 列里靠右，和菜单中间隔着整条空白 —— 两个菜单在左、这一颗在右。）
-          -->
-          <Button Grid.Column="2" x:Name="PerformerButton" Classes="launch" Content="演奏器…"
-                  HorizontalAlignment="Right" Click="OnPerformerClick"
-                  ToolTip.Tip="另开一个窗口，把选中的轨弹到别的程序里去" />
         </Grid>
 
         <!-- 导入失败、导出失败都在这儿说一句，没事时不占地方 -->
@@ -242,19 +320,18 @@
       </StackPanel>
     </Border>
 
-    <!-- ==================== 曲库 + 卷帘区 ==================== -->
+    <!-- ==================== 卷帘区 ==================== -->
     <!--
-      wireframe 的 .split：左边曲库固定 212px，右边卷帘吃满剩下的。
-      曲库**只跟卷帘并排** —— 工具栏 / 导航条 / 读数条 / 走带条都是整幅宽，和 wireframe 一样
-      （那几条在 .split 外面）。
+      曲库原本是左边一条 212px 的常驻侧栏（wireframe 的 .split 左半），40 号工单把它
+      **整个撤了**，搬进「歌曲库」那颗按钮后面的独立窗口 —— 用户要的「一个与文件平齐的按钮」。
+      所以这一层从 Grid（212,*）变成了单列：卷帘自己吃满整幅宽，白得 212px。
 
-      面板是代码塞进 LibraryHost 的，不走 XAML：它要曲库和取色桥两样构造参数，
-      而 XAML 只能调无参构造。见 MainWindow.axaml.cs 的 BuildLibraryPanel。
+      留着一层单列 Grid 而不是把 ScrollViewer 直接摆进 Row 1：Row 1 那一格是 `*`，
+      直接摆也行，但这样「第 1 行 = 卷帘区」这句话还留着形状，
+      将来要在旁边加别的（比如一条侧栏）改的是这一个数字，不是把结构拆开重搭。
     -->
-    <Grid Grid.Row="1" ColumnDefinitions="212,*">
-      <ContentControl Grid.Column="0" x:Name="LibraryHost" />
-
-      <ScrollViewer Grid.Column="1" x:Name="LanesScroll"
+    <Grid Grid.Row="1" ColumnDefinitions="*">
+      <ScrollViewer x:Name="LanesScroll"
                     HorizontalScrollBarVisibility="Disabled"
                     VerticalScrollBarVisibility="Auto">
         <Panel>

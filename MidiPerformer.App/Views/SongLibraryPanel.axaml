@@ -2,13 +2,19 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              x:Class="MidiPerformer.App.Views.SongLibraryPanel">
   <!--
-    歌曲库：左边那一条（docs/wireframe.html 的 <aside class="lib">）。
+    歌曲库：一份列表，40 号工单之后**住在 SongLibraryWindow 里**（从前是主窗口左边那一条，
+    docs/wireframe.html 的 <aside class="lib">）。
+
+    房子和家具分开：**这个文件只管「长什么样」，窗口只管「摆在哪、多大」** ——
+    面板自己不知道外面是侧栏还是窗口，所以从侧栏搬进窗口时它一行都没改
+    （只有根上那道右边框撤了，见下）。列表的行是**代码建的**
+    （曲名 + 改过没改过 + 删除），见 SongLibraryPanel.axaml.cs。
 
     三块里的两块：标题（「歌曲库」+ 几首）、列表。原来底下还有一句脚注
-    （「导入的曲子存进这个文件夹…」），这条切片把它删了 —— 曲库在哪儿、改名就是改文件名，
-    都是用户点一次「导入」就明白的事，不必常年占着两行。列表的行是**代码建的**
-    （曲名 + 改过没改过 + 删除），见 SongLibraryPanel.axaml.cs ——
-    房子住在这儿，家具在那边按曲库里的内容摆。
+    （「导入的曲子存进这个文件夹…」），10 号那条切片把它删了 —— 曲库在哪儿、改名就是改文件名，
+    都是用户点一次「导入」就明白的事，不必常年占着两行。
+    标题这一行在窗口里和窗口自己的标题栏重了一次，留着是因为**「N 首」得有地方待** ——
+    它是这份列表唯一的汇总读数，为了不重复三个字把它砍掉不值。
 
     底色 / 边框 / 每一行的 hover 与选中态，全部取令牌，这里没有一个颜色字面值。
     列表用的是 ListBox：Controls.axaml 里那两条 ListBoxItem 规则（透明边框 + hover 换
@@ -93,9 +99,12 @@
     </Style>
   </UserControl.Styles>
 
-  <Border Background="{DynamicResource TokenSurface2}"
-          BorderBrush="{DynamicResource TokenLine}"
-          BorderThickness="0,0,1,0">
+  <!--
+    底色照旧是 surface-2（比窗口底**深**一层，列表浮在上面）。
+    **右边那道 1px 竖线撤了**：它是「我是一条侧栏、右边是卷帘」的边界线，
+    搬进窗口之后右边没有邻居，留着就是凭空一条线。
+  -->
+  <Border Background="{DynamicResource TokenSurface2}">
     <Grid RowDefinitions="Auto,*">
 
       <!-- ==================== 标题：「歌曲库」+「N 首」 ==================== -->

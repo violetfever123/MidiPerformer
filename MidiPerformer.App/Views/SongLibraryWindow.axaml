@@ -1,0 +1,79 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="MidiPerformer.App.Views.SongLibraryWindow"
+        Title="歌曲库"
+        Width="560" Height="460"
+        MinWidth="420" MinHeight="260"
+        WindowStartupLocation="CenterOwner"
+        ShowInTaskbar="False">
+  <!--
+    窗口：歌曲库（40 号工单）。主窗口工具栏上「歌曲库」那颗按钮按一下开出来的那个。
+
+    **为什么是窗口不是下拉菜单**：用户的原话是「将「歌曲库」这一栏收纳到上方的「文件操作」菜单中」，
+    但接下来说得更具体 ——「我的希望是它增加一个与文件平齐的按钮」。
+    两句话合起来是：入口从侧栏升到工具栏、和「文件」**平起平坐**，而展示形态他留给我定
+    （「点击时会以某种形式展现（具体形式暂未确定）」）。选窗口是因为他同时要了三样东西：
+      · **展示区域宽一点** —— 下拉菜单的宽度是跟着最长那一项走的，改不动；窗口能写死 560。
+      · **每首歌的完整名字** —— 560px 减去行里别的东西，曲名那一格有 400px 上下，
+        Carulli_Duetto_No2_Op4 这种长度不用省略号。窗口还能拉宽（MinWidth 420，没有 MaxWidth）。
+      · **显示是否修改过 + 选择删除** —— 这两样在菜单项里都摆不下（菜单项是一行字）。
+    下拉菜单那条路的代价是明摆着的：这三条一条都做不到。
+
+    **模态**（ShowDialog 而不是 Show）：它是「挑一首打开」—— 挑完就该关掉，
+    主窗口在挑的过程中不该还能被点。这也顺手解掉一件麻烦事：列表要显示「哪一首正开着」，
+    而正开着的那首在主窗口那边随时会变（保存、改名、删掉都会变），
+    模态期间主窗口动不了 ⇒ 列表**不会过期**，于是主窗口那边所有「推一把刷新」的代码
+    （从前 RefreshLibrary 那四个调用点）全都不需要了。
+
+    两个子控件是**代码塞**进来的：SongLibraryPanel 要曲库和取色桥两样构造参数，
+    XAML 只能调无参构造。见 .axaml.cs。
+
+    尺寸是有意写死的：560 宽、460 高。高度不够时列表自己滚（ListBox 在 ScrollViewer 里）。
+  -->
+  <Window.Styles>
+    <!--
+      底下那条页脚：左边一句话（成功了 / 失败了都在这儿说），右边一颗「关闭」。
+      它是一条**常驻**的横条，不是 errorbox 那种「有事才冒出来」的 —— 它一冒出来
+      整个列表就要跳一下，而删除是这一屏上最常做的事。
+    -->
+    <Style Selector="Border.footer">
+      <Setter Property="Background" Value="{DynamicResource TokenSurface2}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource TokenLine}" />
+      <Setter Property="BorderThickness" Value="0,1,0,0" />
+      <Setter Property="Padding" Value="12,9" />
+    </Style>
+
+    <!--
+      页脚上那句话。取 accent（蓝）而不是 warn（黄）—— 和主窗口那两条提示行同一个取舍：
+      这条线上报的多半是「删掉了」这种做成了的事，而它和「删不掉」共用一行，
+      换色就得跟着换形状，一条会变形的页脚比一句颜色不那么准的话更烦人。
+      MinHeight 固定住：报错和没说的时候高度一样，列表不会因为一句话长短而上下动。
+    -->
+    <Style Selector="TextBlock.status">
+      <Setter Property="FontSize" Value="11.5" />
+      <Setter Property="Foreground" Value="{DynamicResource TokenAccent}" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="TextWrapping" Value="Wrap" />
+      <Setter Property="MinHeight" Value="16" />
+    </Style>
+  </Window.Styles>
+
+  <Grid RowDefinitions="*,Auto">
+    <!-- 列表本体。内容由构造函数塞进来 -->
+    <ContentControl Grid.Row="0" x:Name="PanelHost" />
+
+    <Border Grid.Row="1" Classes="footer">
+      <Grid ColumnDefinitions="*,Auto">
+        <TextBlock Grid.Column="0" x:Name="StatusText" Classes="status" />
+
+        <!--
+          Esc 就是这一颗（IsCancel）：IsDefault 那颗是「打开」（列表里双击），
+          不开在这条页脚上 —— 页脚只有一颗按钮，回车该归列表。
+        -->
+        <Button Grid.Column="1" x:Name="CloseButton" Classes="primary"
+                Content="关闭" IsCancel="True"
+                Margin="12,0,0,0" Click="OnCloseClick" />
+      </Grid>
+    </Border>
+  </Grid>
+</Window>
