@@ -159,3 +159,23 @@ UI、用例层、实体层，裁剪产物基本没动，说明这堆改动没把
 第一次发布栽的 `GenerateBundle` MSB4018 就是活进程占着 exe。
 自检报告落在 `%TEMP%\midiperformer-selftest-20260920-112826.txt`。
 
+**2026-09-20 第三次发布**（34 号工单收口之后，`main` @ `5b77e9c`）：
+
+| 项 | 数 |
+| --- | --- |
+| `tools/publish.ps1` | 退出码 **0**，publish 目录里只有那一个 exe（文件数 **1**） |
+| 产物 | `MidiPerformer.App\bin\Release\net8.0\win-x64\publish\MidiPerformer.exe`，**41 053 486 字节**（39.2 MB），mtime 11:43:03 |
+| `tools/run-selftest.ps1` | **20 PASS / 0 FAIL**，耗时 0.9 秒，退出码 **0**（「结果：全部通过」） |
+| 报告里自述的运行时 | 8.0.31；**单文件发布：是** |
+| 工作区 | `git status --porcelain -uno` **空** —— 发布没碰任何受版本控制的文件 |
+
+和上一版（41 053 486 字节）**逐字节同大小**。这一轮只动了 `OnJumpKeyDown` 里的一句
+`ReleaseEditFocus()` —— 一个已经存在的方法调用，没有新的类型、没有新的反射面，
+裁剪产物大小不变是合理的（**不是**「发布没生效」：`verify-34.ps1` 量的是 Debug 构建，
+发布这一份是按 `main @ 5b77e9c` 重新打的，mtime 11:43:03 就是证据）。
+`songs\` 下 5 个曲库文件照旧是运行时数据，没动过。
+
+发布前先确认**没有活着的 `MidiPerformer` 进程**（三支验证脚本都会交代自己起的实例，
+`verify-20` 那个是 `verify-33` 起手时收掉的），确认命令读回 **0**。
+裁剪分析照旧刷 IL2026/IL2075 告警，是预期的那一批（Avalonia 绑定、`SongProject` 的 JSON 反射）。
+
