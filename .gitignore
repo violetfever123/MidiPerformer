@@ -18,4 +18,12 @@ TestResults/
 songs/
 
 # Agent 工作区（worktree 是独立的 git 仓库，add -A 会把它们当嵌入式仓库塞进来）
-.claude/worktrees/
+.claude/
+.scratch/
+
+# 设计文档与原型（spec、wireframe、HTML 原型）
+docs/
+
+# 脚本产物
+__pycache__/
+*.pyc

@@ -1,11 +1,11 @@
 using System.Reflection;
 using Melanchall.DryWetMidi.Core;
-using Melanchall.DryWetMidi.Interaction;   // TrackChunk.GetNotes 住在这儿，它自己也有个 Note
+using Melanchall.DryWetMidi.Interaction;   // GetNotes 在这里，DryWetMidi 自己也有个 Note
 using MidiPerformer.Core.Model;
 using MidiPerformer.Core.UseCases.Project;
 using MidiPerformer.Tests.Corpus;
 using NUnit.Framework;
-// DryWetMidi 也有同名的 MidiReader，不加别名就分不清说的是哪一边
+// 与 DryWetMidi 的同名类型区分
 using MidiReader = MidiPerformer.Core.UseCases.Project.MidiReader;
 using ModelNote = MidiPerformer.Core.Model.Note;
 using ModelTempoMap = MidiPerformer.Core.Model.TempoMap;
@@ -14,55 +14,16 @@ using ModelTimeDivision = MidiPerformer.Core.Model.TimeDivision;
 namespace MidiPerformer.Tests.Project;
 
 /// <summary>
-/// S1 缝的读半边：MIDI 文件 → <see cref="Song"/>。
-///
-/// 「tick 精确」不是修辞：这里逐条比的是原始整数 tick，任何一个字段被秒污染过都会现形。
+/// 读半边：MIDI 文件 → <see cref="Song"/>，逐条比的是原始整数 tick。
 /// </summary>
-public class SongProjectReadTests
+public partial class SongProjectReadTests
 {
     // ==================== 真实 MIDI ====================
-
-    /// <summary>
-    /// 轨的骨架（几条、哪条、叫什么、哪些音）与原版 <c>MidiLoader</c> 逐条对齐。
-    ///
-    /// 用原版当参照而不是自己拿 DryWetMidi 算一遍：轨名的解码规则（严格 UTF-8 → GBK → Latin1）、
-    /// 没轨名时的兜底名、按声道拆轨的顺序，这些都是**从原版逐字搬过来的**，
-    /// 拿它当尺子才量得出「搬歪了没有」。自己再写一遍等于把同一份规则抄两遍，抄错了一起错。
-    /// </summary>
-    [TestCaseSource(typeof(MidiCorpus), nameof(MidiCorpus.TestFiles))]
-    public void 真实MIDI的轨与原版逐条对齐(string path)
-    {
-        var expected = HarpAutoPlayer.Midi.MidiLoader.Parse(path).Candidates;
-        var song = MidiReader.Read(path);
-
-        Assert.That(song.Tracks.Count, Is.EqualTo(expected.Count),
-            $"{Path.GetFileName(path)}：轨数不对（一个轨块里的每个声道算一条轨）");
-
-        for (int i = 0; i < expected.Count; i++)
-        {
-            var e = expected[i];
-            var a = song.Tracks[i];
-
-            Assert.That(a.TrackIndex, Is.EqualTo(e.TrackIndex), $"第 {i} 条轨的轨块序号");
-            Assert.That(a.Channel, Is.EqualTo(e.Channel), $"第 {i} 条轨的声道");
-            Assert.That(a.Name, Is.EqualTo(e.Name), $"第 {i} 条轨的轨名");
-            Assert.That(a.NoteCount, Is.EqualTo(e.Notes.Count), $"第 {i} 条轨的音符数");
-
-            // 音高与力度两边是同一个单位（音符号、0-127），可以直接逐条比。
-            // 时间不比 —— 原版那边已经是秒了，tick 由下面那条测试单独盯着。
-            for (int k = 0; k < e.Notes.Count; k++)
-            {
-                Assert.That(a.Notes[k].Pitch, Is.EqualTo(e.Notes[k].Pitch), $"第 {i} 条轨第 {k} 个音的音高");
-                Assert.That(a.Notes[k].Velocity, Is.EqualTo(e.Notes[k].Velocity), $"第 {i} 条轨第 {k} 个音的力度");
-            }
-        }
-    }
 
     [TestCaseSource(typeof(MidiCorpus), nameof(MidiCorpus.TestFiles))]
     public void 真实MIDI的tick与文件里的整数一致(string path)
     {
-        // 期望值直接来自文件的整数 tick，中间不过秒。
-        // 音符的比对不看文本，所以这里用默认 ReadingSettings 读一遍就够了。
+        // 期望值直接来自文件的整数 tick；比的是音符、不看文本，默认 ReadingSettings 就够。
         using var stream = File.OpenRead(path);
         var file = MidiFile.Read(stream);
         var song = MidiReader.Read(path);
@@ -110,10 +71,8 @@ public class SongProjectReadTests
     }
 
     /// <summary>
-    /// 音色取自**整份文件**里该声道的第一次切换，不是「有音符的那个轨块里」的。
-    ///
-    /// 期望值这里刻意换一种写法算：语料 724 条轨里有 101 条的音色事件不在音符所在的轨块里，
-    /// 要是期望值也跟着「只看同一个轨块」，两边会一起错、一起对，这条测试就废了。
+    /// 音色取自整份文件里该声道的第一次切换，不是「有音符的那个轨块里」的；
+    /// 语料里有 101 条轨的音色事件不在音符所在的轨块里。
     /// </summary>
     [TestCaseSource(typeof(MidiCorpus), nameof(MidiCorpus.TestFiles))]
     public void 真实MIDI的音色与文件一致(string path)
@@ -139,7 +98,7 @@ public class SongProjectReadTests
     [Test]
     public void 音色放在指挥轨里也能认出来()
     {
-        // 格式 1 的常见写法：音色、速度都集中在轨块 0，音符在轨块 1。
+        // 格式 1 常见写法：音色、速度集中在轨块 0，音符在轨块 1。
         var bytes = SmfWriter.Build(1, 480,
             SmfTrack.Named("指挥轨").Tempo(0, 400_000).Program(0, 3, 42),
             SmfTrack.Named("主旋律").Note(0, 480, 3, 60));
@@ -164,13 +123,7 @@ public class SongProjectReadTests
         Assert.That(MidiReader.ReadBytes(bytes).Tracks.Single().Program, Is.EqualTo(24));
     }
 
-    /// <summary>
-    /// 语料整体的「有料」程度。
-    ///
-    /// 上面逐条比对的测试对空文件是**空转**的（两边都是零条轨，比了个寂寞），
-    /// 而 Valid 语料里确实混着几个空壳（14 字节只有文件头的、一个 NoteOn 都没有的）。
-    /// 所以「语料不是空的」这件事得单独有一条来盯，否则哪天语料整体退化了也没人知道。
-    /// </summary>
+    /// <summary>语料整体上有料 —— 逐条比对的测试对空壳文件是空转的（Valid 语料里混着几个空壳）。</summary>
     [Test]
     public void 语料整体上有料()
     {
@@ -215,11 +168,7 @@ public class SongProjectReadTests
 
     /// <summary>
     /// 导入时按顺序发身份：一轨一数，第几个音就是几号（见 <c>NoteIdentity</c>）。
-    ///
-    /// 文件里刻意放了**两个一模一样的音**（同 tick、同音高、同力度）：身份是**发**的，
-    /// 不是拿内容算的 —— 拿内容算的话这两个会拿到同一个身份，而「选中了哪一个」这句话
-    /// 就变得没有意义。它俩在别的测试里也出现不了（内容相等，比什么都相等），
-    /// 只有身份分得开。
+    /// 身份是发的、不是按内容算的 —— 文件里两个同 tick 同音高同力度的音值相等但身份不同。
     /// </summary>
     [Test]
     public void 导入时按顺序发身份_一轨一数()
@@ -244,13 +193,7 @@ public class SongProjectReadTests
         });
     }
 
-    /// <summary>
-    /// **同一次导入必须可重现**：同一份字节读两遍，身份要一模一样。
-    ///
-    /// 身份要是掺了随机数、或者来自一个跨文件累加的全局计数器，这条会红 ——
-    /// 而且是它专门红给发号看的。没有这一条的话，那种坏法会先从全链对拍那几条测试上冒出来，
-    /// 红出来的样子像是「读进来的谱面不对」，查半天才查到发号上。
-    /// </summary>
+    /// <summary>同一次导入可重现：同一份字节读两遍，身份一模一样（掺了随机数或全局计数器就会红）。</summary>
     [Test]
     public void 同一次导入读两遍身份一模一样()
     {
@@ -274,13 +217,7 @@ public class SongProjectReadTests
         });
     }
 
-    /// <summary>
-    /// 语料全量：每条轨上的身份正好是 1..N，不重不漏。
-    ///
-    /// 手工造的那条测试只盯得住两个音、两条轨；而「重号」这种坏法（比如哪天有人把发号挪到
-    /// 分组之外、或者按 (轨块, 声道) 分组时算错了）要跑遍 700 多条真实轨才容易暴露，
-    /// 而那些轨上的音符数、声道分布都不是造得出来的。
-    /// </summary>
+    /// <summary>语料全量：每条轨上的身份正好是 1..N，不重不漏（手工造的曲子盯不住重号这种坏法）。</summary>
     [Test]
     public void 语料里每条轨的身份都是1到N()
     {
@@ -367,7 +304,7 @@ public class SongProjectReadTests
     [Test]
     public void tick是原样的整数不经过秒()
     {
-        // 分辨率 480、120BPM：第 481 tick 只能是 481，不能是「0.501 秒换回来」的 480 或 482。
+        // 分辨率 480、120BPM：第 481 tick 只能是 481，不能是秒换回来的 480 或 482。
         var bytes = SmfWriter.Build(1, 480,
             SmfTrack.Named("t").Note(481, 7, 0, 60).Note(1_234_567, 13, 0, 62));
 
@@ -401,7 +338,7 @@ public class SongProjectReadTests
     [Test]
     public void RIFF包装的rmi能读出来()
     {
-        // .rmi = RIFF 壳子套 MIDI。老曲子在网上常是这种，直接当 .mid 喂进来也得能读。
+        // .rmi = RIFF 壳子套 MIDI，直接当 .mid 喂进来也得能读。
         byte[] midi = SmfWriter.Build(1, 480, SmfTrack.Named("壳里的曲子").Note(0, 480, 0, 60));
 
         var riff = new List<byte>();
@@ -444,12 +381,8 @@ public class SongProjectReadTests
     }
 
     /// <summary>
-    /// 文件头只读了一半就断了的文件。
-    ///
-    /// 这种文件走的是**另一条**路：<c>NotEnoughBytesPolicy.Ignore</c> 会让
-    /// <c>MidiFile.Read</c> 正常返回，只是 <c>TimeDivision</c> 是 null。
-    /// 不自己查这一下的话，错误会变成 DryWetMidi 的
-    /// <c>ArgumentNullException("timeDivision")</c> —— 一句英文，不是给用户看的。
+    /// 文件头只读了一半就断：<c>NotEnoughBytesPolicy.Ignore</c> 会让 <c>MidiFile.Read</c>
+    /// 正常返回但 <c>TimeDivision</c> 是 null，不自己查就会漏出 DryWetMidi 的英文异常。
     /// </summary>
     [TestCase(4)]     // 只有 "MThd" 四个字节
     [TestCase(10)]    // "MThd" + 长度 + 只给了 2 字节的 body
@@ -468,7 +401,7 @@ public class SongProjectReadTests
         });
     }
 
-    /// <summary>分辨率是 0 的文件 DryWetMidi 照收不误，但除以零没有意义，要在门口拦成中文错误。</summary>
+    /// <summary>分辨率为 0 时拦成中文错误（DryWetMidi 照收不误，但除以零没有意义）。</summary>
     [Test]
     public void 分辨率是零时报清楚的错不崩()
     {
@@ -482,7 +415,7 @@ public class SongProjectReadTests
     [Test]
     public void SMPTE每帧零tick时报清楚的错不崩()
     {
-        // SMPTE 的分辨率字：高字节是负的格式号（0xE8 = −24，即 24 帧/秒），低字节是每帧 tick 数
+        // SMPTE 分辨率字：高字节是负的格式号（0xE8 = −24，即 24 帧/秒），低字节是每帧 tick 数
         byte[] zeroTicksPerFrame = SmfWriter.HeaderOnly(1, division: 0xE800, declaredTracks: 0);
 
         var ex = Assert.Throws<InvalidDataException>(() => MidiReader.ReadBytes(zeroTicksPerFrame));
@@ -532,7 +465,7 @@ public class SongProjectReadTests
             SmfTrack.Named("主旋律").Note(0, 480, 0, 60),
             SmfTrack.Named("伴奏").Note(0, 480, 1, 48));
 
-        // 砍掉最后一个轨块的后半截 —— 「网站试听给的残缺文件」就长这样
+        // 砍掉最后一个轨块的后半截
         byte[] truncated = whole[..(whole.Length - 6)];
 
         var song = MidiReader.ReadBytes(truncated);
@@ -559,8 +492,7 @@ public class SongProjectReadTests
     [Test]
     public void Note上没有秒字段()
     {
-        // 「tick 是唯一的时值表示」这条约束，机器也来盯一眼：
-        // 只要有人往 Note 上加一个 double/float/decimal 成员，就是往模型里塞了第二个真相源。
+        // 往 Note 上加 double/float/decimal 成员，就是塞进第二个时值真相源
         var offenders = new List<string>();
 
         foreach (var p in typeof(ModelNote).GetProperties(BindingFlags.Public | BindingFlags.Instance))
@@ -576,8 +508,7 @@ public class SongProjectReadTests
     [Test]
     public void 模型的公开签名里没有DryWetMidi()
     {
-        // spec：DryWetMidi 由 MidiReader / MidiWriter 独占，那两个文件之外不许出现它的类型。
-        // 它俩本身当然有（它们就是干这个的），所以这里盯的是**模型**。
+        // DryWetMidi 由 MidiReader / MidiWriter 独占，这里盯的是模型里不出现它的类型
         Type[] model =
         {
             typeof(Song), typeof(Track), typeof(ModelNote),
@@ -598,12 +529,8 @@ public class SongProjectReadTests
     // ==================== 帮手 ====================
 
     /// <summary>
-    /// 「算整数的一类」= 允许出现在 <see cref="ModelNote"/> 上的成员类型。
-    ///
-    /// <see cref="NoteId"/> 也在这一列：它里面就是一个 <c>int</c>（身份号），
-    /// 既不表示时间也不表示秒，进不了「第二个时间真相源」那个筐。
-    /// 把它算进来不是给谁开绿灯 —— 不放行的话这条测试从加上身份那天起就一直是红的，
-    /// 而一条常年红着的测试，等于把「有人往 Note 上加 double」这件事也一起放过。
+    /// 允许出现在 <see cref="ModelNote"/> 上的整数成员类型。
+    /// <see cref="NoteId"/> 在里面：它就是一个 <c>int</c>（身份号），不表示时间。
     /// </summary>
     private static bool IsIntegral(Type t) =>
         t == typeof(NoteId) ||

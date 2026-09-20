@@ -1,12 +1,14 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <!--
-    第二个 Main：装的是 FakeClock + RecordingEventSink，换配置就是换一个 Main，内层一行不改。
+    NUnit 测试工程。
 
-    这里引用原版 harmonica-auto-player **工程本体**（不是副本），对拍跑的就是原版代码本体。
-    原版仓库一行都不改 —— 它的 BuildScheduleForTest 本来就公开，只是裹在 #if HARP_TEST 里，
-    所以这里用 AdditionalProperties 给那一个工程单独定义 HARP_TEST，
-    我们自己这些工程的 DefineConstants 不受影响。
+    对拍（与原版 harmonica-auto-player 跑同一首曲子、比行为）引用的是**原版工程本体**，
+    由并排目录提供。原版不在时本仓库照样编译、照样跑测试，只是那 4 个对拍文件不参与编译
+    （见文件末尾的 Exists 判断）。
+
+    视觉令牌对账（TokenParityTests）读 docs\wireframe.html 当对照物。docs\ 不进仓库
+    （设计文档与原型），所以它不在时那一个文件同样不参与编译。
   -->
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
@@ -16,6 +18,10 @@
     <IsPackable>false</IsPackable>
     <RootNamespace>MidiPerformer.Tests</RootNamespace>
     <AssemblyName>MidiPerformer.Tests</AssemblyName>
+    <!-- 并排目录里的原版工程；不存在时跳过对拍 -->
+    <ParityProject>..\..\harmonica-auto-player\HarpAutoPlayer\HarpAutoPlayer.csproj</ParityProject>
+    <!-- 视觉令牌的对照物；不存在时跳过令牌对账 -->
+    <TokenOracle>$(MSBuildThisFileDirectory)..\docs\wireframe.html</TokenOracle>
   </PropertyGroup>
 
   <ItemGroup>
@@ -28,9 +34,39 @@
     <ProjectReference Include="..\MidiPerformer.App\MidiPerformer.App.csproj" />
     <ProjectReference Include="..\MidiPerformer.Adapters\MidiPerformer.Adapters.csproj" />
     <ProjectReference Include="..\MidiPerformer.Core\MidiPerformer.Core.csproj" />
-    <ProjectReference Include="..\..\harmonica-auto-player\HarpAutoPlayer\HarpAutoPlayer.csproj">
+  </ItemGroup>
+
+  <!--
+    原版的 BuildScheduleForTest 裹在 #if HARP_TEST 里，所以只给那一个工程加这个常量，
+    我们自己这些工程的 DefineConstants 不受影响。
+  -->
+  <ItemGroup Condition="Exists('$(ParityProject)')">
+    <ProjectReference Include="$(ParityProject)">
       <AdditionalProperties>DefineConstants=HARP_TEST</AdditionalProperties>
     </ProjectReference>
   </ItemGroup>
+
+  <!-- 原版不在：去掉引用它的那几个文件。 -->
+  <ItemGroup Condition="!Exists('$(ParityProject)')">
+    <Compile Remove="Repertoire\EventBuilderParityTests.cs" />
+    <Compile Remove="Repertoire\FullChainParityTests.cs" />
+    <Compile Remove="Repertoire\PortFidelityTests.cs" />
+    <Compile Remove="Project\SongProjectReadTests.Parity.cs" />
+  </ItemGroup>
+
+  <Target Name="ParitySkippedNotice" BeforeTargets="CoreCompile" Condition="!Exists('$(ParityProject)')">
+    <Message Importance="high"
+             Text="原版 harmonica-auto-player 不在 $(ParityProject)，已跳过 4 个对拍文件。" />
+  </Target>
+
+  <!-- docs\wireframe.html 不在（docs\ 不进仓库）：去掉读它的那个文件。 -->
+  <ItemGroup Condition="!Exists('$(TokenOracle)')">
+    <Compile Remove="Visual\TokenParityTests.cs" />
+  </ItemGroup>
+
+  <Target Name="TokenOracleSkippedNotice" BeforeTargets="CoreCompile" Condition="!Exists('$(TokenOracle)')">
+    <Message Importance="high"
+             Text="docs\wireframe.html 不在 $(TokenOracle)，已跳过 1 个视觉令牌对账文件。" />
+  </Target>
 
 </Project>
