@@ -120,3 +120,23 @@ exe 明明找到了、只是崩了，CI 看到 2 会朝反方向查（去查路�
 
 全量测试：**1486 条全绿、52 秒**（`dotnet test MidiPerformer.Tests/MidiPerformer.Tests.csproj`）。
 本切片改的是脚本与自检，没有动 C# 逻辑。
+
+## 发布记录
+
+**2026-09-20 全量发布**（31 张工单收口之后，`main` @ `3b1cd42`）：
+
+| 项 | 数 |
+| --- | --- |
+| `tools/publish.ps1` | 退出码 **0**，publish 目录里只有那一个 exe |
+| 产物 | `MidiPerformer.App\bin\Release\net8.0\win-x64\publish\MidiPerformer.exe`，**41 057 582 字节**（39.2 MB） |
+| `tools/run-selftest.ps1` | **20 PASS / 0 FAIL**，耗时 0.6 秒，退出码 **0**（「结果：全部通过」） |
+| 报告里自述的运行时 | 8.0.31；**单文件发布：是** |
+
+和 12 号那一版（41 020 718 字节）比 **+36 864 字节**（+0.09%）—— 中间 19 张工单动过
+UI、用例层、实体层，裁剪产物基本没动，说明这堆改动没把新的反射面引进发布产物。
+
+发布前先确认**没有活着的 `MidiPerformer` 进程**（上面那条 `GenerateBundle` MSB4018 就是它）。
+裁剪分析照旧刷 IL2026/IL2075 告警（Avalonia 绑定、`SongProject` 的 JSON 反射），
+**是预期的**，靠 `TrimmerRootAssembly` 那 11 个钉住名单兜住 —— 自检里「钉住的程序集都还在」
+和「DryWetMidi 的类型与公开方法没被裁掉」两条 PASS 就是它的证据。
+发布只写 `bin/`、`obj/` 和运行时的 `songs\`，**工作区里没有一个被改动的文件**。
