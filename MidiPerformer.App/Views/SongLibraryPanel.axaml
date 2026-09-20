@@ -22,28 +22,19 @@
     <!--
       一行的曲名：占满剩下的宽度，名字太长就省略号（wireframe 的 .song .nm）。
 
-      Background 取透明是**为了让这一格真的能被点中**：不设底色的 TextBlock 只在字身上
-      接得到鼠标，而这一格要两件事 —— 悬停出 ToolTip（看被省略号吃掉的完整曲名）、
-      点一下进改名。透明底把整格都变成它的地盘，两件都才落到「名字那一小块」上，
-      而不是「字与字之间的空隙里什么都不发生」。
+      Background 取透明是**为了让这一格真的能被鼠标碰到**：不设底色的 TextBlock 只在字身上
+      接得到鼠标，而这一格要一件事 —— 悬停出 ToolTip（看被省略号吃掉的完整曲名）。
+      透明底把整格都变成它的地盘，鼠标落在「字与字之间的空隙」里也能看见提示，
+      而不是只有指到笔画上才弹。
+
+      **Cursor 是默认箭头，不是 IBeam**（32 号工单改回来的）：这一格从前点一下就进改名，
+      于是光标做成 IBeam 承诺「这儿可以打字」。现在点它只是选中这一行、双击打开这一首，
+      IBeam 就成了空头支票 —— 光标形状是这一格唯一还会说话的地方，不能让它说谎。
     -->
     <Style Selector="TextBlock.song-name">
       <Setter Property="VerticalAlignment" Value="Center" />
       <Setter Property="TextTrimming" Value="CharacterEllipsis" />
       <Setter Property="Background" Value="Transparent" />
-      <Setter Property="Cursor" Value="IBeam" />
-    </Style>
-
-    <!--
-      行内改名用的那个框：平时不显示（点名字才换上来），换上来的时候**行高不能跳**——
-      所以字号、内边距都按旁边那行小字对齐（TextBox 应用级样式里是 13px / 9,5，
-      摆进一行 12.5px 的列表里会让这一行高出一头）。
-    -->
-    <Style Selector="TextBox.song-rename">
-      <Setter Property="FontSize" Value="12.5" />
-      <Setter Property="Padding" Value="4,1" />
-      <Setter Property="MinHeight" Value="0" />
-      <Setter Property="VerticalAlignment" Value="Center" />
     </Style>
 
     <!--
@@ -62,8 +53,9 @@
     </Style>
 
     <!--
-      行里剩下的那一个小动作（删除）。改名不再是一颗按钮 —— 名字本身就能点进去改，
-      见 .axaml.cs 的 BeginRename。
+      行里剩下的那一个小动作（删除）。改名既不是一颗按钮、也不在行里 ——
+      32 号之后它只剩顶栏「歌曲名」那一格（改的是当前开着的那首），这个列表里
+      点名字只是选中、双击打开。
 
       wireframe 里删除是**悬停才显形**的（.song .del{opacity:0}），这里改成**一直在、
       只是很淡**：这条切片没有能自动点一遍界面的测试，一个平时看不见的按钮，

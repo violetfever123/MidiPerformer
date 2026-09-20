@@ -30,9 +30,11 @@ namespace MidiPerformer.App.Views;
 /// 能改谱面的入口只有三处，都从这里出去：速度框（回车）、移调步进器、撤销 / 重做。
 ///
 /// **曲库（10）的活也在这儿收口。** <see cref="SongLibraryPanel"/> 自己**不动盘**，
-/// 只把「点了哪一首 / 要改名 / 要删掉」喊上来，读写文件的是本窗口 —— 因为那几件事
-/// 都会反过来影响窗口手上的状态（删掉的正好是当前这首怎么办？改完名曲名框要不要跟着变？），
+/// 只把「点了哪一首 / 要删掉」喊上来，读写文件的是本窗口 —— 因为那两件事
+/// 都会反过来影响窗口手上的状态（删掉的正好是当前这首怎么办？），
 /// 而面板不知道窗口手上有什么。
+/// （**改名不在那条路上**：32 号把曲库列表里的改名整条拆了，它现在只有
+/// <see cref="OnSongNameKeyDown"/> 这一个入口 —— 顶栏那格「歌曲名」框，改当前开着的那首。）
 ///
 /// 演奏器那条走组装点给的工厂，本窗口不 new 那个窗。
 /// </summary>
@@ -499,7 +501,8 @@ public partial class MainWindow : Window
     /// 把曲库那条装进左边那一格。
     ///
     /// 面板是**代码建**的（它要曲库和取色桥两样构造参数，XAML 只能调无参构造）。
-    /// 这里只挂事件、不碰盘 —— 点开、改名、删除的落地全在本窗口，理由见类注释。
+    /// 这里只挂事件、不碰盘 —— 点开、删除的落地全在本窗口，理由见类注释。
+    /// （改名的事件在 32 号工单拆了：曲库列表不再改名，只剩顶栏那一格。）
     /// </summary>
     private void BuildLibraryPanel()
     {
@@ -507,7 +510,6 @@ public partial class MainWindow : Window
 
         _libraryPanel = new SongLibraryPanel(library, _tokens);
         _libraryPanel.OpenRequested += OnOpenLibrarySong;
-        _libraryPanel.RenameRequested += OnRenameRequested;
         _libraryPanel.DeleteRequested += OnDeleteRequested;
 
         LibraryHost.Content = _libraryPanel;
@@ -663,26 +665,11 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// 曲库那条上要改名（在名字上点一下，或按 F2 之后回车）：名字已经到手，落到盘上。
-    ///
-    /// 25 号之前这条路要先弹一个框问名字（<c>Dialogs.AskNameAsync</c>），问完才有个名字；
-    /// 现在名字是行内那个输入框打的，跟着请求一起过来，这儿就只剩「落盘」这一件事 ——
-    /// 于是它也不必是 <c>async</c> 的了。
-    ///
-    /// 消毒和「这名字能不能用」都留在了面板那边（见 <c>SongLibraryPanel.CommitRename</c>）：
-    /// 名字是从那儿打出来的，判据和框里那行字在同一处，才不会出现「框里显示一个、
-    /// 盘上躺着另一个」。不能用的名字也照原样递过来，就是为了让下面 <see cref="RenameTo"/>
-    /// 里那句 <c>ShowError</c> 有机会把它念给用户听。
-    /// </summary>
-    private void OnRenameRequested(object? sender, RenameRequest request)
-    {
-        if (_library is not { } library) return;
-
-        RenameTo(library, request.OldName, request.NewName);
-    }
-
-    /// <summary>
     /// 改名 —— 就是把文件换个名字，内容一个字节都不碰。
+    ///
+    /// **唯一的入口是顶栏那格「歌曲名」框**（<see cref="OnSongNameKeyDown"/>，32 号工单收的口）。
+    /// 25 号一度还有第二条路：曲库列表里点一下曲名就地改。那条拆了 ——
+    /// 列表里点名字最常干的事是「选中它看看」，而改名混在里面就是误触。
     ///
     /// 改的要是**当前正开着的那一首**，曲名框得跟着换：它显示的就是这个名字，
     /// 不改的话界面上会同时存在两个名字（列表里新的、框里旧的），按保存还会存回一个已经不存在的名字。
