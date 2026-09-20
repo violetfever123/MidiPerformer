@@ -29,10 +29,12 @@ public sealed class SongWalker
     private readonly Song _song;
     private double _anchorPhysical;   // 上一次积分的物理时刻
     private double _musicNow;         // 到 _anchorPhysical 为止的音乐时间
+    private long _endTick;            // 曲尾（见 EndTick）
 
     public SongWalker(Song song, double speed = 1.0)
     {
         _song = song;
+        _endTick = song.EndTick;
         Speed = Clamp(speed);
     }
 
@@ -56,8 +58,30 @@ public sealed class SongWalker
     /// （见 <c>RepertoireToSeconds.MinNoteSeconds</c>），也不含事件表末尾的抬键。
     /// 所以 <see cref="Finished"/> 可能比最后一个事件早 20ms 左右。03 / 06 要停钟或收尾时，
     /// 以事件表的时间戳为准，别拿它当「最后一个事件已经发完」。
+    ///
+    /// 终点是 <see cref="EndTick"/>，默认就是整份谱面的末尾；试听那边会把它改小
+    /// （折叠起来的轨不算长度，见 <c>AudibleLength</c>）。
     /// </summary>
-    public double TotalMusicSeconds => _song.TotalSeconds;
+    public double TotalMusicSeconds => TempoMap.SecondsAt(_endTick);
+
+    /// <summary>
+    /// 曲尾落在哪个 tick。默认 = 整份谱面最后一个音的结束 tick，可以被 <see cref="SetEndTick"/> 改小。
+    ///
+    /// 它是一个**可以搬动的终点**，而不是从 <see cref="Song"/> 现算的 —— 因为「曲子多长」
+    /// 和「谱面有多长」不是一回事：收起来的轨不出声，它多出来的那几小节就不该继续空转。
+    /// </summary>
+    public long EndTick => _endTick;
+
+    /// <summary>
+    /// 改曲尾。**只影响 <see cref="TotalMusicSeconds"/> 与 <see cref="Finished"/>，
+    /// 不动积分、不动锚点** —— 改的是「曲子多长」，不是「现在放到哪了」，播放头一个 tick 都不该跳。
+    ///
+    /// 终点改小之后**当前位置可能落在曲子外面**（正在播的话，下一次 <see cref="Finished"/>
+    /// 就是 true），把播放头拉回范围内是调用方的事：积分器只管时间，不管屏幕。
+    ///
+    /// 负数当 0（空曲就是 0）。
+    /// </summary>
+    public void SetEndTick(long tick) => _endTick = Math.Max(0, tick);
 
     /// <summary>是否已经走到曲尾。含义见 <see cref="TotalMusicSeconds"/> 的说明。</summary>
     public bool Finished => _musicNow >= TotalMusicSeconds;

@@ -1274,6 +1274,140 @@ public class PianoRollControllerTests
         });
     }
 
+    // ==================== 折叠让整曲小节数跟着变 ====================
+
+    /// <summary>
+    /// 折叠起来的那条轨**不算整曲长度**：伴奏比主旋律长的时候，收起来听，
+    /// 卷帘右侧那一截什么也不出声的地方要当场消失（用户 2026-09-20 的原话：
+    /// 「减掉末尾两个小节我希望是直接消失，而不是空着小节继续播放」）。
+    /// 见 <c>AudibleLength</c>。
+    /// </summary>
+    [Test]
+    public void 折叠起来的那条不算整曲长度()
+    {
+        var controller = new PianoRollController(长短两条轨());
+
+        Assert.That(controller.BarCount, Is.EqualTo(8), "两条都在：按最长的那条算");
+
+        controller.SetMutedTracks(静音(1));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(controller.BarCount, Is.EqualTo(2), "8 小节那条收起来了，整曲退回 2 小节");
+            Assert.That(controller.TotalTicks, Is.EqualTo(2 * Bar), "卷帘画到哪儿、导航条多长，都跟着走");
+        });
+
+        controller.SetMutedTracks(静音());
+
+        Assert.That(controller.BarCount, Is.EqualTo(8), "展开回来长度也回来");
+    }
+
+    /// <summary>建控制器的那一刻就带上这份名单：窗口重建卷帘时走的是这条（<c>SyncLanes</c>）。</summary>
+    [Test]
+    public void 建控制器时就能带上折叠名单()
+    {
+        Assert.That(new PianoRollController(长短两条轨(), 静音(1)).BarCount, Is.EqualTo(2));
+    }
+
+    /// <summary>
+    /// 收起短的（本来就不是决定长度的）那条：小节数不动，**那张密度表也不重算** ——
+    /// 长度没变的折叠是常事，而数一遍音符是整曲扫一趟，没必要白扫。
+    /// </summary>
+    [Test]
+    public void 折叠短的那条长度和那张表都不动()
+    {
+        var controller = new PianoRollController(长短两条轨());
+        var counts = controller.BarNoteCounts;
+
+        controller.SetMutedTracks(静音(0));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(controller.BarCount, Is.EqualTo(8));
+            Assert.That(controller.BarNoteCounts, Is.SameAs(counts), "长度没变就不重算（同一个数组）");
+        });
+    }
+
+    /// <summary>
+    /// 缩到 2 小节之后，原来停在末尾的视口会落到曲子外面 —— 得拉回来。
+    /// 2 小节的曲子一屏（4 小节）装得下，所以合法位置只剩开头那一个。
+    /// </summary>
+    [Test]
+    public void 曲子变短之后视图位置拉回曲子里面()
+    {
+        var controller = new PianoRollController(长短两条轨());
+        controller.SetViewStart(Bar * 7);
+        Assert.That(controller.ViewStartTick, Is.GreaterThan(0), "先滚到曲子末尾去");
+
+        controller.SetMutedTracks(静音(1));
+
+        Assert.That(controller.ViewStartTick, Is.EqualTo(0), "2 小节的曲子装不下一屏，只能从第 1 小节起");
+    }
+
+    /// <summary>
+    /// 折叠**不动选中与焦点轨**：它们是「哪些音」「哪条轨」，不是「曲子多长」。
+    /// 顺手清掉的话，折叠一下就得重新选一遍音。
+    /// </summary>
+    [Test]
+    public void 折叠不动选中与焦点轨()
+    {
+        var controller = new PianoRollController(长短两条轨());
+        controller.SelectOnly(Ref(0, 0));
+        controller.SetFocusedTrack(0);
+
+        controller.SetMutedTracks(静音(1));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(controller.FocusedTrack, Is.EqualTo(0));
+            Assert.That(controller.Selection!.Value.Track, Is.EqualTo(0));
+            Assert.That(controller.IsSelected(Ref(0, 0)), Is.True);
+        });
+    }
+
+    /// <summary>
+    /// 那张密度表跟着新长度重算：落在**新曲子外面**的音不进表（它们本来也画不出来），
+    /// 表长就等于新小节数。
+    /// </summary>
+    [Test]
+    public void 缩短之后密度表只数曲子之内的小节()
+    {
+        var controller = new PianoRollController(长短两条轨());
+        Assert.That(controller.BarNoteCounts.Sum(), Is.EqualTo(4), "四条音都在 8 小节之内");
+
+        controller.SetMutedTracks(静音(1));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(controller.BarNoteCounts, Has.Count.EqualTo(2), "表长 = 新小节数");
+            Assert.That(controller.BarNoteCounts.Sum(), Is.EqualTo(2), "第 7、8 小节那几个音落在 2 小节之外，不进表");
+        });
+    }
+
+    /// <summary>
+    /// 全折叠退回整份谱面（见 <c>AudibleLength</c>）—— 「这几条我都不想听」不等于「曲子是空的」，
+    /// 卷帘缩成一小节、播放头被拉回开头都不是用户那句话的意思。
+    /// </summary>
+    [Test]
+    public void 全折叠退回整份谱面()
+    {
+        var controller = new PianoRollController(长短两条轨(), 静音(0, 1));
+
+        Assert.That(controller.BarCount, Is.EqualTo(8));
+    }
+
+    /// <summary>2 小节的主旋律 + 6~8 小节的贝斯：折叠哪条，整曲就有多长。</summary>
+    private static Song 长短两条轨() => SongOf(
+        Melody(new Note(60, 0, 480, 100), new Note(62, Bar, 480, 100)),
+        Bass(0, new Note(40, 6 * Bar, 480, 100), new Note(42, 7 * Bar, 480, 100)));
+
+    /// <summary>
+    /// 按**轨块号**写一份折叠名单：这两条轨的轨块号刚好是 0 号和 1 号，读起来比写 (轨块, 声道) 省事。
+    /// （身份那一对的语义在 <c>AudibleLengthTests</c> 里另有用例盯着。）
+    /// </summary>
+    private static IReadOnlySet<(int TrackIndex, int Channel)> 静音(params int[] trackIndexes)
+        => trackIndexes.Select(i => (i, i)).ToHashSet();
+
     /// <summary>每小节一个音的短曲子 —— 多选那几条用例只关心「第几个音」。</summary>
     private static Song ThreeNotes() => BarsOf(3);
 }

@@ -1,6 +1,7 @@
 using MidiPerformer.Adapters.Presenters;
 using MidiPerformer.Core.Model;
 using MidiPerformer.Core.UseCases.Perform.Repertoire;
+using MidiPerformer.Core.UseCases.Preview;
 
 namespace MidiPerformer.Adapters.Controllers;
 
@@ -51,13 +52,24 @@ public sealed class PianoRollController
     /// <summary>没有这条轨（曲子被删光了轨）时给的音域。空轨用的也是它。</summary>
     private static readonly (int Low, int High) EmptyPitchRange = PianoRollGeometry.FitPitchRange(60, 60);
 
-    /// <summary>按曲子的节拍网格建一个卷帘控制器。视图位置从曲子开头开始。</summary>
-    public PianoRollController(Song song)
+    /// <summary>
+    /// 按曲子的节拍网格建一个卷帘控制器。视图位置从曲子开头开始。
+    /// </summary>
+    /// <param name="mutedTracks">
+    /// 此刻不收声的那几条轨（= 折叠起来的那几条），按 <c>(轨块号, 声道)</c> 给。
+    /// **它决定整曲多少小节**：收起来的轨不算长度（见 <see cref="AudibleLength"/>），
+    /// 不然「伴奏比主旋律长 8 小节」会让卷帘右侧多出一截什么也不出声的地方。
+    ///
+    /// 不给 = 一条都不静音，出来的就是从前那个「按整份谱面算」的数。
+    /// **只在这里要一次**：之后名单变了走 <see cref="SetMutedTracks"/>，
+    /// 控制器不另存一份 —— 折叠状态只有轨控件那一处（见 <c>MainWindow.CollapsedFlags</c>）。
+    /// </param>
+    public PianoRollController(Song song, IReadOnlySet<(int TrackIndex, int Channel)>? mutedTracks = null)
     {
         _song = song;
         TicksPerBar = PianoRollGeometry.BarTicks(song.TempoMap);
         _ticksPerQuarterNote = Math.Max(1, song.TempoMap.Division.TicksPerQuarterNote);
-        BarCount = PianoRollGeometry.BarCount(song.EndTick, TicksPerBar);
+        BarCount = BarCountOf(mutedTracks);
 
         _selectedView = _selected.AsReadOnly();
         GridTicks = PianoRollGeometry.GridTicks(song.TempoMap);
@@ -88,8 +100,12 @@ public sealed class PianoRollController
     /// </summary>
     public long GridTicks { get; }
 
-    /// <summary>整曲多少小节。视图、导航条、键盘定位都以它为上界。</summary>
-    public int BarCount { get; }
+    /// <summary>
+    /// 整曲多少小节。视图、导航条、键盘定位都以它为上界。
+    ///
+    /// **只算没被静音的轨**（见 <see cref="SetMutedTracks"/>），所以折叠一条轨会让它变小。
+    /// </summary>
+    public int BarCount { get; private set; }
 
     /// <summary>一屏跨多少 tick —— 固定 4 小节，界面上没有缩放入口。</summary>
     public long TicksVisible => TicksPerBar * PianoRollGeometry.BarsVisible;
@@ -98,14 +114,17 @@ public sealed class PianoRollController
     public long TotalTicks => TicksPerBar * BarCount;
 
     /// <summary>
-    /// 每小节的音符数（**多轨合计**）。
+    /// 每小节的音符数（**多轨合计**，只数在 <see cref="BarCount"/> 之内的小节）。
     ///
     /// **导航条不再拿它画东西了**（22 号工单把那条从「全曲密度柱」改成「焦点轨的音符块」），
     /// 所以这里数的是「整首曲子哪儿热闹」，而不是「你手上这条轨哪儿密」—— 两件事，别混。
     /// 现在整条链上只有测试在读它（`PianoRollControllerTests`）；
     /// 导航条那份 scene 由 <c>PianoRollPresenter.BuildNav</c> 按焦点轨现算。
+    ///
+    /// 表长跟着 <see cref="BarCount"/> 走：曲子被静音名单缩短之后，落在新曲子外面的音
+    /// 不进这张表（它们本来也画不出来）。
     /// </summary>
-    public IReadOnlyList<int> BarNoteCounts { get; }
+    public IReadOnlyList<int> BarNoteCounts { get; private set; }
 
     /// <summary>
     /// 上面那张表里最密的那个小节有多少个音。
@@ -359,6 +378,35 @@ public sealed class PianoRollController
 
         return hits;
     }
+
+    // ==================== 静音 / 长度 ====================
+
+    /// <summary>
+    /// 换一份「哪几条轨不发声」的名单。折叠 / 展开一条轨走这条。
+    ///
+    /// **换的是整曲多少小节**，因为长度只按听得见的轨算（见 <see cref="AudibleLength"/>）。
+    /// 于是三样派生读数一起重算：<see cref="BarCount"/>、<see cref="BarNoteCounts"/>、
+    /// 以及跟着 <see cref="BarCount"/> 走的 <see cref="TotalTicks"/>（导航条和卷帘都读它）；
+    /// 视图位置再钳一次 —— 曲子短了之后，原来停在末尾的视口会落到曲子外面。
+    ///
+    /// **选中与焦点轨不动**：它们是「哪些音」「哪条轨」，不是「曲子多长」。
+    /// 展开回来时长度自然长回去，两边都不欠谁一次重算。
+    ///
+    /// 长度没变就**什么都不做** —— 这是常事（折叠一条本来就短的轨），
+    /// 而 <see cref="CountNotesPerBar"/> 是整曲扫一遍音符，没必要为同一份数据白扫一次。
+    /// </summary>
+    public void SetMutedTracks(IReadOnlySet<(int TrackIndex, int Channel)>? mutedTracks)
+    {
+        int barCount = BarCountOf(mutedTracks);
+        if (barCount == BarCount) return;
+
+        BarCount = barCount;
+        BarNoteCounts = CountNotesPerBar();
+        SetViewStart(ViewStartTick);
+    }
+
+    private int BarCountOf(IReadOnlySet<(int TrackIndex, int Channel)>? mutedTracks) =>
+        PianoRollGeometry.BarCount(AudibleLength.EndTick(_song, mutedTracks), TicksPerBar);
 
     // ==================== 视图位置 ====================
 

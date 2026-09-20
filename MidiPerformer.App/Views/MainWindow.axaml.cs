@@ -384,7 +384,7 @@ public partial class MainWindow : Window
         // 换一首曲子（rebuildAll）一律从头发 —— 控件上的状态说的是**这一首**里的那一条轨。
         var focused = rebuildAll ? null : FocusedIdentity();
 
-        _controller = new PianoRollController(song);
+        _controller = new PianoRollController(song, rebuildAll ? null : MutedTracks());
 
         if (!rebuildAll && _lanes.Count == song.Tracks.Count)
         {
@@ -491,13 +491,32 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// 某条轨收 / 放了：试听那张表跟着重排一遍。
+    /// 某条轨收 / 放了。两件事跟着走，用的是**同一份名单**：
+    /// <list type="bullet">
+    /// <item><b>试听</b> —— 那条轨不出声了，整曲时长也跟着重算（见 <see cref="PreviewPlayback.SetMutedTracks"/>）。</item>
+    /// <item><b>卷帘</b> —— 整曲多少小节也只按听得见的轨算（见 <c>AudibleLength</c>）：
+    /// 收起来的那条要是本来就比别的长，卷帘右侧那截现在直接消失，而不是留一片画得出来、放不出声的地方。</item>
+    /// </list>
     ///
-    /// 正在播的话是**接着放**，只有那一条不响（见 <see cref="PreviewPlayback.SetMutedTracks"/>）——
-    /// 折叠一条正在听的轨不该把整遍听下来打断。
+    /// 正在播的话是**接着放**，只有那一条不响 —— 折叠一条正在听的轨不该把整遍听下来打断。
+    /// 但曲子变短之后演奏可能**当场就到底了**：下一次定时器那一帧就会看见
+    /// <c>Finished</c>、停钟、把视图对齐回小节线，这一路不用在这儿抢先处理。
+    ///
+    /// **暂停 / 停止中**要在这儿补一下：播放头停在曲子外面时没人会去动它（积分器只在帧里走），
+    /// 读数就会一直显示「位置 20 / 12」这种句子。把它拉回新的曲尾 —— 播放头落在曲子外面
+    /// 本来就不是一个说得通的状态，而「拉回末尾」是它唯一说得通的落点。
     /// </summary>
     private void OnLaneCollapseChanged(object? sender, EventArgs e)
-        => _playback.SetMutedTracks(MutedTracks());
+    {
+        var muted = MutedTracks();
+        _playback.SetMutedTracks(muted);
+        _controller?.SetMutedTracks(muted);
+
+        if (!_playback.IsPlaying && _playback.HasSong && _playback.MusicSeconds > _playback.TotalSeconds)
+            _playback.SeekSeconds(_playback.TotalSeconds);
+
+        RefreshView();
+    }
 
     // ==================== 曲库 ====================
 

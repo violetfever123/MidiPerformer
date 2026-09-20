@@ -353,6 +353,83 @@ public class SongWalkerTests
         });
     }
 
+    // ==================== 曲尾是可以搬动的 ====================
+
+    /// <summary>
+    /// 不喊 <see cref="SongWalker.SetEndTick"/> 时，曲尾就是整份谱面的末尾 ——
+    /// 这是试听、演奏两条路一直以来的那个数，搬动曲尾的能力不该顺手改掉它。
+    /// </summary>
+    [Test]
+    public void 没搬过曲尾时就是整份谱面的时长()
+    {
+        var song = 变速曲();
+        var walker = new SongWalker(song, 1.0);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(walker.EndTick, Is.EqualTo(song.EndTick));
+            Assert.That(walker.TotalMusicSeconds, Is.EqualTo(3.25).Within(1e-12));
+        });
+    }
+
+    /// <summary>
+    /// 搬曲尾**只改时长**：积分不动、播放头一个 tick 都不跳 ——
+    /// 改的是「曲子多长」，不是「现在放到哪了」，两件事。
+    /// 而搬短之后当前位置落在曲子外面，<see cref="SongWalker.Finished"/> 当场就是 true
+    /// （试听那头靠它停钟，见 <c>PreviewPlayback.OnTimerTick</c>）。
+    /// </summary>
+    [Test]
+    public void 搬曲尾不动播放头但会当场算走到头()
+    {
+        var walker = new SongWalker(变速曲(), 1.0);
+        walker.Seek(2.5, 0.0);
+        long tickBefore = walker.TickNow;
+
+        walker.SetEndTick(1920);   // 曲子砍到音乐时间 2.0s
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(walker.MusicNow, Is.EqualTo(2.5).Within(1e-12), "积分一个字节都没动");
+            Assert.That(walker.TickNow, Is.EqualTo(tickBefore), "播放头没跳");
+            Assert.That(walker.TotalMusicSeconds, Is.EqualTo(2.0).Within(1e-12));
+            Assert.That(walker.Finished, Is.True, "停在曲子外面 = 已经走到头了");
+        });
+    }
+
+    /// <summary>搬回去时长跟着回去 —— 折叠 / 展开是同一条路上的两个方向。</summary>
+    [Test]
+    public void 曲尾搬回去时长跟着回去()
+    {
+        var song = 变速曲();
+        var walker = new SongWalker(song, 1.0);
+
+        walker.SetEndTick(1920);
+        Assert.That(walker.TotalMusicSeconds, Is.EqualTo(2.0).Within(1e-12));
+
+        walker.SetEndTick(song.EndTick);
+        Assert.Multiple(() =>
+        {
+            Assert.That(walker.TotalMusicSeconds, Is.EqualTo(3.25).Within(1e-12));
+            Assert.That(walker.Finished, Is.False, "停在开头，搬回去就不该再说到头了");
+        });
+    }
+
+    /// <summary>负数当 0：空曲（或者一条轨都没有）就是 0 长度的曲子，别让秒数变成负的。</summary>
+    [Test]
+    public void 曲尾给负数当零()
+    {
+        var walker = new SongWalker(变速曲(), 1.0);
+
+        walker.SetEndTick(-5);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(walker.EndTick, Is.EqualTo(0));
+            Assert.That(walker.TotalMusicSeconds, Is.EqualTo(0));
+            Assert.That(walker.Finished, Is.True);
+        });
+    }
+
     // ==================== 语料 ====================
 
     [Test]

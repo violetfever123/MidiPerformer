@@ -140,6 +140,74 @@ public class PreviewPlaybackMuteTests
         Assert.That(sink.LastPlayed, Is.Empty);
     }
 
+    // ==================== 长度也跟着折叠走 ====================
+
+    /// <summary>
+    /// 折叠一条**比别的都长**的轨：整曲时长当场缩短。
+    ///
+    /// 这是「主旋律放完了还要空转一段」那个毛病的正面：出声那头早就不发伴奏的音了，
+    /// 时间轴上却还在按整份谱面走。长度只按听得见的轨算（见 <c>AudibleLength</c>），
+    /// 展开回来自然长回去。
+    /// </summary>
+    [Test]
+    public void 折叠最长的轨让整曲时长缩短()
+    {
+        var sink = new FakeAudioSink();
+        using var playback = new PreviewPlayback(sink, new FakeClock());
+        playback.Load(长轨与短轨(), 静音());
+
+        Assert.That(playback.TotalSeconds, Is.EqualTo(6.0).Within(1e-9), "两条都在：3 小节 = 6 秒");
+
+        playback.SetMutedTracks(静音(第二轨));
+
+        Assert.That(playback.TotalSeconds, Is.EqualTo(2.0).Within(1e-9), "长的收起来了：1 小节 = 2 秒");
+
+        playback.SetMutedTracks(静音());
+
+        Assert.That(playback.TotalSeconds, Is.EqualTo(6.0).Within(1e-9), "展开回来长度也回来");
+    }
+
+    /// <summary>装曲子时就带着折叠名单走的那条路（换曲子不该把折叠带过去，见 <c>MainWindow.SyncLanes</c>）。</summary>
+    [Test]
+    public void 装曲子时就按名单算时长()
+    {
+        var sink = new FakeAudioSink();
+        using var playback = new PreviewPlayback(sink, new FakeClock());
+
+        playback.Load(长轨与短轨(), 静音(第二轨));
+
+        Assert.That(playback.TotalSeconds, Is.EqualTo(2.0).Within(1e-9));
+    }
+
+    /// <summary>
+    /// 正放着的时候把长的那条收起来：**位置当场落到曲子外面**。
+    ///
+    /// 这一条量的是窗口那颗判据赖以成立的那个状态（「位置 &gt; 总长」）——
+    /// 窗口据此把暂停中的播放头拉回曲尾（见 <c>MainWindow.OnLaneCollapseChanged</c>）；
+    /// 正在播的话，下一帧的 <c>Finished</c> 会把它停掉。
+    /// 定时器那一帧在这儿推不动（真 <c>DispatcherTimer</c>），所以量的是状态不是结果。
+    /// </summary>
+    [Test]
+    public void 折叠之后位置可能当场落到曲子外面()
+    {
+        var clock = new FakeClock();
+        var sink = new FakeAudioSink();
+        using var playback = new PreviewPlayback(sink, clock);
+        playback.Load(长轨与短轨(), 静音());
+        playback.Play();
+
+        clock.Advance(2.5);
+        playback.SetMutedTracks(静音(第二轨));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(playback.MusicSeconds, Is.EqualTo(2.5).Within(1e-9), "折叠不动播放头");
+            Assert.That(playback.TotalSeconds, Is.EqualTo(2.0).Within(1e-9));
+            Assert.That(playback.MusicSeconds, Is.GreaterThan(playback.TotalSeconds), "落到曲子外面了");
+            Assert.That(playback.IsPlaying, Is.True, "折叠这一下不该打断正在听的那一遍");
+        });
+    }
+
     // ==================== 帮手 ====================
 
     /// <summary>两条轨：轨块 0 的 0 号声道（C4）、轨块 1 的 1 号声道（E2）。</summary>
@@ -148,6 +216,18 @@ public class PreviewPlaybackMuteTests
         {
             new Track(0, 0, "主旋律", 24, new[] { new Note(60, 0, Quarter, 100) }),
             new Track(1, 1, "贝斯", 33, new[] { new Note(40, 0, Quarter, 100) })
+        },
+        new TempoMap(TimeDivision.PulsesPerQuarter(480)));
+
+    /// <summary>
+    /// **长短不一**的两条轨：轨块 0 那条 1 小节（1920 tick = 2.0 秒），轨块 1 那条 3 小节（6.0 秒）。
+    /// 长度口径的用例都得用它 —— 等长的两条轨测不出「按哪条算」。
+    /// </summary>
+    private static Song 长轨与短轨() => new(
+        new[]
+        {
+            new Track(0, 0, "主旋律", 24, new[] { new Note(60, 0, 4 * Quarter, 100) }),
+            new Track(1, 1, "贝斯", 33, new[] { new Note(40, 0, 3 * 4 * Quarter, 100) })
         },
         new TempoMap(TimeDivision.PulsesPerQuarter(480)));
 

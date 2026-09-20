@@ -89,6 +89,9 @@ public sealed class PreviewPlayback : IDisposable
         Stop();
         _song = song;
         _walker = new SongWalker(song);
+        // 长度也要跟着这份名单走 —— 收起来的轨不出声，它多出来的那几小节就不该继续空转
+        // （见 AudibleLength）。两处用的是同一份名单，别只改一处。
+        _walker.SetEndTick(AudibleLength.EndTick(song, mutedTracks));
         _notes = PreviewMixer.Mix(song, mutedTracks);
     }
 
@@ -101,12 +104,18 @@ public sealed class PreviewPlayback : IDisposable
     ///
     /// 为什么不像换谱面那样干脆停下来：折叠一条正在听的轨，用户要的是「这条别响了」，
     /// 不是「整遍重放」。换谱面（<see cref="Load"/>）另一回事 —— 那儿连曲子都换了。
+    ///
+    /// <b>曲尾也跟着这份名单重算</b>：收起来的那条轨要是本来就比别的长，长度当场变短，
+    /// 于是「剩下的小节里一条轨都不出声」这件事立刻生效 —— 正在播的话下一次
+    /// <c>OnTimerTick</c> 就会看见 <see cref="SongWalker.Finished"/>、停钟、报 <see cref="Finished"/>；
+    /// 暂停中则停在原地（把播放头拉回范围内是窗口的事，见 <c>MainWindow.OnLaneCollapseChanged</c>）。
     /// </summary>
     public void SetMutedTracks(IReadOnlySet<(int TrackIndex, int Channel)> mutedTracks)
     {
         if (_song is not { } song || _walker is not { } walker) return;
 
         _notes = PreviewMixer.Mix(song, mutedTracks);
+        walker.SetEndTick(AudibleLength.EndTick(song, mutedTracks));
 
         if (!IsPlaying) return;
 
