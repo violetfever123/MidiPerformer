@@ -201,3 +201,33 @@ UI、用例层、实体层，裁剪产物基本没动，说明这堆改动没把
 发布前先确认没有活着的 `MidiPerformer` 进程（读回 **0** —— 上一轮 `verify-20` 那个实例
 已经在它自己收尾时关掉了）。
 
+**2026-09-20 第五次发布**（38、39 两张工单收口之后，`main` @ `53a7831`）：
+
+| 项 | 数 |
+| --- | --- |
+| `tools/publish.ps1` | 退出码 **0**，publish 目录里只有那一个 exe（顶层文件数 **1**） |
+| 产物 | `MidiPerformer.App\bin\Release\net8.0\win-x64\publish\MidiPerformer.exe`，**41 057 582 字节**（39.2 MB），mtime 15:50:56 |
+| `tools/run-selftest.ps1` | **20 PASS / 0 FAIL**，耗时 0.8 秒，退出码 **0**（「结果：全部通过」） |
+| 报告里自述的运行时 | 8.0.31；**单文件发布：是** |
+| 报告 | `%TEMP%\midiperformer-selftest-20260920-155107.txt`（4 253 字节） |
+| 工作区 | `git status --porcelain -uno` **空** —— 发布没碰任何受版本控制的文件 |
+
+和上一版（41 053 486 字节）差 **+4 096 字节**（+0.01%，正好一个页面）—— **和第一次发布那一版
+逐字节同大小**（41 057 582）。这一轮动的是**界面层**：38 号把「抽掉一段」的两个小节号框换成
+在卷帘上拖一段（`PianoRollLane`、`TrackLaneView`、`PianoRollPresenter`、`Format`、
+`PianoRollGeometry` 五个文件），39 号加了 `AudibleLength`（`Core` 里一个静态方法）。
+新加的成员都是被直接调用的，没有多出反射入口，所以裁剪器能看见的那张图基本没变 ——
+差一个页面的量级是合理的。`Core` 那座程序集照旧**故意不在**钉住名单里（见上文与 04 号的分工）。
+
+发布前的进程检查读回 **0**（38 号那张票的验证脚本自己起、自己收，没留下实例）。
+裁剪分析刷的还是预期的那一批 IL2026/IL2075（Avalonia 绑定、`SongProject` 与 `Converters`
+的 JSON 反射）。
+
+**一条调用姿势上的坑（不是发布脚本的问题）**：从 Git Bash 里调这个脚本时，
+`pwsh -NoProfile -File tools/publish.ps1 *>&1 | tail -25` 这一句会被 **bash** 先接管 ——
+`*>&1` 里的 `*` 是个 glob，展开成当前目录那一串**目录名**（`MidiPerformer.Adapters` …）
+当位置参数塞给脚本，于是报 `找不到接受实际参数 'MidiPerformer.Adapters' 的位置形式参数`，
+而管道最后那个 `$?` 还是 `tail` 的 0 —— **看着像发布过了，其实一行都没跑**。
+`*>&1` 是 PowerShell 的写法，要留在 pwsh 那边：`pwsh -NoProfile -Command "& pwsh -NoProfile
+-File tools/publish.ps1"`。（清场：那一次没有产生任何产物，publish 目录的 mtime 没动。）
+
