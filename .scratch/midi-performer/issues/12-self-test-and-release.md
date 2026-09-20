@@ -231,3 +231,32 @@ UI、用例层、实体层，裁剪产物基本没动，说明这堆改动没把
 `*>&1` 是 PowerShell 的写法，要留在 pwsh 那边：`pwsh -NoProfile -Command "& pwsh -NoProfile
 -File tools/publish.ps1"`。（清场：那一次没有产生任何产物，publish 目录的 mtime 没动。）
 
+**2026-09-20 第六次发布**（40 号工单收口之后，`main` @ `9ed0d4f`）：
+
+| 项 | 数 |
+| --- | --- |
+| `tools/publish.ps1` | 退出码 **0**，publish 目录里只有那一个 exe（顶层文件数 **1**） |
+| 产物 | `MidiPerformer.App\bin\Release\net8.0\win-x64\publish\MidiPerformer.exe`，**41 061 678 字节**（39.2 MB），mtime 17:13:34 |
+| `tools/run-selftest.ps1` | **20 PASS / 0 FAIL**，耗时 0.5 秒，退出码 **0**（「结果：全部通过」） |
+| 报告里自述的运行时 | 8.0.31；**单文件发布：是** |
+| 报告 | `%TEMP%\midiperformer-selftest-20260920-171408.txt`（4 253 字节） |
+| 工作区 | `git status --porcelain -uno` **空** —— 发布与自检都只写 bin/obj 与运行时的 songs\，工作区零改动 |
+
+和上一版（41 057 582 字节）差 **+4 096 字节**（+0.01%，又是正好一个页面）。这一轮动的是
+**界面层**：40 号把曲库从侧栏整块搬进一个独立的模态窗（新文件 `SongLibraryWindow.axaml`
++ `.axaml.cs`），工具栏那一排从「文件 菜单 + 右上角一颗演奏器」改成四样并排
+（文件 / 歌曲库 / 操作 / 演奏），`SongLibraryPanel` 本身几乎没改（只去掉右边那条分隔线）。
+新加的只有一个窗口类型和一段 `Button.menubar` 样式，XAML 是编译进程序集的
+（`avares://MidiPerformer/Views/SongLibraryWindow.axaml`，无参构造那条 AVLN3001 已经消掉），
+没有多出反射入口 —— 裁剪器能看见的那张图基本没变，差一个页面是合理的量级。
+`songs\` 下照旧是运行时数据（这一份发布目录里 7 个文件），发布脚本没把它算进「单文件」那条判断，
+也没动过它。
+
+发布前的进程检查读回 **0**（40 号那张票的 `verify-40` 自己起、自己收，没留下实例）。
+裁剪分析刷的还是预期的那一批（数出来了：**36 条** —— 33 条 `IL2026` + 1 条 `IL2075`
++ 2 条 `IL2104`），来源和历次一样：Avalonia 的绑定与 `Avalonia.DesignerSupport`、
+`Melanchall.DryWetMidi`，以及 `Core\UseCases\Project\Converters.cs` 里那几个
+`JsonSerializer` 反射重载。**这一轮没有新增的警告面** —— 40 号碰的全是 XAML 和视图层代码，
+警告里点到名的文件只有 `MidiPerformer.App.cs`、`Converters.cs`、`SongProjectFile.cs` 三个，
+一条也没落在 40 号改过的那些文件上。
+
