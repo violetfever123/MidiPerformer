@@ -76,6 +76,16 @@ public partial class MainWindow : Window
     /// </summary>
     private bool _dirty;
 
+    /// <summary>
+    /// 「关窗口」那一处已经问过、用户选了继续 —— 这一趟真的关，别再拦第二次。
+    /// 和 <see cref="_askingBeforeClose"/> 分开：那个挡的是「问的过程中又来一次关闭请求」，
+    /// 这个放的是「问完了、可以关了」。
+    /// </summary>
+    private bool _closeConfirmed;
+
+    /// <summary>正开着「关窗口」那颗弹窗。问的过程里再来一次关闭请求（任务栏那一处）不再叠第二个框。</summary>
+    private bool _askingBeforeClose;
+
     /// <summary>正在拖导航条 —— 这期间卷帘上的播放头红线要藏起来。</summary>
     private bool _draggingNav;
 
@@ -200,6 +210,10 @@ public partial class MainWindow : Window
     /// <summary>导入一个 .mid：读 → 命名 → 存进曲库 → 显示。菜单和拖放走的是同一个它。命名那一步取消不等于失败：曲子照样装上，只是没进曲库（<see cref="_currentName"/> 保持 null）。</summary>
     private async Task ImportFile(string path)
     {
+        // 拖进来也好、挑一个文件也好，都是「打开另一首」：手上这份改过还没存就先拦一下
+        // （拦在这儿而不是挑文件那一步，拖放那条路才一并盖得住）
+        if (!await ConfirmUnsavedAsync(UnsavedScene.SwitchSong, this)) return;
+
         Song song;
         try
         {
@@ -403,9 +417,13 @@ public partial class MainWindow : Window
 
         var dialog = new SongLibraryWindow(library, _tokens, _currentName);
 
-        dialog.OpenRequested += (s, name) =>
+        dialog.OpenRequested += async (s, name) =>
         {
             if (s is not SongLibraryWindow window) return;
+
+            // 打开另一首会把手上的改动丢掉：先问一句。模态挂在曲库窗口上 —— 它压在头上，
+            // 弹到主窗口背后用户看不见
+            if (!await ConfirmUnsavedAsync(UnsavedScene.SwitchSong, window)) return;
 
             // 读不出来就写进窗口的页脚、窗口留着（它压在头上，主窗口提示行看不见）；装上了才关窗
             if (TryOpenLibrarySong(name) is { } error) window.ShowMessage(error);
@@ -647,6 +665,61 @@ public partial class MainWindow : Window
         }
 
         RenameTo(library, oldName, name);
+    }
+
+    // ==================== 未保存 ====================
+
+    /// <summary>
+    /// 「手上这份改过还没存」时先拦一下，返回 true = 可以继续。
+    ///
+    /// 三处入口走的是同一条（切曲子 / 点演奏 / 关窗口），差别只有那颗弹窗第二行说什么、第二颗叫什么 ——
+    /// 那份表在 <see cref="UnsavedPrompt.Of"/> 里，这儿只判「要不要问」和「用户选了哪条出口」。
+    ///
+    /// 三颗出口：**是** = 先存再继续；**第二颗** = 不存也继续；**✕ / Esc** = 留在原地（返回 false）。
+    /// 判据用的是 <c>_dirty</c>（工具栏「保存」那一格穿不穿主色用的是同一个），不另起一套。
+    /// </summary>
+    /// <param name="owner">那颗弹窗模态挂在谁身上（曲库那一处挂曲库窗口）。</param>
+    private async Task<bool> ConfirmUnsavedAsync(UnsavedScene scene, Window owner)
+    {
+        if (!_dirty) return true;
+
+        var choice = await UnsavedChangesDialog.AskAsync(owner, scene, _title);
+
+        // ✕（和 Esc）：什么都不做，留在原地
+        if (choice == UnsavedChoice.Cancel) return false;
+
+        // 「是」= 先存再继续
+        if (choice == UnsavedChoice.Save) return await SaveFirstAsync();
+
+        // 第二颗：不存也继续 —— 它只是「继续」的另一种方式
+        return true;
+    }
+
+    /// <summary>
+    /// 「是」那一支：先存再继续。返回 false = 没存下去，那就**不许**往下走。
+    ///
+    /// 存不下去的两种：这一首还没进曲库、而问名字那一步被取消了；或者压根没配曲库。
+    /// 两种都得停在这儿 —— 继续下去正是要把改动丢掉，而用户刚才选的是「存」。
+    /// </summary>
+    private async Task<bool> SaveFirstAsync()
+    {
+        await SaveAsync();
+        return !_dirty;
+    }
+
+    /// <summary>
+    /// 「关窗口」那一处问完之后真去关。<see cref="_closeConfirmed"/> 是先放行再关：
+    /// 不然 <see cref="OnClosing"/> 会把自己再拦一次。
+    /// </summary>
+    private async Task ConfirmCloseAsync()
+    {
+        bool proceed = await ConfirmUnsavedAsync(UnsavedScene.CloseWindow, this);
+
+        _askingBeforeClose = false;
+        if (!proceed) return;
+
+        _closeConfirmed = true;
+        Close();
     }
 
     // ==================== 编辑脊柱 ====================
@@ -1002,9 +1075,14 @@ public partial class MainWindow : Window
     /// 工具栏上「演奏」—— 另开一个独立窗口，把选中的轨弹到别的程序里去。
     /// 本窗口不 new 它、也不知道它要什么：要一个过来、挂到自己名下、Show ——
     /// 挂了 owner 之后主窗口一关它就跟着关。
+    ///
+    /// 改过还没存就先问一句：这一处弹的是**曲库里存的那份**，草稿还在编辑器里 ——
+    /// 所以那颗弹窗的第二颗叫「用已存的」而不叫「丢掉」，也不穿警示色（见 <see cref="UnsavedPrompt.Of"/>）。
     /// </summary>
-    private void OnPerformerClick(object? sender, RoutedEventArgs e)
+    private async void OnPerformerClick(object? sender, RoutedEventArgs e)
     {
+        if (!await ConfirmUnsavedAsync(UnsavedScene.Perform, this)) return;
+
         if (_performerFactory?.Invoke() is not { } window) return;
 
         // 组装点复用的那个窗口可能已经显示着了，再 Show 一次会抛
@@ -1542,9 +1620,21 @@ public partial class MainWindow : Window
 
     protected override void OnClosing(WindowClosingEventArgs e)
     {
+        base.OnClosing(e);
+        if (e.Cancel) return;
+
+        // 改过还没存就先拦一下（是 / 丢掉 / ✕）。判据是工具栏那一格用的同一个 _dirty，不另起一套。
+        // 问到一半又来一次关闭请求（任务栏那一处）不再叠第二个框：_askingBeforeClose 挡着
+        if (!_closeConfirmed && !_askingBeforeClose && _dirty)
+        {
+            e.Cancel = true;
+            _askingBeforeClose = true;
+            _ = ConfirmCloseAsync();
+            return;
+        }
+
         // 关窗口时把音松开：不然合成器上会留一串按着不放的键
         _playback.Stop();
-        base.OnClosing(e);
     }
 
     protected override void OnClosed(EventArgs e)

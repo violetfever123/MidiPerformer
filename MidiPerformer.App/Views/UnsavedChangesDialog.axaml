@@ -1,0 +1,81 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="MidiPerformer.App.Views.UnsavedChangesDialog"
+        SizeToContent="WidthAndHeight"
+        CanResize="False"
+        ShowInTaskbar="False"
+        MinWidth="320"
+        WindowStartupLocation="CenterOwner">
+
+  <!--
+    未保存确认弹窗（docs/spec-界面改版.md 的「未保存弹窗」）：改过还没存时，切曲子 / 点演奏 / 关窗口
+    三处都弹它，问的第一行一模一样，第二行与第二颗按钮按场景走 —— 那份表在 UnsavedPrompt.Of 里，
+    这个文件只管照着摆。
+
+    三颗出口：**是**（先存再继续）、**第二颗**（不存也继续，名字跟着场景走）、**右上角那颗 ✕**
+    （什么都不做，留在原地）。✕ 不是这儿画的 —— 它是系统标题栏上那颗，平时素色、鼠标移上去才变红底白叉。
+    这里要做的只有「关掉 = 什么都没发生」：Choice 默认停在 Cancel，只有两颗按钮的点击处理会改它。
+
+    第二颗那颗按钮**不写「否」**：是 / 否回答的是标题那一问（「改动还没保存」），而那一问本身不是个问题。
+    写成「是 / 丢掉」之后两颗各自把后果说出来，不用回头读标题。这是拿 Windows 惯例换可读性。
+
+    按钮的长相全走令牌（这个文件里没有一个颜色字面值）：Button.warn 那四条是「丢掉」那一颗穿的警示色，
+    照 Controls.axaml 的 Button.chip-action 那套浓度写（底色 warn-soft、描边 warn-line、字 warn，
+    悬停/按下翻成实底）—— 取 Warn 而不是 Stop：用户没做错什么，只是这条路会丢东西。
+  -->
+  <Window.Styles>
+    <!-- 正文第一行：三处同一句，粗一档 -->
+    <Style Selector="TextBlock.first">
+      <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+
+    <!-- 正文第二行：三处各不相同，淡一档、小一档 -->
+    <Style Selector="TextBlock.second">
+      <Setter Property="Foreground" Value="{DynamicResource TokenInkMuted}" />
+      <Setter Property="FontSize" Value="12" />
+    </Style>
+
+    <!-- 会丢东西的那一处，第二颗穿警示色。不会丢东西的那一处不加 .warn，它就是一颗普通按钮 -->
+    <Style Selector="Button.warn">
+      <Setter Property="Background" Value="{DynamicResource TokenWarnSoft}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource TokenWarnLine}" />
+      <Setter Property="Foreground" Value="{DynamicResource TokenWarn}" />
+    </Style>
+
+    <Style Selector="Button.warn /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource TokenWarnSoft}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource TokenWarnLine}" />
+      <Setter Property="Foreground" Value="{DynamicResource TokenWarn}" />
+    </Style>
+
+    <Style Selector="Button.warn:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource TokenWarn}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource TokenWarn}" />
+      <Setter Property="Foreground" Value="{DynamicResource TokenWarnSoft}" />
+    </Style>
+
+    <Style Selector="Button.warn:pressed /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource TokenWarn}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource TokenWarn}" />
+      <Setter Property="Foreground" Value="{DynamicResource TokenWarnSoft}" />
+    </Style>
+  </Window.Styles>
+
+  <StackPanel Margin="16" Spacing="12">
+    <StackPanel Spacing="7">
+      <TextBlock x:Name="FirstLineText" Classes="first" TextWrapping="Wrap" MaxWidth="360" />
+      <TextBlock x:Name="SecondLineText" Classes="second" TextWrapping="Wrap" MaxWidth="360" />
+    </StackPanel>
+
+    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+      <!--
+        「是」永远是主色那一颗，而且默认焦点在它身上（OnOpened 里 Focus）：
+        回车落在这颗，而它**永远不会丢东西** —— 手滑触发了、闭眼敲回车也不会出事。
+        两颗等宽（86）：一长一短并排看着像随手摆的。
+      -->
+      <Button x:Name="YesButton" Classes="primary" Content="是" MinWidth="86"
+              IsDefault="True" Click="OnYesClick" />
+      <Button x:Name="SecondButton" MinWidth="86" Click="OnSecondClick" />
+    </StackPanel>
+  </StackPanel>
+</Window>
