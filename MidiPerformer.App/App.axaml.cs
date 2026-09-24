@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using MidiPerformer.Adapters.Gateways;
+using MidiPerformer.App.Startup;
 using MidiPerformer.App.Theme;
 using MidiPerformer.App.Views;
 using MidiPerformer.Core.Ports.Outbound;
@@ -56,8 +57,13 @@ public partial class App : Application
                 // （它收一个目录），所以测试塞得进临时目录。
                 var library = new SongLibrary(Path.Combine(AppContext.BaseDirectory, "songs"));
 
-                desktop.MainWindow = new MainWindow(
+                var window = new MainWindow(
                     Tokens, clock, sink, PerformerFactory(clock, sender), library);
+                desktop.MainWindow = window;
+
+                // 启动时问一次提权：没提权就弹一颗「以管理员身份重启」，用户可以先不按。
+                // 等窗口开出来再问 —— 那颗框是挂在这一窗上的模态框，没显示就跑 ShowDialog 无处可依。
+                window.Opened += async (_, _) => await ElevationPrompt.AskAsync(window, desktop.Args);
 
                 // 退出时收尾：窗口正常关掉时自己会松开按着的音，进程被别处带走时得在这里补一次
                 // （多松一次是幂等的）。
