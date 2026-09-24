@@ -27,3 +27,7 @@ docs/
 # 脚本产物
 __pycache__/
 *.pyc
+
+# 点击脚本的产物（runner 的日志、find-note 的扫描图）
+tools/uitest/logs/
+tools/uitest/shots/
