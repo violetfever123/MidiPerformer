@@ -32,7 +32,7 @@ public class PreflightTests
         Assert.That(outcome, Is.EqualTo(PerformanceStartOutcome.ImeActive));
     }
 
-    /// <summary>「弹不了」的三种长相都认出来，判据取自 <c>TrackRanking.IsPlayable</c>。</summary>
+    /// <summary>「弹不了」的三种长相都认出来，判据取自 <c>PlayableTracks.IsPlayable</c>。</summary>
     [Test]
     public void 轨弹不了就不放行()
     {
@@ -116,6 +116,6 @@ public class PreflightTests
     private static Song 打击乐曲() => MidiReader.ReadBytes(SmfWriter.Build(1, 480,
         SmfTrack.Named("鼓")
             .Tempo(0, 250_000)
-            .Note(0, 120, TrackRanking.PercussionChannel, 38)
-            .Note(240, 120, TrackRanking.PercussionChannel, 38)));
+            .Note(0, 120, PlayableTracks.PercussionChannel, 38)
+            .Note(240, 120, PlayableTracks.PercussionChannel, 38)));
 }

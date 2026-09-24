@@ -23,12 +23,12 @@ public static class PerformancePreflight
         if (!elevated) return PerformanceStartOutcome.NotElevated;
         if (imeInChinese) return PerformanceStartOutcome.ImeActive;
 
-        // 能弹与否判在 TrackRanking.IsPlayable 上（单声部 + 非打击乐），判据不写两份。
+        // 能弹与否判在 PlayableTracks.IsPlayable 上（单声部 + 非打击乐），判据不写两份。
         var tracks = request.Song.Tracks;
         if (request.TrackIndex < 0 || request.TrackIndex >= tracks.Count)
             return PerformanceStartOutcome.NoPlayableTrack;
 
-        return TrackRanking.IsPlayable(tracks[request.TrackIndex], request.Song.TempoMap)
+        return PlayableTracks.IsPlayable(tracks[request.TrackIndex], request.Song.TempoMap)
             ? PerformanceStartOutcome.Started
             : PerformanceStartOutcome.NoPlayableTrack;
     }

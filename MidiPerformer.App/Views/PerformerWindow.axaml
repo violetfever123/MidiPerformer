@@ -183,7 +183,7 @@
     </Grid>
     <!--
       提示行：wireframe 的「只列出单声部轨 · 4 条轨里 2 条可演奏」。两个数取自两个地方 ——
-      N 是这首曲子一共几条轨（song.Tracks.Count），M 是其中能弹的（TrackRanking.Of 的结果条数）。
+      N 是这首曲子一共几条轨（song.Tracks.Count），M 是其中能弹的（PlayableTracks.Of 的结果条数）。
       不另算一遍「可弹数」，那样下拉框里几条、提示里几个数就有了两个真相源。
     -->
     <TextBlock Classes="hint" x:Name="TrackHint" Text="只列出单声部轨。" />

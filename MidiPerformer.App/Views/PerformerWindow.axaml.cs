@@ -20,8 +20,8 @@ namespace MidiPerformer.App.Views;
 /// 所以这里只有编排、没有算法：音符映射、事件表、发送时机、超时、倒计时都在 <c>Core/UseCases/Perform</c>。
 /// 按下开始后，预检要的两个事实（是不是管理员、输入法是不是中文）从这里问网关取，
 /// 然后整条链交给 <see cref="StartPerformance"/>；窗口只把结论翻成中文提示，并按 100ms 把进度画到悬浮层。
-/// 下拉框里列的是「能弹的轨」而不是所有轨（口琴同时只能响一个音），判定与排序
-/// （<see cref="TrackRanking"/>）全在 Core 里 —— 界面不判、不算、也不排。
+/// 下拉框里列的是「能弹的轨」而不是所有轨（口琴同时只能响一个音），判定
+/// （<see cref="PlayableTracks"/>）全在 Core 里，顺序就是原曲下标顺序 —— 界面不判、不算、也不排。
 /// </summary>
 public partial class PerformerWindow : Window
 {
@@ -59,9 +59,9 @@ public partial class PerformerWindow : Window
     /// <summary>
     /// 下拉框里的项，顺序就是下拉框的顺序，同时是「选中项 ⇄ 原曲轨下标」的映射：
     /// <see cref="ComboBox.SelectedIndex"/> 是这张表里的第几条，不能直接当 <c>song.Tracks</c> 的下标
-    /// （筛掉了几条）。原曲下标在 <see cref="RankedTrack.SongTrackIndex"/> 里。
+    /// （筛掉了几条）。原曲下标在 <see cref="PlayableTrack.SongTrackIndex"/> 里。
     /// </summary>
-    private readonly List<RankedTrack> _playable = new();
+    private readonly List<PlayableTrack> _playable = new();
 
     /// <summary>整条演奏链；窗口只递参数、只收结论。</summary>
     private readonly StartPerformance _performance;
@@ -169,17 +169,17 @@ public partial class PerformerWindow : Window
 
         try
         {
-            // 读盘 + 解析 + 挑轨全放线程池：TrackRanking.Of 要把每条轨的音符全走一遍再打分，
+            // 读盘 + 解析 + 挑轨全放线程池：PlayableTracks.Of 要把每条轨的音符全走一遍判单声部，
             // 长曲子几十到几百毫秒，留在界面线程上照样卡。回来的是纯 Core 的 Track 记录。
             var (song, playable) = await Task.Run(() =>
             {
                 var read = MidiReader.Read(path);
-                return (read, TrackRanking.Of(read));
+                return (read, PlayableTracks.Of(read));
             });
 
             _song = song;
 
-            // 能弹的轨（有音 + 单声部 + 非打击乐）已经在上面挑好排好，最像主旋律的在最前；
+            // 能弹的轨（有音 + 单声部 + 非打击乐）已经在上面挑好，按原曲下标升序；
             // 界面后面只用 _playable，不再回头问 song
             _playable.Clear();
             _playable.AddRange(playable);
@@ -199,7 +199,7 @@ public partial class PerformerWindow : Window
             if (any)
             {
                 TrackCombo.PlaceholderText = "选一条轨";   // 占位只在没选中项时露头，但别留着上一轮那句
-                TrackCombo.SelectedIndex = 0;          // 默认第一条
+                TrackCombo.SelectedIndex = 0;          // 默认第一条能弹的轨
                 ShowReady();
             }
             else
@@ -222,10 +222,10 @@ public partial class PerformerWindow : Window
 
     /// <summary>下拉框里的一行：序号 + 轨名 + 音数。</summary>
     /// <remarks>
-    /// 序号是它在原曲里的位置（<see cref="RankedTrack.SongTrackIndex"/> + 1），不是它在下拉框里的位置：
+    /// 序号是它在原曲里的位置（<see cref="PlayableTrack.SongTrackIndex"/> + 1），不是它在下拉框里的位置：
     /// 用户拿着这个号回编辑器里找那条轨，两个号对不上就找不到。
     /// </remarks>
-    private static string Describe(RankedTrack r)
+    private static string Describe(PlayableTrack r)
         => $"{r.SongTrackIndex + 1:D2} {r.Track.Name} · {r.Track.NoteCount} 个音";
 
     /// <summary>
