@@ -20,10 +20,17 @@
 #
 # ⚠️ **这一票会碰用户真实的曲库目录**（删除是这一票的正题，不真删就证明不了）。
 #   所以脚本**开头整目录备份、finally 无条件还原**，收尾还要逐个文件比对 md5。
-#   造的两份临时工程（`_verify40_改过` / `_verify40_坏工程`）也在这套备份里，
-#   万一中途崩了，还原那一支照样会把它们清掉。
+#   造的那几份临时素材也在这套备份里，万一中途崩了，还原那一支照样会把它们清掉。
+#
+# ⚠️ **素材按产品现在的读法造**（52 / 53 / 57 号之后）：曲库成员只认 `songs\<名字>.mid`，
+#   而行上那格小字读的是 `songs\.work\<名字>.mproj` 的**文件头**（v2）。
+#   所以 `.work\` 这一层也一并备份 / 还原 / 比对 —— 造缓存就是往那儿造。
+#   往曲库根下放一份老 `.mproj` 今天**影响不到任何一行**（83 号票量过，见 造缓存 那段）。
 #
 # 前提：**非提权**（本脚本不点「开始演奏」，但同样不许提权跑）。
+#   ⚠️ 60 号之后，非提权 shell 里启动会弹一颗**模态**的「要以管理员身份重启吗？」，
+#      它把主窗整个禁用掉。本脚本**不带关它的那一段**（83 号票特意没动，属 60 号后续的活），
+#      所以在这样的 shell 里跑，红的是「§1 开不出曲库窗」那一步 —— 那是别的票的红。
 
 . (Join-Path $PSScriptRoot 'uitest-lib.ps1')
 
@@ -49,18 +56,29 @@ function 断言含([string]$名字, [string]$实际, [string]$片段) {
 # 曲库目录：备份 / 还原
 # =====================================================================
 $曲库 = (Resolve-Path (Join-Path $PSScriptRoot '..\..\MidiPerformer.App\bin\Debug\net8.0\songs')).Path
+$work目录 = Join-Path $曲库 '.work'
 $备份 = Join-Path $env:TEMP ("midiperformer-songs-backup-" + (Get-Date -Format 'yyyyMMdd-HHmmss'))
 function 目录指纹([string]$目录) {
-  @(Get-ChildItem -File $目录 | Sort-Object Name | ForEach-Object {
+  # 目录不在 = 一份都没有（`.work\` 平时就不在：只有存过盘才会长出来）
+  if (-not (Test-Path $目录)) { return }
+  @(Get-ChildItem -File $目录 -EA SilentlyContinue | Sort-Object Name | ForEach-Object {
       $h = (Get-FileHash $_.FullName -Algorithm MD5).Hash
       "{0} {1} {2}" -f $_.Name, $_.Length, $h })
 }
-$原样 = 目录指纹 $曲库
+$原样 = @(目录指纹 $曲库)
+$原样work = @(目录指纹 $work目录)
+# 81 号票之后曲库成员只认 .mid，而根下还躺着用户自己那两份**老 .mproj**（cargo / Carulli）——
+# 它们既不进列表，这一票也一份都不许动，所以数量记下来给 §2 / §9 当判据。
+$原样mproj数 = @(Get-ChildItem -File $曲库 -Filter *.mproj -EA SilentlyContinue).Count
+# 造出来的每一份（.mid 和 .work 里的缓存）都记在这儿，收尾一份不落地删掉。
+$临时文件 = @()
 Copy-Item $曲库 $备份 -Recurse -Force
 "曲库 $曲库"
 "  （备份到 $备份）"
 "  开头有 $($原样.Count) 份："
 $原样 | ForEach-Object { "    $_" }
+"  缓存目录 .work 开头有 $($原样work.Count) 份："
+$原样work | ForEach-Object { "    $_" }
 
 function 还原曲库 {
   try {
@@ -72,20 +90,84 @@ function 还原曲库 {
     }
     Get-ChildItem -File $曲库 | Remove-Item -Force -EA SilentlyContinue
     Get-ChildItem -File $备份 | Copy-Item -Destination $曲库 -Force -EA SilentlyContinue
+    # `.work\` 同一条规矩：备份里没有就整条撤掉（本脚本自己造的），有就先清后拷。
+    # ⚠️ 这一层**不能只管「删掉我造的那几份」** —— 半路崩掉时，谁造的都说不清。
+    $备份work = Join-Path $备份 '.work'
+    if (Test-Path $备份work) {
+      if (-not (Test-Path $work目录)) { New-Item -ItemType Directory $work目录 | Out-Null }
+      Get-ChildItem -File $work目录 -EA SilentlyContinue | Remove-Item -Force -EA SilentlyContinue
+      Get-ChildItem -File $备份work | Copy-Item -Destination $work目录 -Force -EA SilentlyContinue
+    } elseif (Test-Path $work目录) {
+      Get-ChildItem -File $work目录 -EA SilentlyContinue | Remove-Item -Force -EA SilentlyContinue
+      Remove-Item $work目录 -Recurse -Force -EA SilentlyContinue
+    }
     Remove-Item $备份 -Recurse -Force -EA SilentlyContinue
   } catch { Write-Host "★ 还原曲库时出错：$_" }
 }
 
-# 造一份「改过」的临时工程（cargo 的副本，只把文件头里的 Edited 翻成 true）。
-# 用临时文件这个办法而不是「载一首真歌再改」，是因为**这一票不该动用户任何一份工程**。
-function 造改过的([string]$目标) {
+# ---- 造素材：按产品现在的读法造（往 `.work\` 造 v2 缓存头）----
+#
+# 🔴 83 号票量过的那件事，写在这儿免得下次又走回头路：
+#   从前这儿是「从曲库里捞一份老 `.mproj`、把里面的 `"Edited": false` 翻成 true」，
+#   直接丢在**曲库根下**。今天那条路**已经影响不到任何一行**：
+#     · 曲库成员只认 `.mid`（`SongLibrary.Names()` 拿 `EnumerateFiles()` 筛 `.mid`），
+#       根下那份 `.mproj` 连一行都长不出来；
+#     · 行上那格小字读的是 `songs\.work\<名字>.mproj`（`SongLibraryPanel.AddRow` 里
+#       `_library.WorkPathOf(name)`）—— 不是 `.mid`，更不是根下那份老 `.mproj`。
+#   ⇒ 素材必须造在**产品读的那个位置**，否则造出来的东西谁也看不见，红了还以为是字眼问题。
+#
+# 缓存是从 `cargo.mproj`（用户曲库里那份**老 v1 工程**）改出来的：只动文件头那几行，
+# 谱面那 100KB 一个字节不碰。字段名照产品自己的写法（`SongProjectFile.WriteProject`）：
+#   `Version`（v2 才认，见 `ProjectVersion` / `TryReadProjectHeader` 那道版本闸）、
+#   `Edited`、`PlayableTrackCount`（产品写的就是这三个名字，别自己另起）。
+#   `PlayableTrackCount > 0` ⇒ 那一行说「可播放」，`= 0` ⇒ 「不可播放」（`MarkFor` 的第三档）。
+#   ⚠️ 老 v1 文件里没有 `PlayableTrackCount`，读它是 `0` —— 所以 v1 整个被判成读不出来，
+#      这一票也正是拿这条当素材（见 §2 的坏工程那份）。
+function 造缓存([string]$曲名, [bool]$改过, [int]$可弹轨数) {
+  $mid = Join-Path $曲库 "$曲名.mid"
+  Copy-Item (Join-Path $曲库 'cargo.mid') $mid -Force
   $源 = Join-Path $曲库 'cargo.mproj'
   $字节 = [System.IO.File]::ReadAllBytes($源)
   $有BOM = $字节.Length -ge 3 -and $字节[0] -eq 0xEF -and $字节[1] -eq 0xBB -and $字节[2] -eq 0xBF
   $文 = [System.Text.Encoding]::UTF8.GetString($字节, $(if ($有BOM) { 3 } else { 0 }), $字节.Length - $(if ($有BOM) { 3 } else { 0 }))
-  if ($文 -notmatch '"Edited"\s*:\s*false') { throw 'cargo.mproj 里找不到 "Edited": false —— 副本没法造' }
-  $文 = [regex]::Replace($文, '"Edited"\s*:\s*false', '"Edited": true', 1)
-  [System.IO.File]::WriteAllText($目标, $文, (New-Object System.Text.UTF8Encoding($有BOM)))
+
+  # 三个模式都**锚在行首**（文件头那些字段各自一行），而且先验一句「只出现一次」——
+  # 匹配到两处的话 `-replace` 会把谱面里同名的字段一起改掉，那是无声的坏素材。
+  $版本式 = '(?m)^(\s*)"Version"\s*:\s*[0-9]+'
+  $改过式 = '(?m)^(\s*)"Edited"\s*:\s*(true|false)'
+  $歌式 = '(?m)^(\s*)"Song"\s*:'
+  foreach ($式 in @($版本式, $改过式, $歌式)) {
+    $n = @([regex]::Matches($文, $式)).Count
+    if ($n -ne 1) { throw "cargo.mproj 里「$式」出现了 $n 次（要 1 次）—— 副本没法造" }
+  }
+  $文 = [regex]::Replace($文, $版本式, '$1"Version": 2')
+  $文 = [regex]::Replace($文, $改过式, ('$1"Edited": ' + $(if ($改过) { 'true' } else { 'false' })))
+  # 插在 `"Song"` 那一行前面：跟产品写出来的字段次序一致（版本 / 名字 / 改过 / 来源 / 可弹轨数）
+  $文 = [regex]::Replace($文, $歌式, ('$1"PlayableTrackCount": ' + $可弹轨数 + "," + [Environment]::NewLine + '$1"Song":'))
+  if ($文 -notmatch '"PlayableTrackCount"\s*:\s*' + $可弹轨数) { throw 'PlayableTrackCount 没插进文件头' }
+  if ($文 -notmatch '"Version"\s*:\s*2') { throw 'Version 没改成 2' }
+  [System.IO.File]::WriteAllText((Join-Path $work目录 "$曲名.mproj"), $文, (New-Object System.Text.UTF8Encoding($有BOM)))
+}
+
+# 🔴 那一格小字**脚本自己照真值表算一遍**，再拿去跟屏幕上读到的那格**逐字**比。
+#    判据不许放松成「是那五句里的某一句」—— 自己按缓存头算出该说哪一句，比的才是
+#    「屏幕上那句话跟缓存里的事实对不对得上」。产品那边的算法是 `SongLibraryPanel.MarkFor`
+#    （真值表的规格在 docs/spec-存储与曲库.md 的四态那一节）：
+#      ① 缓存**在不在**（不是读不读得出）—— 不在 ⇒ 那格空的（散装 .mid 不带标记，
+#         「本程序没给它存过盘」不是「没动过」）；
+#      ② 缓存在、头读不出来（坏了 / 版本不是 2，v1 也算） ⇒ 「读不出来」；
+#      ③ 否则 Edited ? 「编辑过 · 」: "" 再拼（可弹轨数 > 0 ? 「可播放」: 「不可播放」）。
+function 该显什么([string]$名) {
+  $缓存 = Join-Path $work目录 "$名.mproj"
+  if (-not (Test-Path $缓存)) { return '' }
+  try { $头 = (Get-Content -Raw -Encoding UTF8 $缓存) | ConvertFrom-Json } catch { return '读不出来' }
+  if ($头 -isnot [System.Management.Automation.PSCustomObject]) { return '读不出来' }
+  if ($头.Version -ne 2) { return '读不出来' }
+  $可弹 = 0
+  if ($头.PlayableTrackCount -is [int] -or $头.PlayableTrackCount -is [long]) { $可弹 = [int]$头.PlayableTrackCount }
+  $弹字 = if ($可弹 -gt 0) { '可播放' } else { '不可播放' }
+  if ($头.Edited -eq $true) { return "编辑过 · $弹字" }
+  return $弹字
 }
 
 # ---------- UIA 取数的小工具 ----------
@@ -147,7 +229,18 @@ function 主窗曲名 {
   catch { return "★读不到曲名框($($_.Exception.GetType().Name))" }
 }
 # 除了某一窗之外还剩几个顶层窗。IntPtr 用 ToInt64 比 —— 直接 -ne 比 IntPtr 不稳。
+# ⚠️ 这是**函数返回管道**，不是数组：调用方**一律**得写 `@(除它之外 $dw).Count`。
+#    不套 `@()` 的话，回来 0 个是 `$null`、回来 1 个是**标量**，两种情况下 `.Count`
+#    在严格模式下都直接抛「在此对象上找不到属性 Count」—— 0 个和 1 个报的错一模一样，
+#    红的位置还指在断言那一行（83 号票实跑栽在这儿：确认框到底弹没弹出来，从那条错里
+#    根本看不出来）。要多数几个窗口时，先用 `$x = @(除它之外 $dw)` 落到变量上再数。
 function 除它之外([IntPtr]$这窗) { @(别窗 | Where-Object { $_.ToInt64() -ne $这窗.ToInt64() }) }
+# 「那一问」= 删除确认框：除 $dw 之外、**标题正好是「删除曲子」**的那个顶层窗。
+# 为什么不写成「除 $dw 之外只剩一个窗就算」：$dw 自己的 ToolTip、Avalonia 那些细碎的浮层
+# 也是本进程的顶层窗，按个数数会把它们算进来（`Others` 那道 80x60 的闸门拦不住
+# 296x60 的提示框）。按**标题**认它，比数个数更死 —— 下面紧跟着还有一条
+# 「标题是「删除曲子」」的逐字断言，两条说的是同一件事，不冲突。
+function 那一问([IntPtr]$除谁) { @(除它之外 $除谁 | Where-Object { [P40]::Title($_) -eq '删除曲子' }) }
 # 一小片里出现最多的那个颜色 = 那一行的底色。**不能**改成「取最左边那一点」——
 # 曲名那一格是拉伸铺满整列的，「名字左边」和「名字右边」都在同一格里，取样点挑不好就取到字上。
 function 行底色($b, [int]$w, [int]$x1, [int]$x2, [int]$y) {
@@ -247,7 +340,7 @@ function 某行($根, [string]$曲名) {
   }
   return $null
 }
-# 一行里那三格：曲名 / 改过没动过 / 那颗叉。
+# 一行里那三格：曲名 / 那一格小字（四态真值表） / 那颗叉。
 # ⚠️ 别拿「×」当变量名 —— 那是 PowerShell 的乘号，词法就过不去（实测 ParserError）。
 function 行里($行, [string]$曲名) {
   $t = @(找类型 $行 $CT::Text)
@@ -262,42 +355,67 @@ $跑完了 = $false
 try {
 
 # =====================================================================
-"`n=== 0. 干净实例：工具栏左边那一排四样 ==="
+"`n=== 0. 干净实例：工具栏那一排入口 ==="
 # =====================================================================
 $h = 起窗口
 $root = $AE::FromHandle($h)
 $win = $root.Current.BoundingRectangle
 "窗口 $([int]$win.Width)x$([int]$win.Height) @ $([int]$win.X),$([int]$win.Y)"
 
-$四样 = @()
-foreach ($名 in @('文件', '歌曲库', '操作', '演奏')) { $四样 += (按种类 $名) }
-断言 '四个入口一个不少（文件 / 歌曲库 / 操作 / 演奏）' $四样.Count 4
-if ($四样.Count -ne 4) { throw '入口不齐，后面每一节都建立在它们身上' }
+# 那一排 = 中线跟「歌曲库」一样高的那些按钮 / 菜单（±2px）。
+# 拿「歌曲库」当锚、不写死坐标，也不写死那一排里有几样：存盘组（保存 / 另存为…）和
+# 还没搬走的「导入 MIDI…」都长在这一排里，可它们各有各的工单（存盘组归 55、导入归 55），
+# 这一票只钉自己名下那三样（歌曲库 / 操作 / 演奏）和「整排长相统一」。
+$曲库钮 = 按id $root 'LibraryButton'
+if ($null -eq $曲库钮) { throw '主窗上没有「歌曲库」那颗按钮（LibraryButton）—— 后面每一节都建立在它身上' }
+$中线 = (矩形 $曲库钮).Y + (矩形 $曲库钮).Height / 2
+$那一排 = @()
+foreach ($t in @($CT::Button, $CT::MenuItem)) {
+  foreach ($e in @(找类型 $root $t)) {
+    $r = 矩形 $e
+    if ([double]::IsNaN($r.X) -or $r.Width -le 0) { continue }
+    if ([Math]::Abs(($r.Y + $r.Height / 2) - $中线) -le 2) { $那一排 += $e }
+  }
+}
+$那一排 = @($那一排 | Sort-Object { (矩形 $_).X })
+$名字们 = @($那一排 | ForEach-Object { $_.Current.Name })
+"  从左到右（中线跟「歌曲库」一样高的）：$($名字们 -join ' | ')"
+function 序号([string]$名) { $i = 0; foreach ($n in $名字们) { if ($n -eq $名) { return $i }; $i++ } return -1 }
 
-$序 = $四样 | Sort-Object { (矩形 $_).X }
-$排 = ($序 | ForEach-Object { $_.Current.Name }) -join ' | '
-"  从左到右：$排"
-断言字 '从左到右正好是「文件 | 歌曲库 | 操作 | 演奏」' $排 '文件 | 歌曲库 | 操作 | 演奏'
+$三样 = @('歌曲库', '操作', '演奏')
+$缺 = @($三样 | Where-Object { $名字们 -notcontains $_ })
+断言 '「歌曲库」「操作」「演奏」三样一个不少（40 号要的那三个入口）' $缺.Count 0
+if ($缺.Count) { throw "入口不齐（缺 $($缺 -join ' / ')），后面每一节都建立在它们身上" }
+断言字 '最左那样就是「歌曲库」（和别的一样是一颗并排的按钮，不是塞进下拉里的菜单项）' $名字们[0] '歌曲库'
+断言 '「演奏」紧挨着「操作」右边（用户原话：将「演奏器」改名为「演奏」，并放在「操作」旁边）' `
+  (序号 '演奏') ((序号 '操作') + 1)
 
-# 「平齐 / 并排」在屏幕上的意思：**同高、同中线、间距一样**。三样都量。
-$高 = @($序 | ForEach-Object { (矩形 $_).Height })
-$中 = @($序 | ForEach-Object { $r = 矩形 $_; $r.Y + $r.Height / 2 })
-$左 = @($序 | ForEach-Object { (矩形 $_).X })
-$右 = @($序 | ForEach-Object { $r = 矩形 $_; $r.X + $r.Width })
-$间 = @(1..3 | ForEach-Object { $左[$_] - $右[$_ - 1] })
+# 「平齐 / 并排」在屏幕上的意思：**同高、同中线、左到右不重叠**。
+# ⚠️ 从前这儿还有一条「三处间隙一样宽」—— 它描述的是「文件 | 歌曲库 | 操作 | 演奏」那一排。
+#    后来「文件」那个下拉被拆掉、存盘那两颗上到台面收进一个组里（组内组外的间隙本来就不一样，
+#    见 docs/spec-界面改版.md 的「工具栏 —— 排法 B（存盘成组）」）⇒ 那条判据描述的那种排法
+#    今天已经不存在了。它不是被放松掉的：并排这件事现在由下面三条钉着，而且是拿整排（不管排里
+#    有几样、谁加的）一起量的。
+$高 = @($那一排 | ForEach-Object { (矩形 $_).Height })
+$中 = @($那一排 | ForEach-Object { $r = 矩形 $_; $r.Y + $r.Height / 2 })
+$左 = @($那一排 | ForEach-Object { (矩形 $_).X })
+$右 = @($那一排 | ForEach-Object { $r = 矩形 $_; $r.X + $r.Width })
+$间 = @(1..($那一排.Count - 1) | ForEach-Object { $左[$_] - $右[$_ - 1] })
 "  高 $($高 -join ',')  中线Y $($中 -join ',')  间隙 $($间 -join ',')"
-断言真 '四样一样高（差 ≤ 2px）' ((($高 | Measure-Object -Max).Maximum - ($高 | Measure-Object -Min).Minimum) -le 2) `
+断言真 '那一排一样高（差 ≤ 2px）' ((($高 | Measure-Object -Max).Maximum - ($高 | Measure-Object -Min).Minimum) -le 2) `
   "最高 $([int]($高|Measure-Object -Max).Maximum) 最矮 $([int]($高|Measure-Object -Min).Minimum)"
-断言真 '四样在同一条中线上（差 ≤ 2px）' ((($中 | Measure-Object -Max).Maximum - ($中 | Measure-Object -Min).Minimum) -le 2) `
+断言真 '那一排在同一条中线上（差 ≤ 2px）——「平齐」' ((($中 | Measure-Object -Max).Maximum - ($中 | Measure-Object -Min).Minimum) -le 2) `
   "中线 $($中 -join ',')"
-断言真 '三处间隙一样宽（差 ≤ 2px）——「并排」' ((($间 | Measure-Object -Max).Maximum - ($间 | Measure-Object -Min).Minimum) -le 2) `
+断言真 '相邻两样不叠在一起（左到右挨着排）——「并排」' (@($间 | Where-Object { $_ -lt 0 }).Count -eq 0) `
   "间隙 $($间 -join ',')"
+
 # ⚠️ `-join` 写在**实参位置**上不行：命令模式的解析器会把 `-join` 当成参数名，
 #    数组就会被 `"$实际"` 按默认分隔符（空格）拼出来。先算成变量再传。
-$类型 = (@($序[1], $序[3]) | ForEach-Object { $_.Current.ControlType.ProgrammaticName }) -join ','
-断言 '「歌曲库」和「演奏」是按钮（按一下就开窗，没有下拉）' $类型 'ControlType.Button,ControlType.Button'
-断言字 '「歌曲库」那颗按钮就是 LibraryButton' $序[1].Current.AutomationId 'LibraryButton'
-断言字 '「演奏」那颗按钮还是叫 PerformerButton（老测试按这个名字找它）' $序[3].Current.AutomationId 'PerformerButton'
+$库演类型 = (@($那一排[(序号 '歌曲库')], $那一排[(序号 '演奏')]) | ForEach-Object { $_.Current.ControlType.ProgrammaticName }) -join ','
+断言 '「歌曲库」和「演奏」是按钮（按一下就开窗，没有下拉）' $库演类型 'ControlType.Button,ControlType.Button'
+断言字 '「歌曲库」那颗按钮就是 LibraryButton' $曲库钮.Current.AutomationId 'LibraryButton'
+断言字 '「演奏」那颗按钮还是叫 PerformerButton（老测试按这个名字找它）' $那一排[(序号 '演奏')].Current.AutomationId 'PerformerButton'
+断言字 '「操作」还是那个下拉菜单（撤销 / 重做住在里面）' $那一排[(序号 '操作')].Current.ControlType.ProgrammaticName 'ControlType.MenuItem'
 
 # 右上角那颗「演奏器…」蓝按钮撤了没有：窗口里不许再有任何控件说「演奏器」
 $带演奏器 = @(全部名字 | Where-Object { $_ -like '*演奏器*' })
@@ -306,11 +424,11 @@ $带歌曲库 = @(全部名字 | Where-Object { $_ -eq '歌曲库' })
 断言 '窗口里叫「歌曲库」的控件只有一个（就是那颗按钮，侧栏标题没了）' $带歌曲库.Count 1
 
 # 曲库那条列表真的不在主窗里了
-$列表数 = (找类型 $root $CT::List).Count + (找类型 $root $CT::ListItem).Count
+$列表数 = @(找类型 $root $CT::List).Count + @(找类型 $root $CT::ListItem).Count
 断言 '主窗里一个列表都没有（曲库那条 ListBox 搬走了）' $列表数 0
 
 # =====================================================================
-"`n=== 1. 点「歌曲库」→ 开出一个窗口，里面是完整曲名 + 改过没动过 + 每行一颗 × ==="
+"`n=== 1. 点「歌曲库」→ 开出一个窗口，里面是完整曲名 + 那格小字 + 每行一颗 × ==="
 # =====================================================================
 点后等 { (按种类 '歌曲库')[0] } $h '歌曲库' { $null -ne (曲库窗) } | Out-Null
 $dw = 曲库窗
@@ -324,15 +442,17 @@ $d宽 = $dr.R - $dr.L; $d高 = $dr.B - $dr.T
 断言真 '曲库窗口「稍微宽一点」—— 物理宽 ≥ 1000px（= 500 DIP @2x）' ($d宽 -ge 1000) "$d宽"
 
 $行们 = @(找类型 $droot $CT::ListItem)
-$应是 = @(Get-ChildItem -File $曲库 -Filter *.mproj | Sort-Object Name)
-断言 '列表里的行数 = 曲库目录里的 .mproj 份数' $行们.Count $应是.Count
+# 行 = 曲库成员 = `songs\` 下的一份 `.mid`（52 号之后只认 .mid；根下那两份老 .mproj
+# 是用户自己的东西，既不是成员、也不该被这份脚本碰 —— 它们照样进 §9 的指纹比对）。
+$应是 = @(Get-ChildItem -File $曲库 -Filter *.mid | Sort-Object Name)
+断言 '列表里的行数 = 曲库目录里的 .mid 份数' $行们.Count $应是.Count
 断言字 '「N 首」和行数对得上' (按id $droot 'CountText').Current.Name "$($应是.Count) 首"
 
 $底 = (按id $droot 'StatusText').Current.Name
 断言字 '页脚那一行一开始是空的（还没删过东西）' $底 ''
 断言真 '页脚上有一颗「关闭」' ($null -ne (按id $droot 'CloseButton')) ''
 
-# ---- 逐行：曲名 / 改过没动过 / ×，以及**完整名字的像素证人** ----
+# ---- 逐行：曲名 / 那格小字 / ×，以及**完整名字的像素证人** ----
 $b = [P40]::Shot($dw)
 $bw = [P40]::LastW
 "  曲库窗的图 $bw x $([P40]::LastH)"
@@ -353,75 +473,134 @@ foreach ($名 in ($应是 | ForEach-Object { $_.BaseName })) {
   "        底色 #$('{0:X6}' -f $底色)，名字画了 $墨宽 px，格子右边还剩 $([int]$rn.Width - $墨宽) px 空白"
   断言真 "「$名」这一行的曲名没被省略号截断（墨迹右边还留着空白）" `
     ($墨右 -ge 0 -and ($x2 - $墨右) -gt 40) "墨水右沿 $墨右，格子右沿 $x2"
-  断言真 "「$名」这一行有「改过 / 没动过 / 读不出来」那格小字" `
-    (@('改过', '没动过', '读不出来') -contains $格.meta.Current.Name) "读到「$($格.meta.Current.Name)」"
+  # 那格小字照真值表验（该说哪一句由**缓存头**算出来，见 该显什么）。
+  # ⚠️ 「该是空的」这一格也得验：空 = 「本程序没给它存过盘」，它跟「没动过」是两件事，
+  #    从前那句 `@('改过','没动过','读不出来') -contains …` 在空的一格上必然红。
+  $该 = 该显什么 $名
+  $读到 = if ($null -eq $格.meta) { '（树里没有那格）' } else { $格.meta.Current.Name }
+  if ($该 -eq '') {
+    断言真 "「$名」那一行没有那格小字（没有缓存 ⇒ 不带标记，不是「没动过」）" `
+      ($null -eq $格.meta -or $格.meta.Current.Name -eq '') "读到「$读到」"
+  } else {
+    断言真 "「$名」那一行的那格小字在树里（读不到就成假绿了）" ($null -ne $格.meta) "读到「$读到」"
+    断言字 "「$名」那一行的小字跟缓存头对得上（四态真值表）" $读到 $该
+  }
   断言真 "「$名」这一行有一颗 ×" ($null -ne $格.叉 -and $格.叉.Current.Name -eq '×') "读到「$($格.叉.Current.Name)」"
 }
 
 # 关窗收工：点页脚那颗「关闭」（它挂着 IsCancel，Esc 也走得通，但点按钮更实在）
-点后等 { 按id (曲库根) 'CloseButton' } $dw '关闭' { (别窗).Count -eq 0 } | Out-Null
-断言 '点「关闭」就把曲库窗口关掉了' (别窗).Count 0
+点后等 { 按id (曲库根) 'CloseButton' } $dw '关闭' { @(别窗).Count -eq 0 } | Out-Null
+断言 '点「关闭」就把曲库窗口关掉了' @(别窗).Count 0
 
 # =====================================================================
-"`n=== 2. 「改过」那格是真从工程文件里读出来的（造一份改过的临时工程）==="
+"`n=== 2. 那格小字是真从缓存文件头里读出来的（素材按产品现在的读法造）==="
 # =====================================================================
-$改过的 = Join-Path $曲库 '_verify40_改过.mproj'
-$坏的 = Join-Path $曲库 '_verify40_坏工程.mproj'
-造改过的 $改过的
-[System.IO.File]::WriteAllText($坏的, '这不是一个工程', (New-Object System.Text.UTF8Encoding($false)))
-"  造了两份临时工程：$(Split-Path -Leaf $改过的) / $(Split-Path -Leaf $坏的)"
+# 三份素材 = 一份 `.mid`（cargo.mid 的副本）+ `.work\` 里一份 v2 缓存头，四个格子各占一格。
+# 那份缓存的可弹轨数写 **5**：57 号上机时产品自己存出来的 cargo 就是 5（它的真值），
+# 造素材照产品自己写出来的数写，别凭空编一个。
+$临时曲 = @(
+  @{ 名 = '_verify40_改过';   改过 = $true;  可弹 = 5 },   # 编辑过 · 可播放
+  @{ 名 = '_verify40_没改过'; 改过 = $false; 可弹 = 5 },   # 可播放（「缓存在 ≠ 改过」那一格）
+  @{ 名 = '_verify40_弹不动'; 改过 = $false; 可弹 = 0 }    # 不可播放
+)
+foreach ($f in $临时曲) {
+  造缓存 $f.名 $f.改过 $f.可弹
+  $临时文件 += @((Join-Path $曲库 "$($f.名).mid"), (Join-Path $work目录 "$($f.名).mproj"))
+}
+# 坏工程：`.mid` 和缓存**都乱写**。缓存坏了 ⇒ 那格说「读不出来」；
+# .mid 也坏了 ⇒ 双击它**打不开**（§6 验的就是这个：坏的那份不许把窗口关了、也不许弄坏手上那首）。
+# ⚠️ 光造一份坏缓存不够：缓存读不出来时产品会**降级去读 .mid**，.mid 好好的就照装不误。
+$坏mid = Join-Path $曲库 '_verify40_坏工程.mid'
+$坏缓存 = Join-Path $work目录 '_verify40_坏工程.mproj'
+[System.IO.File]::WriteAllText($坏mid, '这不是一个 MIDI', (New-Object System.Text.UTF8Encoding($false)))
+[System.IO.File]::WriteAllText($坏缓存, '这不是一个工程', (New-Object System.Text.UTF8Encoding($false)))
+$临时文件 += @($坏mid, $坏缓存)
+"  造了四份临时曲子：4 份 .mid（一份是坏工程）+ 4 份 .work 里的缓存头"
+# §3 / §4 拿「改过」那一份走 × 的删除流程。删的是它那份 `.mid`；
+# 52/53 之后 `SongLibrary.Delete` 把 `.work\` 里那份缓存**一起删**（这也要验，见 §4）。
+$改过的 = Join-Path $曲库 '_verify40_改过.mid'
+$改过的缓存 = Join-Path $work目录 '_verify40_改过.mproj'
 
 点后等 { (按种类 '歌曲库')[0] } $h '歌曲库' { $null -ne (曲库窗) } | Out-Null
 $dw = 曲库窗
 if (-not $dw) { throw '第二次开曲库窗没开出来' }
 $droot = $AE::FromHandle($dw)
-断言 '现在列表里是 4 行（原来 2 + 造的两份）' (找类型 $droot $CT::ListItem).Count 4
+$该行数 = $应是.Count + 4
+断言 "现在列表里是 $该行数 行（原来 $($应是.Count) + 造的 4 份）" @(找类型 $droot $CT::ListItem).Count $该行数
+foreach ($f in $临时曲) {
+  断言真 "列表里有「$($f.名)」这一行（没有 .mid 就长不出行来）" ($null -ne (某行 $droot $f.名)) ''
+}
 
 $行改 = 某行 $droot '_verify40_改过'
-$行原 = 某行 $droot 'cargo'
-断言字 '临时那份（文件头里 Edited=true）那格小字是「改过」' (行里 $行改 '_verify40_改过').meta.Current.Name '改过'
-断言字 'cargo（文件头里 Edited=false）那格小字是「没动过」' (行里 $行原 'cargo').meta.Current.Name '没动过'
+$行没 = 某行 $droot '_verify40_没改过'
+$行弹 = 某行 $droot '_verify40_弹不动'
 $行坏 = 某行 $droot '_verify40_坏工程'
-断言字 '乱写的那份那格小字是「读不出来」' (行里 $行坏 '_verify40_坏工程').meta.Current.Name '读不出来'
+断言字 '临时那份（缓存头 Edited=true、可弹轨数 5）那格小字是「编辑过 · 可播放」' `
+  (行里 $行改 '_verify40_改过').meta.Current.Name '编辑过 · 可播放'
+断言字 '没改过但有缓存那份那格小字是「可播放」（缓存在 ≠ 改过）' `
+  (行里 $行没 '_verify40_没改过').meta.Current.Name '可播放'
+断言字 '缓存头里可弹轨数是 0 那份那格小字是「不可播放」（弹不了不是错误，是事实）' `
+  (行里 $行弹 '_verify40_弹不动').meta.Current.Name '不可播放'
+断言字 '乱写的那份那格小字是「读不出来」' `
+  (行里 $行坏 '_verify40_坏工程').meta.Current.Name '读不出来'
+
+# 🔴 这一条是 83 号票量出来的那件事的**回归门**：曲库根下那份老 cargo.mproj（v1、Edited=false）
+#    今天**影响不到那一行** —— 行上那格读的是 `.work\cargo.mproj`（SongLibraryPanel.AddRow 里
+#    那个 `WorkPathOf`），它不存在 ⇒ 那格必须是**空的**。哪天要是又有人回头读根下那份老工程，
+#    这一条会当场红：v1 里没有 PlayableTrackCount，读出来是 0，那格会变成「不可播放」之类的东西。
+if (Test-Path (Join-Path $work目录 'cargo.mproj')) {
+  "  （cargo 在 .work 里已经有缓存了，那一格不空是应该的 —— 按真值表验）"
+  断言字 'cargo 那格小字跟它**在 .work 里的**缓存头对得上' `
+    (行里 (某行 $droot 'cargo') 'cargo').meta.Current.Name (该显什么 'cargo')
+} else {
+  断言字 'cargo 那格小字是空的（老 .mproj 不算数：行读的是 .work 里的缓存，那儿没有它的缓存）' `
+    (行里 (某行 $droot 'cargo') 'cargo').meta.Current.Name ''
+}
+断言 '用户那两份老 .mproj 还躺在曲库根下（这一票一份都没动它们）' `
+  (@(Get-ChildItem -File $曲库 -Filter *.mproj).Count) $原样mproj数
 
 # =====================================================================
 "`n=== 3. 每行那颗 ×：先「取消」（什么都不该发生）==="
 # =====================================================================
 $格 = 行里 $行改 '_verify40_改过'
-点后等 { (行里 (某行 (曲库根) '_verify40_改过') '_verify40_改过').叉 } $dw '那一行的 ×' { (除它之外 $dw).Count -ge 1 } | Out-Null
-$确认 = 除它之外 $dw
-断言真 '点 × 弹出了一问（多出一个顶层窗）' ($确认.Count -eq 1) "别窗 $($确认.Count) 个"
-if ($确认.Count -ne 1) { throw '确认框没弹出来' }
+点后等 { (行里 (某行 (曲库根) '_verify40_改过') '_verify40_改过').叉 } $dw '那一行的 ×' { @(那一问 $dw).Count -ge 1 } | Out-Null
+$确认 = @(那一问 $dw)
+断言 '点 × 弹出了一个顶层窗，标题叫「删除曲子」' $确认.Count 1
+if ($确认.Count -ne 1) {
+  throw "确认框没弹出来（除曲库窗之外的顶层窗：$((除它之外 $dw | ForEach-Object { '「' + [P40]::Title($_) + '」' }) -join ',')）"
+}
 $croot = $AE::FromHandle($确认[0])
 断言字 '那一问的标题是「删除曲子」' ([P40]::Title($确认[0])) '删除曲子'
 $文 = (找类型 $croot $CT::Text | ForEach-Object { $_.Current.Name }) -join ' / '
 "  那一问上写着：「$文」"
 断言含 '那一问说清了「文件会一起删掉，撤不回来」' $文 '撤不回来'
 
-点后等 { (按名字 ($AE::FromHandle($确认[0])) '取消')[0] } $确认[0] '取消' { (除它之外 $dw).Count -eq 0 } | Out-Null
-断言 '点「取消」之后那一问没了' (除它之外 $dw).Count 0
+点后等 { (按名字 ($AE::FromHandle($确认[0])) '取消')[0] } $确认[0] '取消' { @(那一问 $dw).Count -eq 0 } | Out-Null
+断言 '点「取消」之后那一问没了' @(那一问 $dw).Count 0
 断言真 '点「取消」之后文件还在' (Test-Path $改过的) $改过的
-断言 '点「取消」之后那一行还在' (@(找类型 $AE::FromHandle($dw) $CT::ListItem)).Count 4
+断言 '点「取消」之后那一行还在' (@(找类型 $AE::FromHandle($dw) $CT::ListItem)).Count $该行数
 
 # =====================================================================
 "`n=== 4. 再点一次 ×，这回按「删除」：文件真的没了、行也没了 ==="
 # =====================================================================
 $droot = $AE::FromHandle($dw)
 $格 = 行里 (某行 $droot '_verify40_改过') '_verify40_改过'
-点后等 { (行里 (某行 (曲库根) '_verify40_改过') '_verify40_改过').叉 } $dw '那一行的 ×' { (除它之外 $dw).Count -ge 1 } | Out-Null
-$确认 = 除它之外 $dw
+点后等 { (行里 (某行 (曲库根) '_verify40_改过') '_verify40_改过').叉 } $dw '那一行的 ×' { @(那一问 $dw).Count -ge 1 } | Out-Null
+$确认 = @(那一问 $dw)
 if ($确认.Count -ne 1) { throw '第二次点 × 没弹出确认框' }
 $croot = $AE::FromHandle($确认[0])
-点后等 { (按名字 ($AE::FromHandle($确认[0])) '删除')[0] } $确认[0] '删除' { (除它之外 $dw).Count -eq 0 } | Out-Null
-断言 '按「删除」之后确认框收了' (除它之外 $dw).Count 0
+点后等 { (按名字 ($AE::FromHandle($确认[0])) '删除')[0] } $确认[0] '删除' { @(那一问 $dw).Count -eq 0 } | Out-Null
+断言 '按「删除」之后确认框收了' @(那一问 $dw).Count 0
 断言真 '文件真的从盘上删掉了' (-not (Test-Path $改过的)) "Test-Path $改过的 = $(Test-Path $改过的)"
+断言真 '缓存也跟着删了（.work 里那一份，53 号之后两份一起走）' (-not (Test-Path $改过的缓存)) `
+  "Test-Path $改过的缓存 = $(Test-Path $改过的缓存)"
 $droot = $AE::FromHandle($dw)
-断言 '那一行也没了（4 → 3）' (找类型 $droot $CT::ListItem).Count 3
+断言 "那一行也没了（$该行数 → $($该行数 - 1)）" @(找类型 $droot $CT::ListItem).Count ($该行数 - 1)
 断言真 '那一行确实找不到了' ($null -eq (某行 $droot '_verify40_改过')) ''
-断言字 '「N 首」跟着减到 3' (按id $droot 'CountText').Current.Name '3 首'
+断言字 "「N 首」跟着减到 $($该行数 - 1)" (按id $droot 'CountText').Current.Name "$($该行数 - 1) 首"
 $底 = (按id $droot 'StatusText').Current.Name
 断言含 '页脚上说了那一句' $底 '已从曲库删掉'
-断言 '曲库窗口**留着**（删完还能接着删下一首）' (除它之外 $dw).Count 0
+断言 '曲库窗口**留着**（删完还能接着删下一首）' @(除它之外 $dw).Count 0
 
 # =====================================================================
 "`n=== 5. 双击一首好的：窗口自己关掉，曲子装上 ==="
@@ -456,9 +635,9 @@ $script:等装上的名 = '__还没读过__'
     $script:等装上的名 = $名
     Write-Host "    [等装上] 曲名框里现在读到「$名」"
   }
-  (别窗).Count -eq 0 -and $名 -eq 'Carulli_Duetto_No2_Op4'
+  @(别窗).Count -eq 0 -and $名 -eq 'Carulli_Duetto_No2_Op4'
 } 30 2 6 | Out-Null
-断言 '双击打开之后曲库窗口自己关了' (别窗).Count 0
+断言 '双击打开之后曲库窗口自己关了' @(别窗).Count 0
 断言字 '主窗的曲名框换成了那一首' (主窗曲名) 'Carulli_Duetto_No2_Op4'
 
 # ⚠️ 上一节把 Carulli 装上了，而**装曲子会把主窗的控件整套重建** —— 开场抓在手上的那个
@@ -496,8 +675,8 @@ $底 = (按id $droot 'StatusText').Current.Name
 
 # 后头 §7 要量主窗的像素、§8 要按主窗上的「演奏」—— 模态框压着头顶时主窗是禁用的，
 # 按什么都没反应。所以量之前先把它收了（顺带把「关闭」这颗按钮再走一遍）。
-点后等 { 按id (曲库根) 'CloseButton' } $dw '关闭' { (别窗).Count -eq 0 } | Out-Null
-断言 '点「关闭」把曲库窗收了' (别窗).Count 0
+点后等 { 按id (曲库根) 'CloseButton' } $dw '关闭' { @(别窗).Count -eq 0 } | Out-Null
+断言 '点「关闭」把曲库窗收了' @(别窗).Count 0
 
 # =====================================================================
 "`n=== 7. 侧栏撤了、卷帘真的变宽了（载了曲子才量得到轨道头）==="
@@ -562,23 +741,29 @@ catch {
 finally {
   try { 收窗口 } catch { }
   try {
-    # 造的两份临时工程：删干净（改过那份可能已经被 UI 删掉了，删不到不算错）
-    foreach ($f in @('_verify40_改过.mproj', '_verify40_坏工程.mproj')) {
-      $p = Join-Path $曲库 $f
-      if (Test-Path $p) { Remove-Item $p -Force }
+    # 造出来的每一份临时素材：删干净（`.mid` 和 `.work` 里的缓存都在 $临时文件 里）。
+    # 「改过」那一份的 .mid 可能已经被 UI 删掉了（§4），删不到不算错。
+    foreach ($p in @($临时文件)) {
+      if (Test-Path $p) { Remove-Item $p -Force -EA SilentlyContinue }
     }
+    # 再走一遍整目录还原：`.work\` 那一支在里面（备份里没有 `.work` 就整条撤掉）。
     还原曲库
   } catch { Write-Host "★ 收尾时出错：$_" }
 }
 
 # =====================================================================
-"`n=== 9. 收尾：曲库目录逐字节回到开头那个样子 ==="
+"`n=== 9. 收尾：曲库目录（含 .work 那一层）逐字节回到开头那个样子 ==="
 # =====================================================================
-$现在 = 目录指纹 $曲库
+$现在 = @(目录指纹 $曲库)
 断言 '曲库里的文件数和开头一样' $现在.Count $原样.Count
 $不一样 = @(Compare-Object $原样 $现在)
-断言真 '每一份工程的「名字 + 长度 + MD5」都和开头一样（用户的曲子一份都没动）' `
+断言真 '每一份曲子的「名字 + 长度 + MD5」都和开头一样（用户的曲子一份都没动）' `
   ($不一样.Count -eq 0) "$($不一样.Count) 处不同$(if ($不一样.Count) { '：' + ($不一样 | ForEach-Object { $_.InputObject }) -join ' / ' })"
+$现在work = @(目录指纹 $work目录)
+断言 '缓存目录（.work）里的文件数和开头一样' $现在work.Count $原样work.Count
+$不一样work = @(Compare-Object $原样work $现在work)
+断言真 '缓存里每一份的「名字 + 长度 + MD5」也都和开头一样（脚本没在用户缓存里留下东西）' `
+  ($不一样work.Count -eq 0) "$($不一样work.Count) 处不同$(if ($不一样work.Count) { '：' + ($不一样work | ForEach-Object { $_.InputObject }) -join ' / ' })"
 断言真 '备份目录清掉了' (-not (Test-Path $备份)) $备份
 
 "`n========== 结果 =========="

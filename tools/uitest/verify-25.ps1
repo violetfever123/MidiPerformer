@@ -7,6 +7,18 @@
 #   · 改名只剩顶栏那格「歌曲名」（改的是当前开着的那首），§7/§8/§9 全部改走 `改名走顶栏`。
 # §1-§4、§10 没动。轨头那一半（§4 的轨头名字）仍然是 25 号当时的样子。
 #
+# **40 / 52 / 53 / 55 / 57 号又改动了三处**（83 号票实测出来的，逐条对着现在的产品改）：
+#   · **曲库行住在自己的窗口里了**（40 号：点「歌曲库」开一扇独立窗口、模态挂主窗上）。
+#     `曲库行`/`找行` 从前在主窗那棵树里找 —— 今天主窗里一个 ListItem 都没有 ⇒ §2 起
+#     每一节都得**先开曲库窗、再在它那棵树里找行**；曲库窗是模态子窗，主窗被禁用，
+#     所以 §7-§9 走顶栏改名之前必须先把它关掉（`关曲库`）。
+#   · **曲库行的第二格小字换成了四态真值表**（57 号：空 / 可播放 / 编辑过 · 可播放 /
+#     不可播放 / 读不出来），旧三态（改过 / 没动过 / 读不出来）废了。cargo 今天没有
+#     `songs\.work\cargo.mproj` ⇒ 那一格**是空的**（「本程序没给它存过盘」，不是「没动过」）。
+#   · **盘上的东西分成了两份**（52/53 号）：成员是 `songs\<名字>.mid`（曲名 = 这个名字），
+#     程序自己的缓存在 `songs\.work\<名字>.mproj`。改名两份一起搬（`SongLibrary.Rename`），
+#     所以 `盘上` 数的是 `.mid`、`哈希` 把这一对一起算进去。
+#
 # 用法: pwsh -NoProfile -File verify-25.ps1     （脚本自己起 app、自己收尾）
 #
 # 复用 23 号那份驱动的骨架（UIA 真点 + 前台/点上双重闸门，那两个坑的来龙去脉见 verify-23.ps1 抬头）。
@@ -15,12 +27,31 @@
 #     读得到 帮助='cargo'，所以「被省略号吃掉的名字能不能看全」是**可以直接断言**的。
 #   · **非法名字**：窗口弹的不是对话框，是一个行内错误条（ErrorBox/ErrorText 置可见，见 MainWindow.ShowError），
 #     所以判据是「ErrorText 有没有那句话」，不是「有没有多出一个窗口」。
-#   · **改名真的动盘**：曲库就是 bin/Debug/net8.0/songs/ 下的一堆 .mproj，改名 = File.Move。
-#     所以改完去数文件名，然后**改名改回去**并断言内容哈希一字未动。
+#   · **改名真的动盘**：曲库就是 bin/Debug/net8.0/songs/ 下的 `<名字>.mid`（+ `.work\<名字>.mproj`），
+#     改名 = File.Move。所以改完去数文件名，然后**改名改回去**并断言内容哈希一字未动。
+
+# ---------- 共用驱动库 ----------
+# 非提权 shell 里起 app，60 号那颗模态的「要以管理员身份重启吗？」必弹，**它开着的时候主窗是
+# 禁用的**：点击会被它丢掉、`Take` 也拽不到前台 —— 83 号那趟 verify-40/25 正是死在这上面
+# （点「歌曲库」开不出窗）。84 号把「按掉那颗框」提升进了库（`关提权框`，库的 `起窗口` 里
+# 也在用），所以这一票**只从库里取，一份都不自己抄**（库里写着：三份既有实现已经够多了）。
+# ⚠️ 库在模块作用域里有 `Set-StrictMode -Version Latest`，而 dot-source 在**调用方作用域**里
+#    执行 ⇒ **它会连本脚本剩下的全部代码一起收紧**。本脚本全文从前零个 `Set-StrictMode`（一直
+#    在默认的 Off 下跑），dot 进来就是一次语义变更 —— 这是既有性质（`git show HEAD:` 那份库里
+#    就有，不是 84 带进来的），记在 86 号票里。🔴 **不许靠挪下面这一行的位置去压红数**：
+#    严格模式是**执行时**生效、不是定义时，挪了爆炸半径几乎不变，挪出来的绿就是「绿得不够真」。
+. (Join-Path $PSScriptRoot 'uitest-lib.ps1')
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, System.Drawing, System.Windows.Forms
-Add-Type @"
+# ⚠️ 这一段 C# **必须**用单引号 here-string（`@'…'@`）：本脚本上面 dot 了
+#    `uitest-lib.ps1`，而库在模块作用域就 `Set-StrictMode -Version Latest`，
+#    dot-source 又是在**调用方作用域**里执行的 ⇒ 本脚本全文从此跑在严格模式下。
+#    双引号 here-string 里的 `$` 会被 PowerShell 当变量展开，下面 C# 注释里那些
+#    举例用的裸 `$h` 会当场抛「无法检索变量 '$h'，因为尚未设置该变量」，
+#    而**报错行号指的是那句注释**（84 号在库那边亲手踩过，见库抬头 ⑦）。
+#    这段 C# 里没有任何需要 PowerShell 展开的东西，所以单引号是正解，别改回去。
+Add-Type @'
 using System; using System.Text; using System.Collections.Generic; using System.Runtime.InteropServices;
 public class V25 {
   [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
@@ -79,6 +110,8 @@ public class V25 {
     SetWindowPos(h, new IntPtr(-1), 0,0,0,0, 0x0001|0x0002|0x0010);
     SetWindowPos(h, new IntPtr(-2), 0,0,0,0, 0x0001|0x0002|0x0010);
   }
+  /// 窗口标题。40 号之后曲库是一扇**独立窗口**（标题「歌曲库」），只有标题能认出它来。
+  public static string Title(IntPtr h) { var s = new StringBuilder(256); GetWindowText(h, s, 256); return s.ToString(); }
   /// 这个点上到底是哪个窗口。前台说得再对也不算数，**点击只认这个**。
   public static IntPtr At(int x, int y) { POINT p; p.X = x; p.Y = y; return WindowFromPoint(p); }
   /// 这个点上那个窗口属于哪个进程。
@@ -148,7 +181,7 @@ public class V25 {
     return list;
   }
 }
-"@
+'@
 
 $AE = [System.Windows.Automation.AutomationElement]
 $TS = [System.Windows.Automation.TreeScope]
@@ -203,6 +236,19 @@ Start-Sleep -Seconds 3
 $h = $proc.MainWindowHandle
 $脚本PID = [uint32]$proc.Id
 "起了个干净实例：PID $($proc.Id)"
+
+# 60 号那颗模态提权框**必须在 Take 之前按掉**（库的 `起窗口` 里排在同一个位置）：它开着的时候
+# 主窗是禁用的，`Take` 拽不到前台，后面每一次点击也都会被那个禁用的主窗丢掉 —— 那样红出来的是
+# 一串看不懂的假红。返回值是**主窗句柄**，必须吞掉（不吞会跟后面的值一起进管道）。
+# ⚠️ 库 `:597-606` 只给**它自己那套变量**回写主窗句柄（原话：「模态框关掉之后 Avalonia
+#    **可能重建主窗**，所以以进程现在报的为准；……**显式传参的调用方不动它的东西**」）。
+#    本脚本是显式传参 ⇒ **落在唯一没有被保护的那一支** ⇒ 下面第二行是把库给自己做的那一步
+#    在这一侧补上（不是新逻辑）。🔴 这**可能是库的一个缺口**（显式传参支没有回写）——
+#    照实记在报告里，**留给 84 / 86 号票，本票不改库**。
+$按前 = $h
+$null = 关提权框 -主窗 $h -进程号 $脚本PID -进程 $proc
+$proc.Refresh(); if ($proc.MainWindowHandle -ne 0) { $h = $proc.MainWindowHandle }
+"  提权框这一步：按前 $按前，按后 $h（这一步读了一次，没有结论）"
 
 if (-not [V25]::Take($h)) { throw '拽不到前台' }
 $摆 = { param($摆X, $摆Y, $摆宽, $摆高)
@@ -269,8 +315,13 @@ function 清场([int]$横, [int]$纵, [string]$谁) {
   for ($i = 1; $i -le 6; $i++) {
     要前台 $谁
     if (净了 $横 $纵) {
+      # ⚠️ 这一支**不能**包 `@(…)`：`浮层` 是库抬头 ⑥ 说的「保护数组」那一族
+      #    （`function 浮层 { … , $要收 }`）—— 包了之后外层 `@()` 会把**整个数组**
+      #    当成一个元素 ⇒ `.Count` 恒等于 1、下面 `Describe($_)` 收到的是 Object[]
+      #    （83 号实测：跑到这里抛「无法将类型 System.Object[] 的值转换为 System.IntPtr」）。
+      #    零命中时它是 `$null`，所以判空写成「先判 $null 再数」。
       $要收 = 浮层 @([V25]::Others($脚本PID, $h))
-      if ($要收.Count -eq 0) { return }
+      if ($null -eq $要收 -or $要收.Count -eq 0) { return }
       $说 = 'app 还开着 ' + $要收.Count + ' 个浮层（' + (($要收 | ForEach-Object { [V25]::Describe($_) }) -join ' / ') + '）'
       Write-Host "    ↺「$谁」之前先收一下：$说（第 $i 次，Esc）"
       [V25]::Key(0x1B)
@@ -330,12 +381,15 @@ function 按编号([string]$id) {
 }
 # 轨数用「折叠」按钮数：每条轨的头上都有一颗（和 verify-23 同一把尺子）
 function 数轨 { @(找类型 $CT::Button | Where-Object { $_.Current.Name -eq '折叠' }).Count }
-function 曲库行 { @(找类型 $CT::ListItem) }
+# 曲库行**不住在主窗里**（40 号之后它住在自己那扇窗口里），所以行相关的取数一律走 `曲库根`。
+# 主窗那棵树里一个 ListItem 都没有 —— 拿 `$root` 找行，得到的是空数组（不是报错），
+# 报出来的话是「曲库里没有「Carulli…」」，看着像曲子丢了，其实是找错了窗口。
+function 曲库行 { @(找类型里 (曲库根) $CT::ListItem) }
 function 行里的文字($行) { @($行.FindAll($TS::Descendants, (& $条件 $CT::Text))) }
 function 行里的框($行) { @($行.FindAll($TS::Descendants, (& $条件 $CT::Edit))) }
 function 找行([string]$曲名) {
   @(曲库行 | Where-Object {
-    $t = 行里的文字 $_
+    $t = @(行里的文字 $_)
     $t.Count -gt 0 -and $t[0].Current.Name -eq $曲名
   }) | Select-Object -First 1
 }
@@ -344,8 +398,18 @@ function 取值($e) { $e.GetCurrentPattern([System.Windows.Automation.ValuePatte
 function 设值($e, [string]$v) { $e.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue($v) }
 function 矩形($e) { $e.Current.BoundingRectangle }
 function 中心($e) { $r = 矩形 $e; @([int]($r.X + $r.Width/2), [int]($r.Y + $r.Height/2)) }
-function 盘上 { @(Get-ChildItem -File $曲库目录 | Where-Object { $_.Extension -eq '.mproj' } | ForEach-Object { $_.Name } | Sort-Object) }
-function 哈希([string]$名) { (Get-FileHash (Join-Path $曲库目录 $名)).Hash }
+# 盘上的两份东西（52/53 号之后）：成员 = `<名字>.mid`（曲名就是它，改名搬的就是它），
+# 程序自己的缓存 = `.work\<名字>.mproj`。`盘上` 数的是**成员**（曲库有几首、都叫什么）。
+function 盘上 { @(Get-ChildItem -File $曲库目录 -Filter *.mid | ForEach-Object { $_.Name } | Sort-Object) }
+function 缓存上 { @(Get-ChildItem -File $work目录 -Filter *.mproj -EA SilentlyContinue | ForEach-Object { $_.Name } | Sort-Object) }
+# 「这一首在盘上的东西」= 它的 .mid（一定在）+ 缓存（存过盘才有）。
+function 那一份([string]$名) {
+  @((Join-Path $曲库目录 "$名.mid"), (Join-Path $work目录 "$名.mproj")) | Where-Object { Test-Path $_ }
+}
+# 内容指纹：把这一首**两份文件**的 MD5 拼起来。改名只该动文件名，两份都不该变一个字节。
+function 哈希([string]$名) {
+  (@(那一份 $名 | ForEach-Object { (Get-FileHash $_ -Algorithm MD5).Hash }) -join '+')
+}
 function 曲名框 { (按编号 'SongNameBox')[0] }
 # 「这一行选中了没有」不能读 `$e.Current.IsSelected` —— 那个属性**不在**
 # AutomationElementInformation 上（它在 SelectionItemPattern 里），读出来是 $null，
@@ -355,11 +419,100 @@ function 选中了($行) {
   try { $行.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Current.IsSelected }
   catch { $false }
 }
-# 行里「不是名字文字」的那一格：右边那格小字（'没动过' / '改过' / '读不出来'）。
+# 行里「不是名字文字」的那一格：右边那格小字（**四态真值表**那一格：空 / 可播放 /
+# 编辑过 · 可播放 / 不可播放 / 读不出来 —— 57 号换掉了旧三态「改过 / 没动过 / 读不出来」）。
 # 它是 TextBlock（不是 TextBox 也不是 Button）—— 单击只是选中、双击会打开、
 # 而且**没有 ToolTip**（ToolTip 只挂在名字和删除上），所以是行内最干净的一个落点。
+# ⚠️ 没有缓存那一档（cargo 今天就是）这一格**是空的**：元素还在树里，只是文本 ''
+# （「本程序没给它存过盘」⇒ 什么都不说，不是「没动过」）。所以调用方不能假设它有字。
 function 小字($行) { (行里的文字 $行)[1] }
 function 曲名格($行) { (行里的文字 $行)[0] }
+# §10 的落点：行里**非名字、非 ×** 的那一块空白。行是三格 `*,Auto,Auto` + 列间距 8：
+# 落点取**名字格右沿到 × 左沿的正中**，纵向取行心（贴行边是死区，第 6 节的注释里量过）。
+# 为什么不直接拿 `小字` 那一格的中心：没有缓存的歌那一格宽度是 **0**，它的「中心」就等于
+# 名字格的右沿 —— 那一下会落到名字那一格上（悬浮提示 + 双击开曲子的落点都挂在那一格），
+# 这一节要验的「点非名字区」就白验了。
+function 行里空白($行) {
+  $r = 矩形 $行
+  $文 = @(行里的文字 $行)
+  if ($文.Count -lt 1) { throw "这一行里没有文字，算不出落点" }
+  $r名 = 矩形 $文[0]
+  $叉 = @($行.FindAll($TS::Descendants, (& $条件 $CT::Button)))
+  if ($叉.Count -eq 0) { throw '这一行没有 ×（删除），算不出落点' }
+  $r叉 = 矩形 $叉[0]
+  $左沿 = [int]($r名.X + $r名.Width); $右沿 = [int]$r叉.X
+  if ($右沿 - $左沿 -lt 2) { throw "名字格右沿 $左沿 和 × 左沿 $右沿 之间没有空隙，算不出落点" }
+  @([int](($左沿 + $右沿) / 2), [int]($r.Y + $r.Height / 2))
+}
+
+# ==================== 曲库窗口（40 号之后它是一扇独立窗口） ====================
+# 主窗上那颗「歌曲库」开出来的是一个**模态子窗**（标题「歌曲库」，`SongLibraryWindow`）：
+#   · 曲库行、搜索框、页脚、「关闭」全在它里面 —— 主窗那棵树里一个都没有；
+#   · 模态期间**主窗是禁用的** ⇒ §7-§9 走顶栏改名之前必须先 `关曲库`（不然 SetFocus/回车
+#     落在禁用窗口上，什么都不会发生）。
+function 曲库窗 {
+  $别 = @([V25]::Others($脚本PID, $h) | Where-Object { [V25]::Title($_) -eq '歌曲库' })
+  if ($别.Count -eq 0) { return $null }
+  $别[0]
+}
+# 曲库窗的 UIA 根，每次现取（抓在手上的根会过时：删除一首会重摆列表）。
+function 曲库根 { $w = 曲库窗; if ($w) { $AE::FromHandle($w) } else { $null } }
+# 在**任意一个根**里找控件（`找类型` 只认主窗的 $root；`$根` 为 $null 时当它什么都没有，
+# 让调用方自己去判「窗口还在不在」—— 窗口按设计关掉的那一节里，根真的会是 $null）。
+function 找类型里([object]$根, [object]$类型) { if ($null -eq $根) { return @() } @($根.FindAll($TS::Descendants, (& $条件 $类型))) }
+function 曲库钮([object]$根, [string]$id) { @(找类型里 $根 $CT::Button | Where-Object { $_.Current.AutomationId -eq $id }) }
+
+# 点开了才返回句柄（点一下等一轮，最多四次；开窗是异步的，开出来之前 UIA 里什么都没有）。
+function 开曲库 {
+  for ($i = 1; $i -le 4; $i++) {
+    $钮 = @(找类型 $CT::Button | Where-Object { $_.Current.AutomationId -eq 'LibraryButton' })
+    if ($钮.Count -eq 0) { throw '主窗上没有「歌曲库」那颗按钮（LibraryButton）' }
+    $c = 中心 $钮[0]
+    点 $c[0] $c[1] '主窗上那颗「歌曲库」'
+    for ($j = 1; $j -le 12; $j++) { Start-Sleep -Milliseconds 400; if (曲库窗) { return (曲库窗) } }
+  }
+  throw '「歌曲库」点不开（40 号之后它开的是一扇独立窗口）'
+}
+function 关曲库 {
+  $w = 曲库窗
+  if (-not $w) { return }
+  $钮 = @(曲库钮 ($AE::FromHandle($w)) 'CloseButton')
+  if ($钮.Count -eq 0) { throw '曲库窗上找不到「关闭」（CloseButton）' }
+  $c = 中心 $钮[0]
+  点窗 $c[0] $c[1] $w '曲库窗的「关闭」'
+  for ($i = 1; $i -le 12; $i++) { Start-Sleep -Milliseconds 400; if (-not (曲库窗)) { return } }
+  throw '曲库窗点「关闭」没关掉'
+}
+
+# 曲库窗里的点击闸门。`清场`/`净了` 那套把「点上必须压着**主窗**」写死了，而曲库窗**永远压在
+# 主窗上面**（模态子窗）⇒ 拿那套去点曲库行会一路判「清不干净」然后抛。所以这里另起一条，
+# 只把「是不是主窗」换成「是不是曲库窗」，其余（要前台、悬浮提示前先停车）一模一样。
+function 要前台窗([IntPtr]$窗, [string]$谁) {
+  for ($i = 1; $i -le 6; $i++) {
+    [void][V25]::Take($窗)
+    if ([V25]::GetForegroundWindow() -eq $窗) { Start-Sleep -Milliseconds 250; return }
+    Start-Sleep -Milliseconds 400
+  }
+  throw "「$谁」之前没能把窗 $窗 拽到前台（前台是 $([V25]::Describe([V25]::GetForegroundWindow()))）"
+}
+function 点窗([int]$横, [int]$纵, [IntPtr]$窗, [string]$谁) {
+  要前台窗 $窗 $谁
+  if ([V25]::PidAt($横, $纵) -ne $脚本PID) {
+    throw "点「$谁」之前 $横,$纵 上压着的不是本进程（$([V25]::Describe([V25]::At($横, $纵)))）"
+  }
+  [V25]::Move($停车点[0], $停车点[1]); Start-Sleep -Milliseconds 500
+  [V25]::Move($横, $纵); Start-Sleep -Milliseconds 60
+  [V25]::Press()
+}
+function 双击窗([int]$横, [int]$纵, [IntPtr]$窗, [string]$谁) {
+  要前台窗 $窗 $谁
+  if ([V25]::PidAt($横, $纵) -ne $脚本PID) {
+    throw "双击「$谁」之前 $横,$纵 上压着的不是本进程（$([V25]::Describe([V25]::At($横, $纵)))）"
+  }
+  [V25]::Move($停车点[0], $停车点[1]); Start-Sleep -Milliseconds 500
+  [V25]::Move($横, $纵); Start-Sleep -Milliseconds 60
+  [D25]::DoublePress()
+}
 
 # 曲名那一格**原来**点一下就进改名（25 号做的），32 号把它拆了：点名字只是选中这一行，
 # 双击才打开。所以这里不再有 `进编辑` 这个动作 —— 改名一律走顶栏那格「歌曲名」。
@@ -386,19 +539,48 @@ function 改名走顶栏([string]$到) {
 }
 
 $曲库目录 = (Resolve-Path (Join-Path $PSScriptRoot '..\..\MidiPerformer.App\bin\Debug\net8.0\songs')).Path
+# 程序自己的缓存目录（52/53 号之后是 `songs\.work\`）。**必须在这里定义**：`缓存上`/`那一份`
+# 都要用它，而 StrictMode 底下读一个没定义的变量是当场抛，不是给 $null。
+$work目录 = Join-Path $曲库目录 '.work'
 $原名 = 'Carulli_Duetto_No2_Op4'
 $临时 = 'Carulli_Verify_Tmp'
 
-# 盘上那两份先整份备份。改名本来是可逆的，但**万一脚本中途炸了**，
-# 用户的曲库不该留下乱七八糟的名字 —— 这不是脚本自己的临时目录，是人家在用的东西。
+# 开工前**整个曲库目录**照一遍相：根下的每一个文件（不挑扩展名）+ `.work\` 里的每一份。
+# 为什么要连 `.mproj` 一起：这个曲库里躺着用户自己的两份老 `.mproj`（cargo / Carulli），
+# 它们是**用户的文件**，脚本没有理由动它们 —— 只照 `.mid` 的话，收尾那一步「把这里清干净
+# 再拷回来」会把它们删掉再也还不了。这不是脚本自己的临时目录，是人家在用的东西。
+# 「根下有没有 .mproj」「.work 目录本来在不在」这两件事也一并记下来：收尾要还原成**一模一样**，
+# 包括**不多出一个空目录**（第一次跑这一票就在用户的曲库里留下过一个空的 `.work\`）。
 $备份目录 = Join-Path $env:TEMP ('verify25-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $备份目录 | Out-Null
-$开工前 = 盘上
-foreach ($n in $开工前) { Copy-Item (Join-Path $曲库目录 $n) (Join-Path $备份目录 $n) -Force }
+$开工根下 = @(Get-ChildItem -File $曲库目录 -EA SilentlyContinue | ForEach-Object { $_.Name } | Sort-Object)
+# ⚠️ `缓存上 / 盘上 / 文本 / 行里的文字 / 按编号 / 曲库钮 / 浮层` 这几支都是
+#    `function X { @(管道) }`：**零命中时函数什么都不往外吐**，调用方拿到的是 `$null`，
+#    不是空数组（库抬头 ⑤⑥ 记的就是这一族）。默认（严格模式 Off）下 `$null.Count` 是 0，
+#    所以以前这么写没事；本脚本上面 dot 了库 ⇒ 全文跑在 `Set-StrictMode -Version Latest` 下，
+#    那里 `$null.Count` **直接抛**「找不到属性 Count」。
+#    ⇒ 凡是「拿回来还要数一数」的调用点，一律 `@(…)` 包一层：零命中得 0（和 Off 时同一个数），
+#      命中一个得 1，命中 N 个得 N —— 判据的真假一个都没动，改的只是「不再中途炸掉」。
+#    （判据要的是「数出来的数」，不是「有没有抛」；抛掉的那一格比 FAIL 更看不清。）
+#    ⚠️ 例外：`浮层` 是库抬头 ⑥ 说的「保护数组」那一族（`return ,$arr`）——**不能**包 `@()`，
+#      包了 `.Count` 恒等于 1、枚举出来的是那个数组本身。它那一处按「先判 $null 再数」写。
+$开工缓存 = @(缓存上)
+$开工有work = Test-Path $work目录
+New-Item -ItemType Directory -Path (Join-Path $备份目录 'root') | Out-Null
+New-Item -ItemType Directory -Path (Join-Path $备份目录 'work') | Out-Null
+$开工前 = @(盘上)
+foreach ($n in $开工根下) { Copy-Item (Join-Path $曲库目录 $n) (Join-Path $备份目录 'root' $n) -Force }
+foreach ($n in $开工缓存) { Copy-Item (Join-Path $work目录 $n) (Join-Path $备份目录 'work' $n) -Force }
 $开工前哈希 = @{}
 foreach ($n in $开工前) { $开工前哈希[$n] = 哈希 $n }
+$开工根下哈希 = @{}
+foreach ($n in $开工根下) { $开工根下哈希[$n] = (Get-FileHash (Join-Path $曲库目录 $n) -Algorithm MD5).Hash }
+$开工缓存哈希 = @{}
+foreach ($n in $开工缓存) { $开工缓存哈希[$n] = (Get-FileHash (Join-Path $work目录 $n) -Algorithm MD5).Hash }
 "曲库目录 $曲库目录"
-"开工前盘上：$($开工前 -join ' / ')"
+"开工前盘上的曲子（.mid）：$($开工前 -join ' / ')"
+"开工前根下所有文件：$($开工根下 -join ' / ')"
+"开工前缓存（.work）：$(if ($开工缓存.Count) { $开工缓存 -join ' / ' } else { '（空）' })；.work 目录本来在吗：$开工有work"
 
 # 「跑到底了没有」这一格是给收尾那句「全过」把关的：脚本要是中途抛了，
 # 断言只覆盖到断点，而 $fail 照样是 0 —— 那种「全过」是假的。
@@ -409,22 +591,51 @@ try {
 # =====================================================================
 "`n=== 1. 空状态：文案改短了、不再指路、曲库脚注整条没了 ==="
 # =====================================================================
-$新句 = '还没有曲子 —— 把 .mid 拖进这个窗口，或从「文件」菜单导入。'
-断言真 '卷帘区的空态文案就是改短后那一句（逐字）' ((文本 $新句).Count -eq 1) "数到 $((文本 $新句).Count) 条"
-$旧一 = 文本 '还没有曲子 —— 点左上角'
-$旧二 = 文本 '还没有曲子 —— 点上面'
+# 这句是**现在的原话**（`MainWindow.axaml` 里 EmptyHint 那一格）：55 号把「文件」那个下拉
+# 拆了、把「导入 MIDI…」挪成工具栏上一颗真按钮，于是句尾从「或从「文件」菜单导入。」
+# 变成「或按「导入 MIDI…」。」—— 判据跟着改的是**这句话本身**，逐字比。
+$新句 = '还没有曲子 —— 把 .mid 拖进这个窗口，或按「导入 MIDI…」。'
+断言真 '卷帘区的空态文案就是改短后那一句（逐字）' (@(文本 $新句).Count -eq 1) "数到 $(@(文本 $新句).Count) 条"
+$旧一 = @(文本 '还没有曲子 —— 点左上角')
+$旧二 = @(文本 '还没有曲子 —— 点上面')
 断言真 '旧文案（指着工具栏那颗按钮的两句）一条都不剩' ($旧一.Count -eq 0 -and $旧二.Count -eq 0) "左上角 $($旧一.Count) 条 / 上面 $($旧二.Count) 条"
-$指路 = 文本 '导入 MIDI'
-断言真 '全窗口没有文字还写着「导入 MIDI…」（不再靠位置指路）' ($指路.Count -eq 0) "数到 $($指路.Count) 条"
-断言真 '曲库脚注「导入的曲子存进…」整条没了' ((文本 '导入的曲子存进').Count -eq 0) "数到 $((文本 '导入的曲子存进').Count) 条"
-断言真 '脚注后半句「改名就是改文件名」也没了' ((文本 '改名就是改文件名').Count -eq 0) "数到 $((文本 '改名就是改文件名').Count) 条"
-断言真 '空状态下也没有名字叫「改名」的按钮' ((按钮 '改名').Count -eq 0) "数到 $((按钮 '改名').Count) 个"
+# ⚠️⚠️ 这一条从 25 号起就是「不许再写着「导入 MIDI…」」那一类判据（HEAD 版符号名
+#      `$指路`：`断言真 … ($指路.Count -eq 0)`）。
+#      📌 **83 号既不把它改成断言、也不把它删掉了事 —— 这里记的是「现状」，不是「预期」**：
+#      主窗空态那句话点名的「导入 MIDI…」**不在主窗里**。55 号（`65ff325`）把按钮搬进了
+#      **曲库窗标题行右上角**（`SongLibraryPanel.axaml` 的 `ImportButton`，默认
+#      `IsVisible="False"`，要主窗接上 `ImportRequested` 才露面），`MainWindow.axaml:281`
+#      自己留着一句注释承认这件事。⇒ **用户在主窗读到「或按「导入 MIDI…」」，在主窗上找
+#      不到那颗按钮。这是缺陷，不是设计**（它只是「搬按钮」和「改文案」被切成两张票、
+#      改文案那张一直没人开）。收拾它的票是 **85 号**。
+#      🔴 本批规矩（**90 号票第四节**，61 号故意不钉断言时记下的）：
+#      「发现缺陷时，『钉一条断言把它记下来』是错的做法 —— 断言表达的是**预期**，
+#       不是**现状**。要记就记进票，不要记进断言。真机日志里写一行『现状记录，非红』是
+#       对的做法。」钉上去的话，85 号把文案/落点改对的那一刻反而会**红**（测试惩罚修复）。
+#      ⇒ 所以下面**只把量到的事实打出来：不判红不判绿、不进 `$fail`**。
+#      85 号票里已写明：这一行要由它换成一条**真的**断言（那颗按钮在用户读到那句话的地方
+#      够得着）—— 本票不替它写，也不替它改文案（`MainWindow.axaml` 是 85 的文件）。
+$主窗指路钮 = @(找类型里 $root $CT::Button | Where-Object { $_.Current.Name -eq '导入 MIDI…' })
+$null = 开曲库
+$库窗指路钮 = @(找类型里 (曲库根) $CT::Button | Where-Object { $_.Current.Name -eq '导入 MIDI…' })
+关曲库
+Write-Host ("  现状记录，非红（85 号的缺陷，本条不进判据也不进 `$fail）：主窗空态那句点名" +
+  "「导入 MIDI…」—— 主窗那棵树里数到 $($主窗指路钮.Count) 颗；曲库窗标题行右上角数到 " +
+  "$($库窗指路钮.Count) 颗（SongLibraryPanel.axaml 的 ImportButton，默认藏着）")
+断言真 '曲库脚注「导入的曲子存进…」整条没了' (@(文本 '导入的曲子存进').Count -eq 0) "数到 $(@(文本 '导入的曲子存进').Count) 条"
+断言真 '脚注后半句「改名就是改文件名」也没了' (@(文本 '改名就是改文件名').Count -eq 0) "数到 $(@(文本 '改名就是改文件名').Count) 条"
+断言真 '空状态下也没有名字叫「改名」的按钮' (@(按钮 '改名').Count -eq 0) "数到 $(@(按钮 '改名').Count) 个"
 
 # =====================================================================
 "`n=== 2. 从曲库点开一首（4 条轨）==="
 # =====================================================================
+# 40 号之后「点开一首」是：曲库窗口里选中那一行 → 回车（双击也一样）。
+# ⚠️ 这一节**兼着后面几节的前置**：曲库窗在打开的**那一刻**才列一遍列表（模态期间主窗动不了，
+#    列表不会过期）。装上了曲子窗口就自己关 —— 所以 §3-§6/§10 每次都得重新开一遍。
+$dw = 开曲库
 $行 = 找行 $原名
-if (-not $行) { throw "曲库里没有「$原名」" }
+if (-not $行) { throw "曲库窗里没有「$原名」这一行（列表里是：$((曲库行 | ForEach-Object { 行名 $_ }) -join ' / ')）" }
+要前台窗 $dw '开曲子（键盘要落在曲库窗上）'
 [void]$行.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select()
 Start-Sleep -Milliseconds 400
 [void]$行.SetFocus()
@@ -432,12 +643,15 @@ Start-Sleep -Milliseconds 400
 [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
 Start-Sleep -Seconds 4
 断言真 '曲库点开之后真的载进来了（4 条轨）' ((数轨) -eq 4) "$(数轨) 条轨"
+断言真 '装上了窗口就自己关了（40 号的规矩：读不出来才留着）' ($null -eq (曲库窗)) "曲库窗：$(if (曲库窗) { '还在' } else { '关了' })"
 
 # =====================================================================
 "`n=== 3. 「改名」按钮全没了、名字格常驻 ==="
 # =====================================================================
-断言真 '载了曲之后也没有名字叫「改名」的按钮（轨头 + 曲库行一起数）' ((按钮 '改名').Count -eq 0) "数到 $((按钮 '改名').Count) 个"
-$名框 = 按编号 'NameBox'
+$dw = 开曲库
+$改名钮 = @(按钮 '改名') + @(找类型里 (曲库根) $CT::Button | Where-Object { $_.Current.Name -eq '改名' })
+断言真 '载了曲之后也没有名字叫「改名」的按钮（主窗 + 曲库窗一起数）' ($改名钮.Count -eq 0) "数到 $($改名钮.Count) 个"
+$名框 = @(按编号 'NameBox')
 断言真 '轨头 4 个名字格都在树里' ($名框.Count -eq 4) "数到 $($名框.Count) 个"
 $名框看不见 = @($名框 | Where-Object { $_.Current.IsOffscreen }).Count
 断言真 '轨头的名字格**常驻可见**（不是藏在某颗按钮后面）' ($名框看不见 -eq 0) "看不见的有 $名框看不见 个"
@@ -462,11 +676,11 @@ foreach ($名 in @('cargo', $原名)) {
 # =====================================================================
 $行 = 找行 $原名
 $c = 中心 (曲名格 $行)
-点 $c[0] $c[1] "点曲名「$原名」（该只是选中）"
+点窗 $c[0] $c[1] $dw "点曲名「$原名」（该只是选中）"
 Start-Sleep -Milliseconds 700
 $行 = 找行 $原名
 if (-not $行) { throw '点完那一行不见了 —— 名字那格的点击把行拆了？' }
-断言真 '点曲名之后行里**没有**冒出输入框' ((行里的框 $行).Count -eq 0) "行里的框 $((行里的框 $行).Count) 个"
+断言真 '点曲名之后行里**没有**冒出输入框' (@(行里的框 $行).Count -eq 0) "行里的框 $(@(行里的框 $行).Count) 个"
 断言真 '点曲名把这一行选中了（点击没被吃掉）' (选中了 $行) "选中=$(选中了 $行)"
 断言真 '点曲名不会把歌打开（曲名框还是原来那首）' ((取值 (曲名框)) -eq $原名) "曲名框='$(取值 (曲名框))'"
 
@@ -474,42 +688,49 @@ if (-not $行) { throw '点完那一行不见了 —— 名字那格的点击把
 "`n=== 6. F2 那条键盘路也拆了（鼠标和键盘是一起拆的）==="
 # =====================================================================
 # F2 从前是**列表上的**快捷键（OnListKeyDown 挂在 ListBox 上），所以先得像用户那样把列表
-# 点活：点这一行右边那格小字（选中它、焦点落到列表上），再按 F2。
-# 落点挑小字而不是「行内边距」是有实测依据的：ListBoxItem 的 UIA 矩形比它能接点击的范围
-# 大一圈，贴着行边缘点（离上边 2px）是**死区**，什么都不发生 —— 而那一格小字是实打实的元素。
+# 点活：点这一行右边那格空白（选中它、焦点落到列表上），再按 F2。
+# 落点不挑行边缘是有实测依据的：ListBoxItem 的 UIA 矩形比它能接点击的范围大一圈，
+# 贴着行边缘点（离上边 2px）是**死区**，什么都不发生 —— 所以取行心，横向落在名字格和 × 中间。
+# （原先点的是「那一格小字」，57 号之后没有缓存的歌那一格宽度是 0，见 `行里空白` 的注释。）
 #
 # 这一条的力气只有一半，得说清楚：判据是「F2 之后行里没有输入框」，而「F2 根本没送到列表」
 # 也满足它 —— 分不开「送到了、被无视了」和「压根没送」。前半句有 §6 上面那次点击做的
 # 「这一行确实选中了」兜着（列表是活的），但这仍然不是一条能证明「F2 被处理过」的断言。
 $行 = 找行 $原名
-$c = 中心 (小字 $行)
-点 $c[0] $c[1] "点「$原名」那一行的小字（先把列表点活）"
+$c = 行里空白 $行
+点窗 $c[0] $c[1] $dw "点「$原名」那一行右边那块空白（先把列表点活）"
 Start-Sleep -Milliseconds 500
 $行 = 找行 $原名
-断言真 '点小字把这一行选中了（F2 才有落点）' (选中了 $行) "选中=$(选中了 $行)"
+断言真 '点空白把这一行选中了（F2 才有落点）' (选中了 $行) "选中=$(选中了 $行)"
 # F2 这**一下**特意不走 `按`（它开头要抢一次前台）：Take 里那句 `SetFocus(h)` 会把键盘焦点
 # 从刚点上的那个 ListBoxItem 挪回窗口上，而 F2 恰恰是挂在 ListBox 上的 —— 抢完再发，
 # F2 就没人接了。实测栽过一回。
-if ([V25]::GetForegroundWindow() -ne $h) { 清场 -1 -1 'F2' }
+# 40 号之后这里只能拽**曲库窗**：`清场` 会去 Take 主窗，而模态期间主窗是**禁用**的，
+# Take 里那句 SetFocus 落在禁用窗上不但没用，还会把 F2 的落点（刚点上的列表项）抢掉。
+if ([V25]::GetForegroundWindow() -ne $dw) { 要前台窗 $dw 'F2（键盘要落在曲库窗上）' }
 [V25]::Key(0x71)
 Start-Sleep -Milliseconds 800
 $行 = 找行 $原名
-断言真 'F2 之后行里**也没有**输入框（改名那条键盘路拆干净了）' ((行里的框 $行).Count -eq 0) "行里的框 $((行里的框 $行).Count) 个"
+断言真 'F2 之后行里**也没有**输入框（改名那条键盘路拆干净了）' (@(行里的框 $行).Count -eq 0) "行里的框 $(@(行里的框 $行).Count) 个"
 断言真 'F2 之后这一行还是原来那个名字' ((曲名格 $行).Current.Name -eq $原名) "'$(行名 $行)'"
 
 # =====================================================================
 "`n=== 7. 改名真的落到文件系统（走顶栏那一格，改出去、再改回来）==="
 # =====================================================================
-$原哈希 = 哈希 "$原名.mproj"
+# ⚠️ 先关曲库窗：它是**模态**子窗，开着的时候主窗是禁用的 —— 顶栏那格「歌曲名」拿不到焦点，
+# 回车也没人接（§6 上面那条注释说的同一个坑，只是这次是整扇窗禁用，比抢焦点更彻底）。
+关曲库
+断言真 '曲库窗关上了（顶栏改名要主窗能接键盘）' ($null -eq (曲库窗)) "曲库窗：$(if (曲库窗) { '还在' } else { '关了' })"
+$原哈希 = 哈希 $原名
 改名走顶栏 $临时
-断言真 "盘上真的出现了「$临时.mproj」" (Test-Path (Join-Path $曲库目录 "$临时.mproj")) "盘上现在：$((盘上) -join ' / ')"
-断言真 "盘上原来那份「$原名.mproj」没了" (-not (Test-Path (Join-Path $曲库目录 "$原名.mproj"))) "盘上现在：$((盘上) -join ' / ')"
-断言真 '窗口喊了一句「改成了」' ((文本 '改成了').Count -ge 1) "数到 $((文本 '改成了').Count) 条"
-断言真 '改名动的是文件名，不是又抄了一份（文件个数没变）' ((盘上).Count -eq $开工前.Count) "$((盘上).Count) 个（开工前 $($开工前.Count) 个）"
+断言真 "盘上真的出现了「$临时.mid」" (Test-Path (Join-Path $曲库目录 "$临时.mid")) "盘上现在：$((盘上) -join ' / ')"
+断言真 "盘上原来那份「$原名.mid」没了" (-not (Test-Path (Join-Path $曲库目录 "$原名.mid"))) "盘上现在：$((盘上) -join ' / ')"
+断言真 '窗口喊了一句「改成了」' (@(文本 '改成了').Count -ge 1) "数到 $(@(文本 '改成了').Count) 条"
+断言真 '改名动的是文件名，不是又抄了一份（曲子个数没变）' (@(盘上).Count -eq $开工前.Count) "$(@(盘上).Count) 个（开工前 $($开工前.Count) 个）"
 
 改名走顶栏 $原名
-断言真 '再改回来，盘上文件名回到原样' ((盘上) -contains "$原名.mproj") "盘上现在：$((盘上) -join ' / ')"
-断言真 '改回来之后**内容一个字节都没动**（改名只动文件名）' ((哈希 "$原名.mproj") -eq $原哈希) "$(哈希 "$原名.mproj") 对 $原哈希"
+断言真 '再改回来，盘上文件名回到原样' ((盘上) -contains "$原名.mid") "盘上现在：$((盘上) -join ' / ')"
+断言真 '改回来之后**内容一个字节都没动**（改名只动文件名）' ((哈希 $原名) -eq $原哈希) "$(哈希 $原名) 对 $原哈希"
 
 # =====================================================================
 "`n=== 8. 空名字被挡住，而且盘上什么都不动 ==="
@@ -518,10 +739,14 @@ $原哈希 = 哈希 "$原名.mproj"
 # 判据跟着改成新的那句，不然这一条会在「功能其实是对的」的时候红。
 $这次前 = 盘上
 改名走顶栏 ''
-$错 = 文本 '不能当曲名'
+$错 = @(文本 '不能当曲名')
 断言真 '空名字被挡下来了：窗口冒出那句现成的中文' ($错.Count -ge 1) "数到 $($错.Count) 条；窗口里的错字是「$(if($错.Count){$错[0].Current.Name})」"
 断言真 '空名字下盘上一个文件都没动' (((盘上) -join '|') -eq ($这次前 -join '|')) "现在：$((盘上) -join ' / ')"
+# 「曲库行还好好地叫原名」这一条要**开一次曲库窗**才看得到：40 号之后行住在它自己的窗里，
+# 主窗那棵树里一个 ListItem 都没有（拿主窗找行只会得到空数组，报出来是「曲子丢了」）。
+$dw = 开曲库
 断言真 '空名字之后曲库行还好好地叫原名' ((找行 $原名) -ne $null) "现在有：$((曲库行 | ForEach-Object { 行名 $_ }) -join ' / ')"
+关曲库
 断言真 '空名字之后曲名框退回原名（不是留着一个空框）' ((取值 (曲名框)) -eq $原名) "曲名框='$(取值 (曲名框))'"
 
 # =====================================================================
@@ -533,27 +758,31 @@ $错 = 文本 '不能当曲名'
 改名走顶栏 'Carulli/Tmp:Bad'
 $带坏字符 = @(盘上 | Where-Object { $_ -match '[/:\\:*?"<>|]' })
 断言真 '名字里的 / 和 : 一个都没落到文件名上' ($带坏字符.Count -eq 0) "带坏字符的有：$($带坏字符 -join ' / ')"
-断言真 '消毒之后的名字落在盘上（CarulliTmpBad.mproj）' ((盘上) -contains 'CarulliTmpBad.mproj') "盘上现在：$((盘上) -join ' / ')"
+断言真 '消毒之后的名字落在盘上（CarulliTmpBad.mid）' ((盘上) -contains 'CarulliTmpBad.mid') "盘上现在：$((盘上) -join ' / ')"
 改名走顶栏 $原名
-断言真 '消毒那一轮过完，名字回到原名' ((盘上) -contains "$原名.mproj") "盘上现在：$((盘上) -join ' / ')"
-断言真 '这一轮下来内容依然一个字节都没动' ((哈希 "$原名.mproj") -eq $原哈希) "$(哈希 "$原名.mproj") 对 $原哈希"
+断言真 '消毒那一轮过完，名字回到原名' ((盘上) -contains "$原名.mid") "盘上现在：$((盘上) -join ' / ')"
+断言真 '这一轮下来内容依然一个字节都没动' ((哈希 $原名) -eq $原哈希) "$(哈希 $原名) 对 $原哈希"
 
 # =====================================================================
 "`n=== 10. 单击选中 / 双击打开，两条路没互相抢 ==="
 # =====================================================================
-# 落点挑**右边那格小字**（'没动过'）：它是 TextBlock，
+# 落点挑**右边那一块空白**（`行里空白`：名字格右沿到 × 左沿的正中、纵向行心）：
 #   · 单击 = 点在这一行上 → 只选中（32 号之后名字那一格上连 Tapped 都没有了）；
 #   · 双击 = 落到 ListBoxItem 上 → OnRowDoubleTapped 那道「祖先里有 Button 就拦下」
 #     的闸门不拦它（它不是按钮）→ 该打开；
-#   · 而且它**没有 ToolTip**（ToolTip 只挂在名字和删除上），删除那一颗点了会弹确认框。
-# 先单击一次「点在这一行上会不会误进改名」，再双击验「会不会打开」，两件事分开。
+#   · 而且它既不在名字那格上（ToolTip 挂在名字上，双击也要开曲子）、也不在 × 上
+#     （点了会弹删除确认框）。
+# ⚠️ 从前这里点的是**第二格小字**（'没动过'）。57 号之后 cargo 那一格**是空的**、宽度为 0，
+#    它的「中心」就等于名字格右沿 —— 那一下就点在名字格上了，这一节验的东西会变味。
+$dw = 开曲库
 $行 = 找行 'cargo'
-$元 = 小字 $行
-断言真 '右边那格小字认出来了（就是「改过没改过」那一格）' ($元.Current.Name -eq '没动过') "'$($元.Current.Name)'"
-$c = 中心 $元
-$r行 = 矩形 $行; $r元 = 矩形 $元
-Write-Host "    落点：行 $([int]$r行.X),$([int]$r行.Y) $([int]$r行.Width)x$([int]$r行.Height)；小字那一格 $([int]$r元.X),$([int]$r元.Y) $([int]$r元.Width)x$([int]$r元.Height)；点 $($c[0]),$($c[1])"
-点 $c[0] $c[1] '单击曲库行的小字（该只是选中，不进编辑）'
+$文 = @(行里的文字 $行)
+if ($文.Count -lt 2) { throw "cargo 那一行在树里只有 $($文.Count) 格文字（$(行名 $行)）—— 第二格小字没了，落点和小字判据都算不出来" }
+断言真 'cargo 那第二格小字**是空的**（没有缓存 ⇒ 四态真值表里「不带标记」那一态，不是「没动过」）' ($文[1].Current.Name -eq '') "读到「$($文[1].Current.Name)」"
+$c = 行里空白 $行
+$r行 = 矩形 $行; $r名 = 矩形 (曲名格 $行)
+Write-Host "    落点：行 $([int]$r行.X),$([int]$r行.Y) $([int]$r行.Width)x$([int]$r行.Height)；名字格右沿 $([int]($r名.X + $r名.Width))；点 $($c[0]),$($c[1])"
+点窗 $c[0] $c[1] $dw '单击曲库行右边那块空白（该只是选中，不进编辑）'
 # 分两次读：150ms 一次、再 550ms 一次。中间被谁改回去了的话，两次读数会不一样 ——
 # 那样的话「点了没选中」和「选中了又被清掉」是两句完全不同的话，得分开。
 Start-Sleep -Milliseconds 150
@@ -566,9 +795,8 @@ if (-not (选中了 $行)) {
   # 第一次没中就补一次 —— 和第 6/9 节那条改名路一样的手法，好把「第一下不生效」
   # 和「这条路根本不通」分开。补上了会在这一行下面直接说。
   Write-Host "    ★ 第一下没选中。点上读到的是 $([V25]::Describe([V25]::At($c[0], $c[1])))"
-  $行2 = 找行 'cargo'
-  $c = 中心 (小字 $行2)
-  点 $c[0] $c[1] '再点一次曲库行的小字'
+  $c = 行里空白 (找行 'cargo')
+  点窗 $c[0] $c[1] $dw '再点一次曲库行右边那块空白'
   Start-Sleep -Milliseconds 700
   $行 = 找行 'cargo'
   $卡 = 找行 $原名
@@ -576,27 +804,33 @@ if (-not (选中了 $行)) {
 }
 断言真 '单击非名字区**选中了这一行**' (选中了 $行) "选中=$(选中了 $行)"
 断言真 '单击非名字区把原来选中的那行让了出去' ($卡 -eq $null -or -not (选中了 $卡)) "Carulli 选中=$(if($卡){选中了 $卡}else{'行没了'})"
-断言真 '单击非名字区**没有**进编辑（两条路没打架）' ((行里的框 $行).Count -eq 0) "行里的框 $((行里的框 $行).Count) 个"
+断言真 '单击非名字区**没有**进编辑（两条路没打架）' (@(行里的框 $行).Count -eq 0) "行里的框 $(@(行里的框 $行).Count) 个"
 断言真 '单击没有把歌打开（曲名框还是 Carulli）' ((取值 (曲名框)) -eq $原名) "曲名框='$(取值 (曲名框))'"
 
-$元 = 小字 (找行 'cargo')
-$c = 中心 $元
-双击 $c[0] $c[1] '双击曲库行的小字（该打开这一首）'
+$c = 行里空白 (找行 'cargo')
+双击窗 $c[0] $c[1] $dw '双击曲库行右边那块空白（该打开这一首）'
 Start-Sleep -Seconds 5
 if ((取值 (曲名框)) -ne 'cargo') {
   Write-Host "    ★ 双击没打开。点上读到的是 $([V25]::Describe([V25]::At($c[0], $c[1])))；曲名框还是 '$(取值 (曲名框))'"
-  $元 = 小字 (找行 'cargo')
-  $c = 中心 $元
-  双击 $c[0] $c[1] '再双击一次曲库行的小字'
+  # 补一次要先**把曲库窗开回来**：双击真开了的话窗口已经自己关了（40 号的规矩），
+  # 而「没开」这一支里它可能还留着 —— 两种都当成「重新开一遍」处理。
+  if (-not (曲库窗)) { $dw = 开曲库 }
+  $c = 行里空白 (找行 'cargo')
+  双击窗 $c[0] $c[1] $dw '再双击一次曲库行右边那块空白'
   Start-Sleep -Seconds 5
   Write-Host "    → 补双击一次：曲名框='$(取值 (曲名框))' 轨数=$(数轨)"
 }
 断言真 '双击真的把那一首打开了（曲名框变成 cargo）' ((取值 (曲名框)) -eq 'cargo') "曲名框='$(取值 (曲名框))'；轨数 $(数轨)"
 # 打开另一首之后把原来那首开回来，别把 app 留在别的曲子上
+# 下面那一下 SendKeys('{ENTER}') 投给的是**当前有焦点的窗口**：曲库窗要**重新开一次**
+# （上面那一次双击把它关掉了），并且得确认前台是它 —— 别的窗口盖在上面时，
+# 这一下会往别人的编辑器里敲一个回车（32 号实测栽过）。
+# 上面那一支要是栽了（双击连补一次都没开成），窗可能还开着 —— 那就别再去点主窗那颗
+# 「歌曲库」（模态期间主窗被压住，点它只会抛「清不干净」）。
+if (-not (曲库窗)) { $dw = 开曲库 } else { $dw = 曲库窗 }
 $行 = 找行 $原名
-# 下面那一下 SendKeys('{ENTER}') 投给的是**当前有焦点的窗口**，先确认前台是 app ——
-# 别的窗口盖在上面时，这一下会往别人的编辑器里敲一个回车（32 号实测栽过）。
-要前台 "把「$原名」开回来"
+if (-not $行) { throw "曲库窗里没有「$原名」了（列表里是：$((曲库行 | ForEach-Object { 行名 $_ }) -join ' / ')）" }
+要前台窗 $dw '把「$原名」开回来（键盘要落在曲库窗上）'
 [void]$行.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select()
 Start-Sleep -Milliseconds 400
 [void]$行.SetFocus()
@@ -604,6 +838,7 @@ Start-Sleep -Milliseconds 400
 [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
 Start-Sleep -Seconds 5
 断言真 '把 Carulli 开回来，曲名框回到原名' ((取值 (曲名框)) -eq $原名) "曲名框='$(取值 (曲名框))'；轨数 $(数轨)"
+断言真 '开回来之后曲库窗也自己关了（这一节到此为止本来那扇窗就在）' ($null -eq (曲库窗)) "曲库窗：$(if (曲库窗) { '还在' } else { '关了' })"
 
   $跑完了 = $true
 }
@@ -612,16 +847,58 @@ catch {
   Write-Host "`n★ 脚本跑到一半抛了：$_"
 }
 finally {
-  # 无条件还原曲库：先把盘上所有 .mproj 清掉，再把开工前备份的整份拷回来，逐字节对一遍。
-  # 这个脚本动的是**用户的曲库**，不能停在「应该没问题」上。
+  # 无条件还原曲库 —— 把开工前照的那张相**整个复刻回去**：根下每一个文件（含用户自己的
+  # 两份老 `.mproj`）+ `.work\` 里每一份缓存。复刻 = 先删掉多出来的、再把相片拷回来、
+  # 最后逐字节对指纹。这个脚本动的是**用户的曲库**，不能停在「应该没问题」上。
   try {
-    Get-ChildItem -File $曲库目录 -Filter *.mproj -EA SilentlyContinue | Remove-Item -Force -EA SilentlyContinue
-    foreach ($n in $开工前) { Copy-Item (Join-Path $备份目录 $n) (Join-Path $曲库目录 $n) -Force }
+    # ---- 根下 ----
+    foreach ($现在 in @(Get-ChildItem -File $曲库目录 -EA SilentlyContinue | ForEach-Object { $_.Name })) {
+      if ($开工根下 -notcontains $现在) { Remove-Item (Join-Path $曲库目录 $现在) -Force -EA SilentlyContinue }
+    }
+    foreach ($n in $开工根下) { Copy-Item (Join-Path $备份目录 'root' $n) (Join-Path $曲库目录 $n) -Force }
+    # ---- .work\ ----
+    if (Test-Path $work目录) {
+      foreach ($现在 in @(Get-ChildItem -File $work目录 -EA SilentlyContinue | ForEach-Object { $_.Name })) {
+        if ($开工缓存 -notcontains $现在) { Remove-Item (Join-Path $work目录 $现在) -Force -EA SilentlyContinue }
+      }
+      foreach ($n in $开工缓存) { Copy-Item (Join-Path $备份目录 'work' $n) (Join-Path $work目录 $n) -Force }
+    } elseif ($开工缓存.Count -gt 0) {
+      New-Item -ItemType Directory -Path $work目录 | Out-Null
+      foreach ($n in $开工缓存) { Copy-Item (Join-Path $备份目录 'work' $n) (Join-Path $work目录 $n) -Force }
+    }
+    # 开工时**没有** `.work\` 的话，一个空的也不该留下（第一次跑这一票就在用户的曲库里
+    # 留下过一个空的 `.work\`：那一步只是「把 .mproj 清掉」，目录本身没人管）。
+    if (-not $开工有work -and (Test-Path $work目录) -and @(Get-ChildItem -File $work目录 -EA SilentlyContinue).Count -eq 0) {
+      Remove-Item $work目录 -Recurse -Force -EA SilentlyContinue
+    }
+    # ---- 对账 ----
+    $根现在 = @(Get-ChildItem -File $曲库目录 -EA SilentlyContinue | ForEach-Object { $_.Name } | Sort-Object)
+    $对得上 = ($根现在.Count -eq $开工根下.Count)
+    if ($对得上) {
+      foreach ($n in $开工根下) {
+        if ($根现在 -notcontains $n) { $对得上 = $false }
+        elseif ((Get-FileHash (Join-Path $曲库目录 $n) -Algorithm MD5).Hash -ne $开工根下哈希[$n]) { $对得上 = $false }
+      }
+    }
+    $缓存现在 = @(缓存上)
+    $缓存对 = ($缓存现在.Count -eq $开工缓存.Count)
+    if ($缓存对) {
+      foreach ($n in $开工缓存) {
+        if ($缓存现在 -notcontains $n) { $缓存对 = $false }
+        elseif ((Get-FileHash (Join-Path $work目录 $n) -Algorithm MD5).Hash -ne $开工缓存哈希[$n]) { $缓存对 = $false }
+      }
+    }
+    $work在 = Test-Path $work目录
     $还原后 = 盘上
-    $对得上 = (($还原后 -join '|') -eq ($开工前 -join '|'))
     foreach ($n in $开工前) { if ((哈希 $n) -ne $开工前哈希[$n]) { $对得上 = $false } }
-    if ($对得上) { "`n曲库已还原：$($还原后 -join ' / ')（逐字节和开工前一致）" }
-    else { "`n★ 曲库还原没对上！现在：$($还原后 -join ' / ')，开工前：$($开工前 -join ' / ')" }
+    if ($对得上 -and $缓存对 -and ($work在 -eq $开工有work)) {
+      "`n曲库已还原：根下 $($根现在 -join ' / ')；曲目（.mid）$($还原后 -join ' / ')；.work $(if ($缓存现在.Count) { $缓存现在 -join ' / ' } else { '（空）' })（逐字节和开工前一致）"
+    } else {
+      "`n★ 曲库还原没对上！"
+      "   根下现在：$($根现在 -join ' / ')  开工前：$($开工根下 -join ' / ')"
+      "   缓存现在：$($缓存现在 -join ' / ')  开工前：$($开工缓存 -join ' / ')"
+      "   .work 目录现在在吗：$work在  开工前：$开工有work"
+    }
     Remove-Item $备份目录 -Recurse -Force -EA SilentlyContinue
   } catch { "`n★ 还原时出错：$_" }
 }
