@@ -70,6 +70,18 @@ public partial class PerformerWindow : Window
     /// </summary>
     private readonly PitchRangeView _range;
 
+    /// <summary>
+    /// 按键速度那块（平均 / 峰值 / 每秒直方图）。窗口只喂数据 —— 三个数怎么算、哪一秒是峰值
+    /// 全在 <see cref="KeyRateReadout"/> 里（同样是纯函数，另有测试盯着）。
+    /// </summary>
+    private readonly KeyRateView _keyRate;
+
+    /// <summary>
+    /// 这一份按键速度读数的代号。算表是丢线程池的（长曲子几十毫秒起步），算完回来时用户可能
+    /// 已经换了轨 / 换了时序 / 换了曲子 —— 晚到的那一份不许盖掉新算的那一份。
+    /// </summary>
+    private int _keyRateStamp;
+
     /// <summary>上一次画到条子上的那个音。<see cref="OnProgressTick"/> 100ms 一次，同一个音不必重画。</summary>
     private string _rangeNote = "";
 
@@ -105,10 +117,17 @@ public partial class PerformerWindow : Window
         TimingCombo.SelectedIndex = 1;              // 标准档（InputTiming.FromIndex(1)）
         CountdownCombo.ItemsSource = CountdownNames;
         CountdownCombo.SelectedIndex = 1;           // 5 秒
+
+        // 时序是事件表的一个输入（帧宽 / 提前量 / 重触发间隔都在它里面）：换了档位就是另一张表，
+        // 按键速度读数得跟着重量一遍 —— 摆着旧数就是「读数」和「真按下去那张表」两个真相源。
+        // 挂在这个下标设完之后，免得构造期白算一次。
+        TimingCombo.SelectionChanged += (_, _) => _ = RefreshKeyRate();
+
         TrackCombo.SelectionChanged += (_, _) =>
         {
             ShowReady();
             RefreshRange();      // 换一条轨，条子跟着换（亮的那片跟着这首曲子的音域走）
+            _ = RefreshKeyRate();   // 换一条轨，按键速度那两个数和直方图一起换
         };
         _hotkeys.Panic += OnPanicHotkey;
 
@@ -128,6 +147,11 @@ public partial class PerformerWindow : Window
         // 不抛就一直没人发现。
         _range = new PitchRangeView(RangeBar, RangeKeys, RangeSummary, RangeAlert, RangeAlertTitle, RangeAlertSub);
         RefreshRange();                             // 还没曲子：38 根全暗、读数行不出现
+
+        // 按键速度那块同理：控件是 XAML 摆好的，这里只把「哪几个控件拼成一块读数」告诉它。
+        // 还没曲子：整块不出现（XAML 里就是 IsVisible="False"），装上曲子时 ApplySong 才去算。
+        _keyRate = new KeyRateView(KeyRate, KeyRateAverage, KeyRatePeak, KeyRateBars,
+                                   KeyRateAxisStart, KeyRateAxisNote, KeyRateAxisEnd);
 
         SetStatus("就绪 · 先打开一首 MIDI", Status.Idle);
     }
@@ -243,6 +267,10 @@ public partial class PerformerWindow : Window
         // 两条路都要走一遍：换上新曲子（或换上一首一条可弹的都没有的）之后，
         // 条子上不该还留着上一首的亮片
         RefreshRange();
+
+        // 按键速度同理：读数也是**这首歌**的量 —— 换曲子（或换上一首一条可弹的都没有的）
+        // 之后不该还摆着上一首的那两个数。它是丢线程池算的，算完自己会画上去。
+        _ = RefreshKeyRate();
     }
 
     /// <summary>下拉框里的一行：序号 + 轨名 + 音数。</summary>
@@ -279,19 +307,63 @@ public partial class PerformerWindow : Window
             PitchRangeReadout.PitchOfLabel(_currentNote));
     }
 
-    // ==================== 开始 / 急停 ====================
+    // ==================== 按键速度（平均 + 峰值 + 每秒直方图） ====================
 
-    private void OnStart(object? sender, RoutedEventArgs e)
+    /// <summary>
+    /// 把当前这条轨量成一块按键速度读数，画到窗口上。
+    ///
+    /// **在播放之前算**（用户的原话：「可以尽量在播放之前就计算出来吗？我不希望在播放的时候
+    /// 临时看」）—— 载入、换一条演奏轨、换一次时序就重算一遍，演奏期间一个数都不动，
+    /// 没有计时器、没有节流，也没有一边弹一边更新这回事。
+    ///
+    /// 三个数都从 <see cref="EventTable.Build"/> 那张**事件表**来：就是真按下去时
+    /// <see cref="StartPerformance"/> 递给派发器的那一张（它自己也走同一个方法，连时序都是
+    /// 同一个下拉给的）。**不另走一遍 Song 的轨数据** —— 那就成了「同一件事有第二个写它的地方」，
+    /// 屏幕上那个「最密的一秒」迟早和耳朵里真挨的那一秒对不上。
+    /// </summary>
+    private async Task RefreshKeyRate()
     {
-        if (_running) return;
-        if (_song is not { } song) return;
+        var request = CurrentRequest();
+
+        // 这一份的代号。算完回来时对一下：换过轨 / 换过时序 / 换过曲子的话，晚到的那份作废
+        int stamp = ++_keyRateStamp;
+
+        if (request is null)
+        {
+            _keyRate.Show(null);            // 没曲子 / 没有能弹的轨：整块不出现
+            return;
+        }
+
+        // 建表不是瞬时的（长曲子上万音符，几十毫秒起步 —— 同 StartPerformance 里那句），
+        // 别占着界面线程算；await 回来还在界面线程上。
+        var state = await Task.Run(() =>
+        {
+            var (events, seconds, _) = EventTable.Build(
+                request.Song, request.TrackIndex, request.Timing, request.BaseOctave);
+            return KeyRateReadout.Measure(events, seconds);
+        });
+
+        if (stamp != _keyRateStamp) return;
+        _keyRate.Show(state);
+    }
+
+    /// <summary>
+    /// 手上这份选择拼出来的那一次「演奏」：选中的轨 + 时序 + 倒计时。
+    ///
+    /// 按下开始、以及算按键速度读数，要的是**同一份**参数 —— 各拼一遍的话，
+    /// 读数会和真按下去的那张事件表错开（比如时序换了读数没换）。给不出就是 <c>null</c>
+    /// （还没曲子 / 一条能弹的轨都没有）。
+    /// </summary>
+    private StartPerformanceRequest? CurrentRequest()
+    {
+        if (_song is not { } song) return null;
 
         // 下拉框的选中项是「能弹的轨」那张表里的下标，不是 song.Tracks 的下标（中间筛掉过几条），
         // 所以递给用例的是原曲里的下标 _playable[index].SongTrackIndex。
         int index = TrackCombo.SelectedIndex;
-        if (index < 0 || index >= _playable.Count) return;
+        if (index < 0 || index >= _playable.Count) return null;
 
-        var request = new StartPerformanceRequest(
+        return new StartPerformanceRequest(
             song,
             _playable[index].SongTrackIndex,
             // 基准八度永远自动（null）：按音域挑那个能容下最多音符的八度。人工选八度是程序算得比人准的事，
@@ -299,6 +371,17 @@ public partial class PerformerWindow : Window
             BaseOctave: null,
             InputTiming.FromIndex(TimingCombo.SelectedIndex),
             CountdownOptions[Math.Clamp(CountdownCombo.SelectedIndex, 0, CountdownOptions.Length - 1)]);
+    }
+
+    // ==================== 开始 / 急停 ====================
+
+    private void OnStart(object? sender, RoutedEventArgs e)
+    {
+        if (_running) return;
+
+        // 要弹的是哪一首、哪条轨、哪个档位，全由 CurrentRequest 一处拼出来 ——
+        // 和上面那块按键速度读数是同一份参数（读数就是在播放之前按它算的）。
+        if (CurrentRequest() is not { } request) return;
 
         // 预检要的两个事实在这里问网关（Core 引不到 Win32）。两次问都是同步一次性的，
         // 只在按下开始时各问一次 —— 输入法那次放进循环里就是白烧 CPU。

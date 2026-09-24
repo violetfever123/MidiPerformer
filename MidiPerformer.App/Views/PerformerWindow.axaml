@@ -252,6 +252,57 @@
       <Setter Property="TextWrapping" Value="Wrap" />
     </Style>
 
+    <!-- ==================== 按键速度（平均 + 峰值 + 每秒直方图） ==================== -->
+    <!--
+      两个数：峰值那个数**重一档**（大一号 + 加粗 + warn 色），平均是陪衬（小一号 + 常规 + 淡一档）。
+      重一档不能只靠颜色 —— 同一块色在浅底 / 暗底上轻重会翻个个儿，而字号和字重到哪儿都是那个差
+      （brief §5s：颜色只能判「大块纯色、边界干净」的东西）。峰值那个数是 warn、峰值那根柱子是 stop：
+      前者照原型（K1 的两个数），后者照规格（「红的那一秒」，直方图那一条）。
+    -->
+    <Style Selector="TextBlock.kps">
+      <Setter Property="FontFamily" Value="{DynamicResource TokenFontMono}" />
+      <Setter Property="FontSize" Value="15" />
+      <Setter Property="FontWeight" Value="Normal" />
+      <Setter Property="Foreground" Value="{DynamicResource TokenInkMuted}" />
+      <Setter Property="VerticalAlignment" Value="Bottom" />
+    </Style>
+    <Style Selector="TextBlock.kps.peak">
+      <Setter Property="FontSize" Value="21" />
+      <Setter Property="FontWeight" Value="Bold" />
+      <Setter Property="Foreground" Value="{DynamicResource TokenWarn}" />
+    </Style>
+    <Style Selector="TextBlock.kps-unit">
+      <Setter Property="FontSize" Value="11" />
+      <Setter Property="Foreground" Value="{DynamicResource TokenInkFaint}" />
+      <Setter Property="VerticalAlignment" Value="Bottom" />
+    </Style>
+    <Style Selector="TextBlock.kps-sep">
+      <Setter Property="FontSize" Value="12" />
+      <Setter Property="Foreground" Value="{DynamicResource TokenLine}" />
+      <Setter Property="VerticalAlignment" Value="Bottom" />
+    </Style>
+
+    <!-- 横轴那行字：左端 0:00 / 中间那句 / 右端总时长，三条一样淡，落在直方图底下 -->
+    <Style Selector="TextBlock.kps-axis">
+      <Setter Property="FontSize" Value="10.5" />
+      <Setter Property="Foreground" Value="{DynamicResource TokenInkFaint}" />
+    </Style>
+
+    <!--
+      直方图一根柱子 = 一秒。**底对齐**、等高线由 KeyRateView 按读数给的 Height 说了算
+      （根数随曲子变，所以柱子不在 XAML 里摆）。
+    -->
+    <Style Selector="Border.kbar">
+      <Setter Property="Background" Value="{DynamicResource TokenAccent}" />
+      <Setter Property="CornerRadius" Value="1,1,0,0" />
+      <Setter Property="VerticalAlignment" Value="Bottom" />
+    </Style>
+
+    <!-- 峰值那一秒变红。排在 .kbar 之后：同优先级的 setter 谁后写谁赢 -->
+    <Style Selector="Border.kbar.peak">
+      <Setter Property="Background" Value="{DynamicResource TokenStop}" />
+    </Style>
+
   </Window.Styles>
 
   <StackPanel Margin="14" Spacing="11">
@@ -284,6 +335,59 @@
                 HorizontalAlignment="Left" Click="OnGoEditor" />
       </StackPanel>
     </Border>
+
+    <!-- ============ 按键速度（平均 + 峰值 + 每秒直方图） ============ -->
+    <!--
+      紧贴「演奏轨」那一行、挂在它底下（不另起一行、不单独成块）：选完轨第一个想知道的就是
+      「这首弹得动吗」，这条直方图是它的细节。
+      三个数**全部在播放之前算完**（用户的原话：不想在播放的时候临时看）—— 载入就看得见，
+      不用先按播放，演奏期间一个数都不动。它们从 EventBuilder.Build 那张事件表来，
+      和真按下去的是同一张表（KeyRateReadout 那一半是纯函数，另有测试盯着）。
+
+      直方图缩进 84px，与上面那一行的「值」左端齐（74 的标签列 + 10 的列距）。
+      一秒一根柱子：峰值那一秒 TokenStop，其余 TokenAccent —— 颜色只标「哪一秒是峰值」，
+      柱子的高矮由 Height 给（brief §5s：颜色当不了几何判据）。
+      整块没得画时（没曲子 / 一条能弹的轨都没有）不出现，见 KeyRateView.Show。
+    -->
+    <StackPanel x:Name="KeyRate" IsVisible="False" Margin="0,3,0,0">
+
+      <!--
+        读数那一行：标签 + 两个数。峰值那个数**重一档**（大一号 + 加粗 + warn 色），
+        平均是陪衬 —— 难不难不在平均值，在最密的那一秒。
+      -->
+      <Grid ColumnDefinitions="74,*" ColumnSpacing="10">
+        <TextBlock Grid.Column="0" Classes="row-label" Text="按键速度" />
+        <Grid Grid.Column="1" ColumnDefinitions="Auto,Auto,Auto,Auto,Auto"
+              ColumnSpacing="5" VerticalAlignment="Center">
+          <TextBlock Grid.Column="0" x:Name="KeyRateAverage" Classes="kps" Text="" />
+          <TextBlock Grid.Column="1" Classes="kps-unit" Text="平均" />
+          <TextBlock Grid.Column="2" Classes="kps-sep" Text="·" />
+          <TextBlock Grid.Column="3" x:Name="KeyRatePeak" Classes="kps peak" Text="" />
+          <TextBlock Grid.Column="4" Classes="kps-unit" Text="峰值 键/秒" />
+        </Grid>
+      </Grid>
+
+      <!--
+        每秒直方图：缩进 84px 挂在上面那一行的值底下。柱子那一格是**空的** ——
+        一秒一根、根数随曲子变，全由 KeyRateView 摆（XAML 里摆不出来，摆了它也会当场抛）。
+      -->
+      <StackPanel Margin="84,0,0,0">
+        <UniformGrid x:Name="KeyRateBars" Rows="1" Height="26" Margin="0,5,0,0" />
+
+        <!--
+          横轴：左端 0:00、右端总时长、中间那句「整曲每秒按键数 · 红的那一秒是峰值」。
+          三处字都由 KeyRateReadout 写（连 0:00 也是，走同一个时钟格式），这儿不写样例 ——
+          写一份样例就多一个真相源。
+        -->
+        <Grid ColumnDefinitions="Auto,*,Auto" Margin="0,3,0,0">
+          <TextBlock Grid.Column="0" x:Name="KeyRateAxisStart" Classes="kps-axis" Text="" />
+          <TextBlock Grid.Column="1" x:Name="KeyRateAxisNote" Classes="kps-axis" Text=""
+                     HorizontalAlignment="Center" />
+          <TextBlock Grid.Column="2" x:Name="KeyRateAxisEnd" Classes="kps-axis" Text="" />
+        </Grid>
+      </StackPanel>
+
+    </StackPanel>
 
     <!-- ============ 音域读数（38 根细条） ============ -->
     <!--

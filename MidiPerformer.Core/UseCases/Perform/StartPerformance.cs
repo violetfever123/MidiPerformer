@@ -20,7 +20,7 @@ namespace MidiPerformer.Core.UseCases.Perform;
 /// </summary>
 public sealed class StartPerformance
 {
-    /// <summary>倒计时与等待取消的分片长度（秒）。要短到「按了 F6 立刻有反应」，也要短到假时钟下推进得动。</summary>
+    /// <summary>倒计时与等待取消的分片长度（秒）。要短到「按了急停键立刻有反应」，也要短到假时钟下推进得动。</summary>
     private const double SliceSeconds = 0.005;
 
     private readonly IClock _clock;
@@ -131,7 +131,7 @@ public sealed class StartPerformance
     }
 
     /// <summary>
-    /// 急停（F6、急停按钮、关窗都走它）。可以从任何线程调，重复调无害。
+    /// 急停（任意键、急停按钮、关窗都走它）。可以从任何线程调，重复调无害。
     /// 倒计时期间调它就是「取消」；立刻松一次键不等派发线程醒来 —— 它自己的收尾是幂等的。
     /// </summary>
     public void Stop()
@@ -215,24 +215,16 @@ public sealed class StartPerformance
     }
 
     /// <summary>
-    /// 选中轨 → 秒 → 键位 → 事件表。四步的顺序就是 <c>RepertoireToSeconds</c> 定下的那条链：
-    /// 换单位只发生一次。
+    /// 要弹的那张事件表。四步的链子不在这个文件里 —— 它在 <see cref="EventTable.Build"/>，
+    /// 界面量按键速度读数（50 号票）用的是**同一个方法**：读数与演奏对拍的前提就是同一个真相源。
     /// </summary>
     private static (List<EventBuilder.PhysicalEvent> Events, SongWalker Walker) BuildEventTable(
         StartPerformanceRequest request)
     {
-        var track = request.Song.Tracks[request.TrackIndex];
-
-        var seconds = RepertoireToSeconds.Convert(track.Notes, request.Song.TempoMap);
-
-        // 基准八度：手动给的就是它，null 走自动（让可演奏区容下最多音符）。
-        var mapped = NoteMapper.Map(seconds, track.Transpose, request.BaseOctave);
-
-        // 超出三个八度的音跳过不发，事件表只收 InRange 的那些（卷帘上它们已经标灰了）。
-        var builder = new EventBuilder { Timing = request.Timing };
-        var (events, _) = builder.Build(
-            mapped.Notes.Where(n => n.InRange).ToList(), EventBuilder.ModState.None);
-
-        return (events, new SongWalker(request.Song));
+        // 中间那个是这张表铺了多久 —— 派发这一路用不上（进度条读的是 Song.TotalSeconds），
+        // 它是按键速度读数的分母
+        var (events, _, walker) = EventTable.Build(
+            request.Song, request.TrackIndex, request.Timing, request.BaseOctave);
+        return (events, walker);
     }
 }
