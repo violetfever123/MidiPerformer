@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  coverlet.collector（VSTest 集成）的配置。跑法：dotnet test 加 collect 参数取 XPlat Code Coverage。
+
+  报告落在 MidiPerformer.Tests\TestResults\<guid>\coverage.cobertura.xml，
+  <guid> 那层由 VSTest 平台生成（coverlet 的 VSTest 集成没有关掉它的开关）——
+  所以要读它就得按 TestResults\*\coverage.cobertura.xml 找，多次跑过就取最新的一份。
+-->
+<RunSettings>
+  <DataCollectionRunSettings>
+    <DataCollectors>
+      <DataCollector friendlyName="XPlat code coverage">
+        <Configuration>
+          <!--
+            只采功能层。Core 是纯层，四条缝都在它里面；App（Avalonia 视图）与
+            Adapters（Gateway）明确不测，测试工程自己的代码也不算数。
+          -->
+          <Include>[MidiPerformer.Core]*</Include>
+          <Format>cobertura</Format>
+        </Configuration>
+      </DataCollector>
+    </DataCollectors>
+  </DataCollectionRunSettings>
+</RunSettings>

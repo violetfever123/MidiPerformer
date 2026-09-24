@@ -22,12 +22,26 @@
     <ParityProject>..\..\harmonica-auto-player\HarpAutoPlayer\HarpAutoPlayer.csproj</ParityProject>
     <!-- 视觉令牌的对照物；不存在时跳过令牌对账 -->
     <TokenOracle>$(MSBuildThisFileDirectory)..\docs\wireframe.html</TokenOracle>
+    <!--
+      覆盖率的范围配置。只在真的带了 collect 参数时才挂上去：runsettings 里那份
+      DataCollectors 会**自己**把采集器打开，无条件挂上就等于每次 dotnet test 都采一遍。
+    -->
+    <RunSettingsFilePath Condition="'$(VSTestCollect)' != ''">$(MSBuildThisFileDirectory)coverlet.runsettings</RunSettingsFilePath>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.13.0" />
     <PackageReference Include="NUnit" Version="4.3.2" />
     <PackageReference Include="NUnit3TestAdapter" Version="5.0.0" />
+    <!--
+      覆盖率采集。跑法：dotnet test 加 collect 参数取 XPlat Code Coverage。
+      报告落在 TestResults\<guid>\coverage.cobertura.xml（guid 那层由 VSTest 平台生成，不是我们选的）。
+      范围收在 MidiPerformer.Core，见同目录的 coverlet.runsettings。
+    -->
+    <PackageReference Include="coverlet.collector" Version="8.0.1">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
   </ItemGroup>
 
   <ItemGroup>
