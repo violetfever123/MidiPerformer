@@ -189,7 +189,7 @@ function 关提权框 {
   if (-not [P40]::Enabled($script:h)) { throw '主窗口还是禁用的 —— 提权框没真收掉' }
 }
 
-$日志 = Join-Path (Join-Path $PSScriptRoot '..\..\.scratch') 'shots\48'
+$日志 = Join-Path (Join-Path $PSScriptRoot 'shots') '48'
 New-Item -ItemType Directory -Force -Path $日志 | Out-Null
 
 try {
