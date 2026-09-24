@@ -405,8 +405,8 @@ function Shift点([int]$横, [int]$纵, [string]$谁) {
 # **前台只在真掉了时才拽**：`Take` 里的 `SetFocus(h)` 会把焦点打回最后一个输入框。
 function 确保前台([string]$谁) {
   if ([V36]::GetForegroundWindow() -eq $h) { return $true }
-  "  ！！ 「$谁」之前前台掉了（台面上是 $([V36]::Describe([V36]::GetForegroundWindow()))）—— 拽回来；"
-  "     这一下 `Take` 里的 `SetFocus(h)` 会把焦点打回输入框，本节的焦点读数作废。"
+  Write-Host "  ！！ 「$谁」之前前台掉了（台面上是 $([V36]::Describe([V36]::GetForegroundWindow()))）—— 拽回来；"
+  Write-Host "     这一下 `Take` 里的 `SetFocus(h)` 会把焦点打回输入框，本节的焦点读数作废。"
   return [V36]::Take($h)
 }
 

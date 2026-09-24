@@ -145,8 +145,8 @@ function 位置小节 {
 # **前台只在真掉了时才拽**：`Take` 里的 `SetFocus(h)` 会把焦点打回最后一个输入框（34 号量的）
 function 确保前台([string]$谁) {
   if ([V35]::GetForegroundWindow() -eq $h) { return $true }
-  "  ！！ 「$谁」之前前台掉了（台面上是 $([V35]::Describe([V35]::GetForegroundWindow()))）—— 拽回来；"
-  "     这一下 `Take` 里的 `SetFocus(h)` 会把焦点打回输入框，本节的焦点读数作废。"
+  Write-Host "  ！！ 「$谁」之前前台掉了（台面上是 $([V35]::Describe([V35]::GetForegroundWindow()))）—— 拽回来；"
+  Write-Host "     这一下 `Take` 里的 `SetFocus(h)` 会把焦点打回输入框，本节的焦点读数作废。"
   return [V35]::Take($h)
 }
 

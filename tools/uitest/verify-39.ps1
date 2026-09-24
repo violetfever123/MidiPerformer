@@ -298,7 +298,7 @@ function 点([int]$横, [int]$纵, [string]$谁) {
 }
 function 确保前台([string]$谁) {
   if ([V39]::GetForegroundWindow() -eq $h) { return $true }
-  "  ！！ 「$谁」之前前台掉了 —— 拽回来；"
+  Write-Host "  ！！ 「$谁」之前前台掉了 —— 拽回来；"
   return [V39]::Take($h)
 }
 

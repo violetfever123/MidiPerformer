@@ -287,7 +287,7 @@ function 稳帧([string]$说明) {
     $列 = 取列
     $后 = 读小节
     if ($前 -eq $后) { break }
-    "    （$说明：第 $i 次取帧时读数从 $前 变到 $后，重取）"
+    Write-Host "    （$说明：第 $i 次取帧时读数从 $前 变到 $后，重取）"
     Start-Sleep -Milliseconds 400
   }
   [pscustomobject]@{ 列 = $列; 读 = $后 }

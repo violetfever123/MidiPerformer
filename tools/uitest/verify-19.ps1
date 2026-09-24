@@ -254,7 +254,7 @@ function 按键([string]$k, [int]$歇 = 700) {
 function 拽([int]$试 = 4) {
   for ($i = 1; $i -le $试; $i++) {
     if ([V19]::Take($h) -and [V19]::Mine($h)) { return $true }
-    "     ⚠ 第 $i 次没拽回前台（现在前台是 $([V19]::Fg())）—— 隔一下再拽"
+    Write-Host "     ⚠ 第 $i 次没拽回前台（现在前台是 $([V19]::Fg())）—— 隔一下再拽"
     Start-Sleep -Milliseconds 500
   }
   return $false
@@ -282,7 +282,7 @@ function 框([int]$x1, [int]$y1, [int]$x2, [int]$y2) {
   if (-not (拖 $x1 $y1 $x2 $y2)) { return $false }
   if ((选中读数) -ne $没有读数) { return $true }
   $script:补拖++
-  "     ⚠ 这一下拖出去什么也没框住（读数还是「$没有读数」）—— 被吞了，原样补拖一次"
+  Write-Host "     ⚠ 这一下拖出去什么也没框住（读数还是「$没有读数」）—— 被吞了，原样补拖一次"
   if (-not (拖 $x1 $y1 $x2 $y2)) { return $false }
   return $true
 }
@@ -295,7 +295,7 @@ function 框([int]$x1, [int]$y1, [int]$x2, [int]$y2) {
 function 跑找音符([string[]]$argv) {
   $出 = @(& pwsh -NoProfile -WindowStyle Hidden -File (Join-Path $脚本目录 'find-note.ps1') @argv 2>&1)
   if (@($出 | Where-Object { $_ -match '^\d+,\d+$' }).Count) { return $出 }
-  "     ⚠ 隐藏起法这一趟没拿到坐标 —— 退回普通起法再来一次"
+  Write-Host "     ⚠ 隐藏起法这一趟没拿到坐标 —— 退回普通起法再来一次"
   @(& pwsh -NoProfile -File (Join-Path $脚本目录 'find-note.ps1') @argv 2>&1)
 }
 

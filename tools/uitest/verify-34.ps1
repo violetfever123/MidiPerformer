@@ -157,8 +157,8 @@ function 位置小节 {
 # **前台只在真掉了时才拽**（抬头里那条）：拽会把焦点打回输入框，拽完的读数就不算数了。
 function 确保前台([string]$谁) {
   if ([V34]::GetForegroundWindow() -eq $h) { return $true }
-  "  ！！ 「$谁」之前前台掉了（台面上是 $([V34]::Describe([V34]::GetForegroundWindow()))）—— 拽回来；"
-  "     这一下 `Take` 里的 `SetFocus(h)` 会把焦点打回输入框，本节的焦点读数作废。"
+  Write-Host "  ！！ 「$谁」之前前台掉了（台面上是 $([V34]::Describe([V34]::GetForegroundWindow()))）—— 拽回来；"
+  Write-Host "     这一下 `Take` 里的 `SetFocus(h)` 会把焦点打回输入框，本节的焦点读数作废。"
   return [V34]::Take($h)
 }
 

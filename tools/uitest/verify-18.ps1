@@ -253,7 +253,7 @@ function 按键([string]$k, [int]$歇 = 700) {
 function 拽([int]$试 = 4) {
   for ($i = 1; $i -le $试; $i++) {
     if ([V18]::Take($h) -and [V18]::Mine($h)) { return $true }
-    "     ⚠ 第 $i 次没拽回前台（现在前台是 $([V18]::Fg())）—— 隔一下再拽"
+    Write-Host "     ⚠ 第 $i 次没拽回前台（现在前台是 $([V18]::Fg())）—— 隔一下再拽"
     Start-Sleep -Milliseconds 500
   }
   return $false
@@ -277,7 +277,7 @@ function 点准([int]$x, [int]$y) {
   if (-not (点 $x $y)) { throw "点下去被别的窗口挡了 —— ($x,$y) 上压着 $([V18]::At($x,$y))" }
   if ((选中读数) -ne $前) { return $true }
   $script:补点++
-  "     ⚠ 这一下点下去读数没动（$前）—— 被吞了，原样补点一次"
+  Write-Host "     ⚠ 这一下点下去读数没动（$前）—— 被吞了，原样补点一次"
   if (-not (点 $x $y)) { throw "点下去被别的窗口挡了 —— ($x,$y) 上压着 $([V18]::At($x,$y))" }
   return ((选中读数) -ne $前)
 }
@@ -290,7 +290,7 @@ function 点准([int]$x, [int]$y) {
 function 跑找音符([string[]]$argv) {
   $出 = @(& pwsh -NoProfile -WindowStyle Hidden -File (Join-Path $脚本目录 'find-note.ps1') @argv 2>&1)
   if (@($出 | Where-Object { $_ -match '^\d+,\d+$' }).Count) { return $出 }
-  "     ⚠ 隐藏起法这一趟没拿到坐标 —— 退回普通起法再来一次"
+  Write-Host "     ⚠ 隐藏起法这一趟没拿到坐标 —— 退回普通起法再来一次"
   @(& pwsh -NoProfile -File (Join-Path $脚本目录 'find-note.ps1') @argv 2>&1)
 }
 
