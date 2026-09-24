@@ -6,7 +6,7 @@
     歌曲库：一份列表，住在 SongLibraryWindow 里。
 
     这个文件只管「长什么样」，窗口只管「摆在哪、多大」。列表的行是代码建的
-    （曲名 + 改过没改过 + 删除），见 SongLibraryPanel.axaml.cs。
+    （曲名 + 第二格标记 + 删除），见 SongLibraryPanel.axaml.cs。
 
     三块：标题（「歌曲库」+「N 首」）、搜索框、列表。「N 首」说的是曲库里一共有几首，
     搜索只筛列表、不动这个读数。搜索框那种「边打边筛」的即时行为在 .axaml.cs 里
@@ -33,14 +33,21 @@
       <Setter Property="Background" Value="Transparent" />
     </Style>
 
-    <!-- 曲名右边那格小字（wireframe 的 .song .mt 那个位置）：那儿画的是时长，这儿画「改过 / 没动过」。 -->
+    <!--
+      曲名右边那格小字（wireframe 的 .song .mt 那个位置）：那儿画的是时长，这儿画「编辑过 · 可播放」
+      那一组标记，或者什么都不画（没有缓存的散装 .mid）。写哪个字、要不要 bad 色，由代码那边的
+      纯函数 MarkFor 给（见 SongLibraryPanel.axaml.cs）。
+    -->
     <Style Selector="TextBlock.song-meta">
       <Setter Property="FontSize" Value="11" />
       <Setter Property="Foreground" Value="{DynamicResource TokenInkFaint}" />
       <Setter Property="VerticalAlignment" Value="Center" />
     </Style>
 
-    <!-- 读不出来的那份：换成 warn 色 -->
+    <!--
+      读不出来的那一份：换成警告色。**只有它能穿这个类** —— 「不可播放」不穿，
+      弹不了是事实不是错误（比如音域超出那 38 格）。
+    -->
     <Style Selector="TextBlock.song-meta.bad">
       <Setter Property="Foreground" Value="{DynamicResource TokenWarn}" />
     </Style>

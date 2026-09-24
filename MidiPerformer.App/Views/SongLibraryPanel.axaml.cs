@@ -18,12 +18,14 @@ namespace MidiPerformer.App.Views;
 ///
 /// 它自己不改盘（写）：点一首、要删除，都只是喊一声（<see cref="OpenRequested"/> /
 /// <see cref="DeleteRequested"/>），真正读文件、删文件的是窗口。读是有的 ——
-/// <see cref="AddRow"/> 为每一行读一次文件头（<see cref="SongProjectFile.TryReadProjectHeader"/>），
-/// 「改过 / 没动过」那格小字就写在文件头里。删除前那句「真要删？」也留在这儿 ——
-/// 居中要有 <see cref="Window"/> 才好问，而窗口是这一层拿得到的东西（<c>TopLevel.GetTopLevel</c>）。
+/// <see cref="AddRow"/> 为每一行读一次**缓存的文件头**（<c>songs\.work\&lt;名字&gt;.mproj</c>，
+/// 见 <c>SongLibrary.WorkPathOf</c>），第二格那句小字就写在缓存里（判据见 <see cref="MarkFor"/>）。
+/// ⚠️ **读缓存，不读 <c>.mid</c>** —— 曲库成员是二进制，拿 JSON 解析它永远失败。
+/// 删除前那句「真要删？」也留在这儿 —— 居中要有 <see cref="Window"/> 才好问，
+/// 而窗口是这一层拿得到的东西（<c>TopLevel.GetTopLevel</c>）。
 ///
-/// 列表的每一行是代码摆的（曲名 + 改过没改过 + 删除），房子在 .axaml，家具在这儿。
-/// 那格小字不写时长：时长要把整份工程读出来算，而「改过没改过」只要读文件头。
+/// 列表的每一行是代码摆的（曲名 + 第二格标记 + 删除），房子在 .axaml，家具在这儿。
+/// 那格小字不写时长：时长要把整份工程读出来算，而那个标记只要读缓存的文件头。
 /// </summary>
 public sealed partial class SongLibraryPanel : UserControl
 {
@@ -201,18 +203,24 @@ public sealed partial class SongLibraryPanel : UserControl
         // 点它和点这一行别处完全一样，ToolTip 说的是「这一格装的是什么」。
         ToolTip.SetTip(nameText, name);
 
-        // 只读文件头，不读谱面。读不出来的（坏工程、版本比本程序新）返回 null 而不是抛 ——
-        // 一首读不出来不能让整个列表消失。
-        ProjectHeader? header = SongProjectFile.TryReadProjectHeader(_library!.PathOf(name));
-        var metaText = new TextBlock { Text = Meta(header), Classes = { "song-meta" } };
-        if (header is null) metaText.Classes.Add("bad");
+        // 第二格读的是**缓存**（songs\.work\<名字>.mproj）的文件头，**不是 .mid** ——
+        // .mid 是二进制，拿 JSON 去解析它永远失败，标记会恒为空。两件事都要问：
+        // ① 缓存路径在不在（HasWork）—— 分得开「根本没存过盘」和「缓存坏了」的只有它；
+        // ② 读得出来吗 —— 读文件头而不读谱面，是为了不为一格小字把整首曲子装出来。
+        // 读不出来的（坏缓存、版本比本程序新）返回 null 而不是抛：一首读不出来不能让整个列表消失。
+        bool hasCache = _library!.HasWork(name);
+        ProjectHeader? header = hasCache ? SongProjectFile.TryReadProjectHeader(_library.WorkPathOf(name)) : null;
+        var mark = MarkFor(hasCache, header);
+
+        var metaText = new TextBlock { Text = mark.Text, Classes = { "song-meta" } };
+        if (mark.Bad) metaText.Classes.Add("bad");
 
         // danger 是 Controls.axaml 里现成的「危险：删轨 / 删曲子」：悬停变 warn 色
         var delete = new Button { Content = "×", Classes = { "row-action", "del", "danger" }, Tag = name };
         delete.Click += OnDeleteClickAsync;
         ToolTip.SetTip(delete, "把这首从曲库里删掉");
 
-        // 三格：名字（占满剩下的宽度）、改过没改过、删除。行动作只剩删除这一颗。
+        // 三格：名字（占满剩下的宽度）、第二格标记、删除。行动作只剩删除这一颗。
         var grid = new Grid
         {
             ColumnDefinitions = ColumnDefinitions.Parse("*,Auto,Auto"),
@@ -232,13 +240,69 @@ public sealed partial class SongLibraryPanel : UserControl
         SongList.Items.Add(item);
     }
 
-    /// <summary>行右边那格小字：这份工程改过没有。</summary>
-    private static string Meta(ProjectHeader? header) => header switch
+    /// <summary>缓存读不出来时那一格说的话（红的那一格，唯一一格）。</summary>
+    public const string UnreadableMark = "读不出来";
+
+    /// <summary>缓存里 <see cref="ProjectHeader.Edited"/> 是 <c>true</c> 时那句话的前半句。</summary>
+    public const string EditedMark = "编辑过";
+
+    /// <summary>缓存里至少有一条能弹的轨。</summary>
+    public const string PlayableMark = "可播放";
+
+    /// <summary>缓存里一条能弹的轨都没有。</summary>
+    public const string UnplayableMark = "不可播放";
+
+    /// <summary>「编辑过」和「可播放 / 不可播放」中间那个隔断。</summary>
+    private const string MarkSeparator = " · ";
+
+    /// <summary>
+    /// 行右边那格小字 —— **先过一道闸，再查一张真值表**。
+    ///
+    /// **闸：有没有缓存。** 缓存 = <c>songs\.work\&lt;名字&gt;.mproj</c>，本程序自己存的那一份。
+    /// <list type="bullet">
+    /// <item><b>不存在</b> → <see cref="string.Empty"/>，那一格**什么都不显示**。
+    /// 这正是「**从别处手拷进来的 `.mid` 不带标记**」那条规则的实现：本程序没给它存过盘，就是一首它不认识的歌。
+    /// **显示「没动过」是错的** —— 那三个字等于宣称程序认识它。</item>
+    /// <item><b>读不出来</b>（截断 / JSON 坏了 / 版本不对）→ 「读不出来」+ <see cref="RowMark.Bad"/>。
+    /// 这一格才是**出错**：文件在那儿，本程序读不懂它。</item>
+    /// <item>读得出来 → 往下查真值表。</item>
+    /// </list>
+    ///
+    /// ⚠️ **「根本没有缓存」和「缓存坏了」是两件事**，而 <see cref="SongProjectFile.TryReadProjectHeader"/>
+    /// 对两者一样返回 <c>null</c> —— 所以 <paramref name="hasCache"/> **不能省**（省了就有缓存那一格全废，
+    /// 每一首没存过盘的散装 `.mid` 都会显示「读不出来」）。问它的是 <c>SongLibrary.HasWork</c>。
+    ///
+    /// **真值表：缓存里那两个事实互相独立**，拼成一句话。
+    /// <list type="bullet">
+    /// <item><c>Edited</c> =「**上次存盘那一刻**，它跟打开时不一样」。也就是
+    /// <c>MainWindow._edited</c> 那个**粘性**标记（存盘不清它，清它的只有 <c>LoadSong</c>），
+    /// 由 <c>SongCache.HeaderFor</c> 写进缓存。⚠️ 它跟工具栏那格「保存」高亮用的 <c>_dirty</c>
+    /// （=「**现在这个窗口里的东西**动过没有」）**不是一回事**，列表上显示的是前者。</item>
+    /// <item><c>PlayableTrackCount</c> =「上次保存时算的能弹轨数」。**只读这一个数字，不现算** ——
+    /// 算它要把每条轨的音符全走一遍（<c>PlayableTracks.Of</c>），二十首就是二十趟全曲扫描。</item>
+    /// </list>
+    /// **两个事实为什么真的独立**：缓存的存在只说明「本程序给它存过盘」；<c>Edited</c> 说明
+    /// 「存盘那一刻，它跟打开时不一样」。缓存虽然总是跟着保存写，但**存盘 ≠ 改过** ——
+    /// 打开一首手拷进来的 `.mid`、什么都没动、顺手按一下 Ctrl+S，缓存就有了而 <c>Edited</c> 还是
+    /// <c>false</c>。（<c>ImportedFrom</c> **不参与**任何判据：拿它当判据，程序导入和手动拷贝会长得一模一样。）
+    ///
+    /// **「不可播放」不是警告色**：弹不了不是错误，是事实（比如音域超出那 38 格）。
+    /// <see cref="RowMark.Bad"/> 只留给「读不出来」。
+    /// </summary>
+    /// <param name="hasCache">这一首有缓存吗（<c>SongLibrary.HasWork</c>）。</param>
+    /// <param name="header">缓存的文件头；<c>null</c> = 没有 / 读不出来。**光看它是 null 分不出这两种**。</param>
+    public static RowMark MarkFor(bool hasCache, ProjectHeader? header)
     {
-        null => "读不出来",
-        { Edited: true } => "改过",
-        _ => "没动过",
-    };
+        // 闸①：本程序没给它存过盘（手拷进来的 .mid 就是这样）—— 什么都不说才是实话
+        if (!hasCache) return new RowMark("", Bad: false);
+
+        // 闸②：有缓存、但读不出来 —— 这一格才是出错
+        if (header is null) return new RowMark(UnreadableMark, Bad: true);
+
+        // 闸过了：两个互相独立的事实拼一句话
+        string playable = header.PlayableTrackCount > 0 ? PlayableMark : UnplayableMark;
+        return new RowMark(header.Edited ? EditedMark + MarkSeparator + playable : playable, Bad: false);
+    }
 
     /// <summary>「N 首」这句汇总读数。</summary>
     private static string Count(int count) => $"{count} 首";
@@ -296,3 +360,8 @@ public sealed partial class SongLibraryPanel : UserControl
         if (confirmed) DeleteRequested?.Invoke(this, name);
     }
 }
+
+/// <summary>曲库列表第二格要显示的东西：一句话，外加「该不该用 <c>bad</c> 色」。</summary>
+/// <param name="Text">显示什么。<see cref="string.Empty"/> = 这一格什么都不显示。</param>
+/// <param name="Bad">该不该用 <c>bad</c> 色。只有「读不出来」是 <c>true</c>。</param>
+public readonly record struct RowMark(string Text, bool Bad);
