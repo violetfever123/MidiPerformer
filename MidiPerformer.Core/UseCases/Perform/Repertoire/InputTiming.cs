@@ -39,27 +39,14 @@ public sealed record InputTiming
     /// <summary>标准档：60fps 默认。</summary>
     public static InputTiming Standard => new();
 
-    /// <summary>极限档：高帧率、跟极快的歌时用，时间余量最小。</summary>
-    public static InputTiming Aggressive => new()
-    {
-        Name = "极限",
-        FrameMs = 8.0,
-        ModLeadMs = 20,
-        RetriggerMs = 22,
-        MinHoldMs = 22,
-        ReleaseGapMs = 18,
-        LeadMs = 28          // ≥ 20 + 8
-    };
-
     /// <summary>按界面下拉框序号取档位。</summary>
     public static InputTiming FromIndex(int index) => index switch
     {
         0 => Safe,
-        2 => Aggressive,
         _ => Standard
     };
 
-    public static string[] Names => new[] { "稳健（30fps / 卡顿）", "标准（60fps 推荐）", "极限（高帧率）" };
+    public static string[] Names => new[] { "稳健（30fps / 卡顿）", "标准（60fps 推荐）" };
 }
 
 /// <summary>输入时序诊断：统计音符按下时的修饰键提前量、同键重触发间隔与按住时长。</summary>

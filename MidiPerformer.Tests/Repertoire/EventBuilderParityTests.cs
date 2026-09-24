@@ -124,7 +124,7 @@ public class EventBuilderParityTests
     [TestCaseSource(nameof(RandomCorpus))]
     public void 随机语料_两边事件表逐条相等(NoteSpec[] specs) => AssertParity(specs);
 
-    /// <summary>三档 InputTiming 各跑一遍（稳健 / 标准 / 极限）。</summary>
+    /// <summary>两档 InputTiming 各跑一遍（稳健 / 标准）。</summary>
     private static void AssertParity(IReadOnlyList<NoteSpec> specs)
     {
         foreach (var (name, originalTiming, portedTiming) in Timings())
@@ -146,7 +146,8 @@ public class EventBuilderParityTests
     {
         yield return ("稳健", Original.InputTiming.Safe, Ported.InputTiming.Safe);
         yield return ("标准", Original.InputTiming.Standard, Ported.InputTiming.Standard);
-        yield return ("极限", Original.InputTiming.Aggressive, Ported.InputTiming.Aggressive);
+        // 原版还有第三档「极限」，界面把它收掉了（47 号，依据 docs/spec-界面改版.md 的「演奏器 —— 行级决定」），
+        // 所以那一档没有能跟原版配对的移植档 —— 这一行没了，不是漏了。
     }
 
     /// <summary>原版：跑原版工程本体导出的公开测试入口。</summary>

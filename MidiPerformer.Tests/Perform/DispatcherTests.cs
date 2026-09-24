@@ -63,11 +63,10 @@ public class DispatcherTests
     }
 
     /// <summary>
-    /// 三档时序各跑一遍，每一档落在它自己那个 LeadMs 算出的目标上（拦「换了档却还留着另一个数」）。
+    /// 两档时序各跑一遍，每一档落在它自己那个 LeadMs 算出的目标上（拦「换了档却还留着另一个数」）。
     /// </summary>
     [TestCase(0.104)]   // 稳健
     [TestCase(0.057)]   // 标准
-    [TestCase(0.028)]   // 极限
     public void 提前量来自所选档位(double leadSeconds)
     {
         var (clock, sink, walker) = 开工();
@@ -231,9 +230,9 @@ public class DispatcherTests
         return list;
     }
 
-    /// <summary>按提前量反查档位，免得测试自己写第二套档位定义。</summary>
+    /// <summary>按提前量反查档位，免得测试自己写第二套档位定义（第三档「极限」已随 47 号收掉）。</summary>
     private static InputTiming 档位(double leadSeconds) =>
-        new[] { InputTiming.Safe, InputTiming.Standard, InputTiming.Aggressive }
+        new[] { InputTiming.Safe, InputTiming.Standard }
             .Single(t => Math.Abs(t.LeadMs / 1000.0 - leadSeconds) < 1e-9);
 
     /// <summary>轮询等待一个条件成立。只用于等后台线程做事，等不到就判失败。</summary>

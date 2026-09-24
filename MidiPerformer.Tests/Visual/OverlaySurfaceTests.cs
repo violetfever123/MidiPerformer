@@ -173,4 +173,108 @@ public class OverlaySurfaceTests
         Assert.That(属性(button!, "Click"), Is.Not.Null.And.Not.Empty,
             "按钮挂在那儿但没接命令：按下去什么都不发生，也不报错");
     }
+
+    // ==================== 演奏器窗口的行 ====================
+
+    private static XElement 演奏器() =>
+        XDocument.Load(Path.Combine(AppDir, "Views", "PerformerWindow.axaml")).Root!;
+
+    /// <summary>窗口里所有写明了名字的控件（<c>x:Name</c>）。</summary>
+    private static List<string> 控件名(XElement 窗) =>
+        窗.Descendants().Select(名字).Where(n => !string.IsNullOrEmpty(n)).Select(n => n!).ToList();
+
+    /// <summary>窗口上画出来的字：TextBlock / Run 的 Text、Button 的 Content、ComboBox 的占位。</summary>
+    private static List<string> 控件字(XElement 窗) =>
+        窗.Descendants()
+            .Select(e => e.Attribute("Text")?.Value
+                      ?? e.Attribute("Content")?.Value
+                      ?? e.Attribute("PlaceholderText")?.Value)
+            .Where(t => !string.IsNullOrEmpty(t)).Select(t => t!).ToList();
+
+    /// <summary>窗口上按钮的字（<c>Content</c>）。占位文字不算 —— 「先打开一首 MIDI」是下拉框的占位，不是一颗按钮。</summary>
+    private static List<string> 按钮字(XElement 窗) =>
+        窗.Descendants().Where(e => e.Name.LocalName == "Button")
+            .Select(e => e.Attribute("Content")?.Value)
+            .Where(t => !string.IsNullOrEmpty(t)).Select(t => t!).ToList();
+
+    /// <summary>
+    /// 47 号：演奏器窗口上不再有「曲目」行、不再有「基准八度」行 —— 连它们留下的控件一起。
+    /// 曲子由曲库窗口决定（<c>docs/spec-界面改版.md</c> 的「演奏器 —— 行级决定」），
+    /// 基准八度永远自动。
+    ///
+    /// 文本级守卫：证明的是「文件里没有这些东西」。窗口真打开时什么样归实机（47 的验收记录里那条）。
+    /// 拦的是「哪天有人把这一行抄回来」—— 多一行不报错，只是用户又得在两个地方挑曲子、挑八度。
+    /// </summary>
+    [Test]
+    public void 演奏器上没有曲目行也没有基准八度行()
+    {
+        var 名 = 控件名(演奏器());
+        var 字 = 控件字(演奏器());
+        var 钮 = 按钮字(演奏器());
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(名, Has.None.EqualTo("SongValue"), "「曲目」行那块读数还在");
+            Assert.That(名, Has.None.EqualTo("OpenButton"), "「打开 MIDI…」那颗按钮还在");
+            Assert.That(名, Has.None.EqualTo("BaseOctaveCombo"), "「基准八度」那个下拉还在");
+            Assert.That(字, Has.None.EqualTo("曲目"), "「曲目」这个标签还在");
+            Assert.That(字, Has.None.EqualTo("基准八度"), "「基准八度」这个标签还在");
+            Assert.That(钮.Any(t => t.Contains("打开 MIDI")), Is.False,
+                "还留着一颗写着「打开 MIDI…」的按钮 —— 那是「曲目」行的入口");
+        });
+    }
+
+    /// <summary>
+    /// 47 号：三个下拉都还在，而且打开窗口时后两个停在「标准」和「5 秒」。
+    /// 选中项写在 XAML 的 <c>SelectedIndex</c> 上（构造器里又设了一遍，两处对得上）。
+    ///
+    /// 证明的是「文件里写的是 1」；窗口真打开时显示的是哪一档归实机。
+    /// 演奏轨的选中项**不写死**：默认第一条能弹的轨是曲子接进来之后由代码挑的。
+    /// </summary>
+    [Test]
+    public void 演奏器打开时停在标准档和五秒()
+    {
+        var 下拉 = 演奏器().Descendants().Where(e => e.Name.LocalName == "ComboBox").ToList();
+        var 时序 = 下拉.SingleOrDefault(e => 名字(e) == "TimingCombo");
+        var 倒计 = 下拉.SingleOrDefault(e => 名字(e) == "CountdownCombo");
+
+        // 找不到时给一句看得懂的话，别让它变成 NullReference
+        static string 选中项(XElement? e) => e is null ? "★没有这个下拉" : 属性(e, "SelectedIndex") ?? "★没写 SelectedIndex";
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(下拉.Select(名字), Does.Contain("TrackCombo"), "「演奏轨」那个下拉没了");
+            Assert.That(下拉.Select(名字), Does.Contain("TimingCombo"), "「时序」那个下拉没了");
+            Assert.That(下拉.Select(名字), Does.Contain("CountdownCombo"), "「倒计时」那个下拉没了");
+            Assert.That(选中项(时序), Is.EqualTo("1"), "时序默认该停在第 1 项 = 标准档");
+            Assert.That(选中项(倒计), Is.EqualTo("1"), "倒计时默认该停在第 1 项 = 5 秒");
+        });
+
+        Assert.That(读源文件("PerformerWindow.axaml.cs"), Does.Contain("\"3 秒\", \"5 秒\", \"10 秒\""),
+            "倒计时的三个选项被改过了 —— 47 只拨默认项，不动选项本身");
+    }
+
+    /// <summary>
+    /// 47 号定的行序（也是 48–51 往哪儿插东西）：演奏轨在最上面，时序与倒计时成对压在按钮上面。
+    /// 只钉这几者**前后**的关系，中间插进来什么（按键速度 / 微调 / 38 根细条）都不影响它。
+    /// </summary>
+    [Test]
+    public void 演奏器的行序是演奏轨在上时序倒计时压着按钮()
+    {
+        var 顺序 = 演奏器().Descendants().ToList();
+        int 位(string 名) => 顺序.FindIndex(e => 名字(e) == 名);
+
+        int 轨 = 位("TrackCombo"), 时 = 位("TimingCombo"), 倒 = 位("CountdownCombo");
+        int 始 = 位("StartButton"), 停 = 位("StopButton");
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(new[] { 轨, 时, 倒, 始, 停 }, Has.None.EqualTo(-1),
+                "有几个控件根本找不到，下面的顺序就无从谈起");
+            Assert.That(轨, Is.LessThan(时), "演奏轨该在最上面（下面那几块读数都跟着它变）");
+            Assert.That(时, Is.LessThan(倒), "倒计时该跟在时序下面");
+            Assert.That(倒, Is.LessThan(始), "时序与倒计时成对，一起压在按钮上面");
+            Assert.That(始, Is.LessThan(停), "开始演奏在急停上面");
+        });
+    }
 }

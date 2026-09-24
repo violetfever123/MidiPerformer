@@ -168,13 +168,6 @@
 
   <StackPanel Margin="14" Spacing="11">
 
-    <!-- ============ 曲目 ============ -->
-    <Grid ColumnDefinitions="74,*,Auto" ColumnSpacing="10">
-      <TextBlock Grid.Column="0" Classes="row-label" Text="曲目" />
-      <TextBlock Grid.Column="1" Classes="row-value" x:Name="SongValue" Text="还没有选曲子" />
-      <Button Grid.Column="2" x:Name="OpenButton" Content="打开 MIDI…" Click="OnOpenMidi" />
-    </Grid>
-
     <!-- ============ 演奏轨 ============ -->
     <Grid ColumnDefinitions="74,*" ColumnSpacing="10">
       <TextBlock Grid.Column="0" Classes="row-label" Text="演奏轨" />
@@ -212,22 +205,10 @@
     <TextBlock Classes="hint" x:Name="TimingHint"
                Text="游戏按键按帧采样，间隔给不够会漏音。不确定就用标准档。" />
 
-    <!-- ============ 基准八度 ============ -->
-    <!--
-      口琴只有三个八度（基准八度、上下各一个，外加最高两个音）。基准选错，超出去的音会被
-      整段跳过（卷帘上标灰），所以「自动」是按音域选的那个。
-    -->
-    <Grid ColumnDefinitions="74,*" ColumnSpacing="10">
-      <TextBlock Grid.Column="0" Classes="row-label" Text="基准八度" />
-      <ComboBox Grid.Column="1" x:Name="BaseOctaveCombo" HorizontalAlignment="Stretch" SelectedIndex="0" />
-    </Grid>
-    <TextBlock Classes="hint" x:Name="BaseOctaveHint"
-               Text="自动 = 让可演奏区容下最多音符；手动指定就按你选的那个八度算。" />
-
     <!-- ============ 倒计时 ============ -->
     <Grid ColumnDefinitions="74,*" ColumnSpacing="10">
       <TextBlock Grid.Column="0" Classes="row-label" Text="倒计时" />
-      <ComboBox Grid.Column="1" x:Name="CountdownCombo" HorizontalAlignment="Stretch" SelectedIndex="0" />
+      <ComboBox Grid.Column="1" x:Name="CountdownCombo" HorizontalAlignment="Stretch" SelectedIndex="1" />
     </Grid>
     <TextBlock Classes="hint" x:Name="CountdownHint"
                Text="按下开始之后用它切到游戏窗口。倒计时结束才发第一个音，期间按 F6 取消。" />

@@ -33,9 +33,9 @@ internal static class PerformerSelfTest
         "Melanchall.DryWetMidi",
     };
 
-    /// <summary>三档时序各跑一遍；标准档是用例自己那条断言的档位，另两档只过不变量。</summary>
+    /// <summary>两档时序各跑一遍；标准档是用例自己那条断言的档位，稳健档只过不变量。</summary>
     private static readonly InputTiming[] Timings =
-        { InputTiming.Safe, InputTiming.Standard, InputTiming.Aggressive };
+        { InputTiming.Safe, InputTiming.Standard };
 
     private static readonly List<string> Lines = new();
     private static int _failed;
@@ -83,7 +83,7 @@ internal static class PerformerSelfTest
         Lines.Add($"演奏器内置自检 {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
         Lines.Add($"进程：{Environment.ProcessPath}");
         Lines.Add($"运行时：{Environment.Version}；单文件发布：{(IsSingleFile() ? "是" : "否（开发构建）")}");
-        Lines.Add($"语料：{Cases().Count} 个手写用例；时序档位：{string.Join(" / ", Timings.Select(t => t.Name))}（不变量三档各跑一遍）");
+        Lines.Add($"语料：{Cases().Count} 个手写用例；时序档位：{string.Join(" / ", Timings.Select(t => t.Name))}（不变量两档各跑一遍）");
         Lines.Add("");
 
         try

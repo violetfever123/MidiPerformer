@@ -1,6 +1,5 @@
 using Avalonia.Controls;
 using Avalonia.Interactivity;
-using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using MidiPerformer.Adapters.Gateways;
 using MidiPerformer.Adapters.Presenters;
@@ -10,18 +9,19 @@ using MidiPerformer.Core.Ports.Outbound;
 using MidiPerformer.Core.UseCases.Analysis;
 using MidiPerformer.Core.UseCases.Perform;
 using MidiPerformer.Core.UseCases.Perform.Repertoire;
-using MidiPerformer.Core.UseCases.Project;
 
 namespace MidiPerformer.App.Views;
 
 /// <summary>
-/// 演奏器窗口 —— 打开 MIDI → 选轨与档位 → 开始 / 急停，演奏期间另有一块悬浮层。
-/// 这是唯一碰外部世界的地方（窗口、文件选择器、真时钟、真键鼠网关），中间全是 Core 的纯逻辑，
+/// 演奏器窗口 —— 选轨与档位 → 开始 / 急停，演奏期间另有一块悬浮层。
+/// 这是唯一碰外部世界的地方（窗口、真时钟、真键鼠网关），中间全是 Core 的纯逻辑，
 /// 所以这里只有编排、没有算法：音符映射、事件表、发送时机、超时、倒计时都在 <c>Core/UseCases/Perform</c>。
 /// 按下开始后，预检要的两个事实（是不是管理员、输入法是不是中文）从这里问网关取，
 /// 然后整条链交给 <see cref="StartPerformance"/>；窗口只把结论翻成中文提示，并按 100ms 把进度画到悬浮层。
 /// 下拉框里列的是「能弹的轨」而不是所有轨（口琴同时只能响一个音），判定
-/// （<see cref="PlayableTracks"/>）全在 Core 里，顺序就是原曲下标顺序 —— 界面不判、不算、也不排。
+/// （<c>PlayableTracks</c>）全在 Core 里，顺序就是原曲下标顺序 —— 界面不判、不算、也不排。
+/// 曲子不由这个窗口挑：它只管弹手上这首，「曲目」行连同那颗文件选择器已经按界面改版删掉了
+/// （见 docs/spec-界面改版.md 的「演奏器 —— 行级决定」），曲子由外面经 <see cref="LoadSong"/> 递进来。
 /// </summary>
 public partial class PerformerWindow : Window
 {
@@ -38,15 +38,7 @@ public partial class PerformerWindow : Window
         Running
     }
 
-    /// <summary>基准八度下拉框：第 0 项是自动，其余按 MIDI 八度编号（C4 = 第 4 八度）。</summary>
-    private static readonly string[] BaseOctaveNames =
-    {
-        "自动（按音域选）",
-        "第 2 八度 C2", "第 3 八度 C3", "第 4 八度 C4",
-        "第 5 八度 C5", "第 6 八度 C6", "第 7 八度 C7"
-    };
-
-    /// <summary>倒计时档位（秒），第一项是默认。</summary>
+    /// <summary>倒计时档位（秒）。默认选中哪一项见构造器里的 <c>SelectedIndex</c>。</summary>
     private static readonly double[] CountdownOptions = { 3, 5, 10 };
 
     private static readonly string[] CountdownNames = { "3 秒", "5 秒", "10 秒" };
@@ -95,10 +87,8 @@ public partial class PerformerWindow : Window
 
         TimingCombo.ItemsSource = InputTiming.Names;
         TimingCombo.SelectedIndex = 1;              // 标准档（InputTiming.FromIndex(1)）
-        BaseOctaveCombo.ItemsSource = BaseOctaveNames;
-        BaseOctaveCombo.SelectedIndex = 0;          // 自动
         CountdownCombo.ItemsSource = CountdownNames;
-        CountdownCombo.SelectedIndex = 0;           // 3 秒
+        CountdownCombo.SelectedIndex = 1;           // 5 秒
         TrackCombo.SelectionChanged += (_, _) => ShowReady();
         _hotkeys.Panic += OnPanicHotkey;
 
@@ -143,80 +133,52 @@ public partial class PerformerWindow : Window
         base.OnClosed(e);
     }
 
-    // ==================== 曲目 ====================
+    // ==================== 曲子 ====================
 
-    private async void OnOpenMidi(object? sender, RoutedEventArgs e)
+    /// <summary>
+    /// 把一首曲子接进这个窗口：挑出能弹的轨、列进下拉框、默认选第一条。
+    /// 曲子从哪儿来不归这个窗口管 —— 「曲目」行连同那颗文件选择器已经按界面改版删掉了
+    /// （见 docs/spec-界面改版.md 的「演奏器 —— 行级决定」：曲子由曲库窗口决定，演奏器只弹现在这首），
+    /// 由外面把读好的 <see cref="Song"/> 递进来。
+    /// </summary>
+    /// <remarks>
+    /// 挑轨（有音 + 单声部 + 非打击乐）与排序都在 Core 的 <c>PlayableTracks</c> 里，
+    /// 这里只把结果摆到界面上：界面不判、不算、也不排。
+    /// </remarks>
+    public async Task LoadSong(Song song)
     {
-        // net8.0 没有 WinForms，只能用 Avalonia 自己的 StorageProvider
-        if (TopLevel.GetTopLevel(this) is not { } top) return;
+        // 挑轨要把每条轨的音符全走一遍判单声部，长曲子几十到几百毫秒，留在界面线程上会卡，
+        // 所以丢线程池；await 回来还在原来的线程上（界面线程调的就还是界面线程）。
+        var playable = await Task.Run(() => PlayableTracks.Of(song));
 
-        var files = await top.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
-        {
-            Title = "打开 MIDI 文件",
-            AllowMultiple = false,
-            FileTypeFilter = new[]
-            {
-                new FilePickerFileType("MIDI 文件") { Patterns = new[] { "*.mid", "*.midi", "*.rmi" } }
-            }
-        });
+        _song = song;
 
-        if (files.Count == 0) return;
-        if (files[0].TryGetLocalPath() is not { } path)
+        // 能弹的轨已经挑好，按原曲下标升序；界面后面只用 _playable，不再回头问 song
+        _playable.Clear();
+        _playable.AddRange(playable);
+
+        TrackHint.Text = $"只列出单声部轨 · {song.Tracks.Count} 条轨里 {_playable.Count} 条可演奏";
+
+        bool any = _playable.Count > 0;
+        // 空状态那块说明顶掉提示行，两行说的是同一件事
+        EmptyBox.IsVisible = !any;
+        TrackHint.IsVisible = any;
+        TrackCombo.IsEnabled = any;
+        StartButton.IsEnabled = any;
+
+        // 先设列表再设选中项：SelectionChanged 会读 _playable
+        TrackCombo.ItemsSource = any ? _playable.Select(Describe).ToList() : null;
+        if (any)
         {
-            SetStatus("这个文件读不到本地路径（是不是在网盘或压缩包里？）", Status.Idle);
-            return;
+            TrackCombo.PlaceholderText = "选一条轨";   // 占位只在没选中项时露头，但别留着上一轮那句
+            TrackCombo.SelectedIndex = 0;          // 默认第一条能弹的轨
+            ShowReady();
         }
-
-        try
+        else
         {
-            // 读盘 + 解析 + 挑轨全放线程池：PlayableTracks.Of 要把每条轨的音符全走一遍判单声部，
-            // 长曲子几十到几百毫秒，留在界面线程上照样卡。回来的是纯 Core 的 Track 记录。
-            var (song, playable) = await Task.Run(() =>
-            {
-                var read = MidiReader.Read(path);
-                return (read, PlayableTracks.Of(read));
-            });
-
-            _song = song;
-
-            // 能弹的轨（有音 + 单声部 + 非打击乐）已经在上面挑好，按原曲下标升序；
-            // 界面后面只用 _playable，不再回头问 song
-            _playable.Clear();
-            _playable.AddRange(playable);
-
-            SongValue.Text = Path.GetFileNameWithoutExtension(path);
-            TrackHint.Text = $"只列出单声部轨 · {song.Tracks.Count} 条轨里 {_playable.Count} 条可演奏";
-
-            bool any = _playable.Count > 0;
-            // 空状态那块说明顶掉提示行，两行说的是同一件事
-            EmptyBox.IsVisible = !any;
-            TrackHint.IsVisible = any;
-            TrackCombo.IsEnabled = any;
-            StartButton.IsEnabled = any;
-
-            // 先设列表再设选中项：SelectionChanged 会读 _playable
-            TrackCombo.ItemsSource = any ? _playable.Select(Describe).ToList() : null;
-            if (any)
-            {
-                TrackCombo.PlaceholderText = "选一条轨";   // 占位只在没选中项时露头，但别留着上一轮那句
-                TrackCombo.SelectedIndex = 0;          // 默认第一条能弹的轨
-                ShowReady();
-            }
-            else
-            {
-                TrackCombo.PlaceholderText = "— 无可演奏的轨 —";
-                TrackCombo.SelectedIndex = -1;
-                SetStatus($"就绪 · {song.Tracks.Count} 条轨里一条都弹不了，去编辑器里处理一下", Status.Idle);
-            }
-        }
-        catch (Exception ex)
-        {
-            // 畸形 MIDI 抛的是 InvalidDataException（消息是给人看的中文），读盘还可能抛 IO 异常，
-            // 这里一律收住：打不开一个文件不该让程序躺下
-            _song = null;
-            ClearTrackChoices();
-            SongValue.Text = "还没有选曲子";
-            SetStatus($"这个文件打不开：{ex.Message}", Status.Idle);
+            TrackCombo.PlaceholderText = "— 无可演奏的轨 —";
+            TrackCombo.SelectedIndex = -1;
+            SetStatus($"就绪 · {song.Tracks.Count} 条轨里一条都弹不了，去编辑器里处理一下", Status.Idle);
         }
     }
 
@@ -227,23 +189,6 @@ public partial class PerformerWindow : Window
     /// </remarks>
     private static string Describe(PlayableTrack r)
         => $"{r.SongTrackIndex + 1:D2} {r.Track.Name} · {r.Track.NoteCount} 个音";
-
-    /// <summary>
-    /// 把轨的下拉框收回「还没选曲子」的样子。上一首曲子的轨不能留在框里，
-    /// 否则按钮点下去弹的会是上一首的歌。
-    /// </summary>
-    private void ClearTrackChoices()
-    {
-        _playable.Clear();
-        TrackCombo.ItemsSource = null;
-        TrackCombo.SelectedIndex = -1;
-        TrackCombo.PlaceholderText = "先打开一首 MIDI";
-        TrackCombo.IsEnabled = false;
-        TrackHint.Text = "只列出单声部轨。";
-        TrackHint.IsVisible = true;
-        EmptyBox.IsVisible = false;
-        StartButton.IsEnabled = false;
-    }
 
     // ==================== 开始 / 急停 ====================
 
@@ -260,7 +205,9 @@ public partial class PerformerWindow : Window
         var request = new StartPerformanceRequest(
             song,
             _playable[index].SongTrackIndex,
-            SelectedBaseOctave(),
+            // 基准八度永远自动（null）：按音域挑那个能容下最多音符的八度。人工选八度是程序算得比人准的事，
+            // 「基准八度」那一行连同它的下拉框已经按界面改版删掉了。
+            BaseOctave: null,
             InputTiming.FromIndex(TimingCombo.SelectedIndex),
             CountdownOptions[Math.Clamp(CountdownCombo.SelectedIndex, 0, CountdownOptions.Length - 1)]);
 
@@ -382,13 +329,6 @@ public partial class PerformerWindow : Window
             SetStatus($"演奏中 · {_currentNote}", Status.Running);
     }
 
-    /// <summary>基准八度：第 0 项是「自动」（null），其余按下拉框里的 C2…C7 折算成 MIDI 八度编号。</summary>
-    private int? SelectedBaseOctave()
-    {
-        int index = BaseOctaveCombo.SelectedIndex;
-        return index <= 0 ? null : index + 1;
-    }
-
     /// <summary>
     /// 拉起悬浮层（已经开着就只把它显出来）。上一场结束后它会自己收起来，所以每次「开始」
     /// 都得重新显示，不然后面那些 <c>Show*</c> 全打在一块看不见的窗口上。
@@ -406,10 +346,8 @@ public partial class PerformerWindow : Window
         // 「有没有能弹的轨」只有一个判据：_playable 空不空
         StartButton.IsEnabled = !running && _playable.Count > 0;
         StopButton.IsEnabled = running;
-        OpenButton.IsEnabled = !running;
         TrackCombo.IsEnabled = !running && _playable.Count > 0;
         TimingCombo.IsEnabled = !running;
-        BaseOctaveCombo.IsEnabled = !running;
         CountdownCombo.IsEnabled = !running;
     }
 

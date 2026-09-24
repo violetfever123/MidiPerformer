@@ -6,7 +6,8 @@ namespace MidiPerformer.Tests.Repertoire;
 /// <summary>
 /// 移植的逐行保真度检查：把 <c>Core/UseCases/Perform/Repertoire/</c> 里的文件与原版源码文本比。
 /// 判据是子序列 —— 我们的每一行代码（剥掉文档注释、命名空间、using）都必须按原顺序出现在原版文件里；
-/// 整文件复制的那两个文件额外查行数相等（删行在那里会被抓住）。对拍管行为等价，这里管文本一致。
+/// 整文件复制的那两个文件额外查行数相等（删行在那里会被抓住；**有意**删的登记在
+/// <see cref="DeliberatelyRemovedLines"/> 里，一条条写明依据）。对拍管行为等价，这里管文本一致。
 /// </summary>
 public class PortFidelityTests
 {
@@ -27,6 +28,18 @@ public class PortFidelityTests
     private static readonly string[] OurOwnLines =
     {
         "public sealed class EventBuilder",
+    };
+
+    /// <summary>
+    /// 整文件复制的文件里**有意**删掉的行数（文件名 → 行数）：原版有、我们没搬。
+    /// 每一条的依据都写在 <see cref="Normalize"/> 下面那段注释里，实现它的票号也写在那儿。
+    /// 除这张表登记的数之外，行数必须分毫不差 —— 多一行少一行都是动了移植文件。
+    /// </summary>
+    private static readonly Dictionary<string, int> DeliberatelyRemovedLines = new()
+    {
+        // 47：界面上的「时序」收成两档，第三档「极限」整个删掉（Aggressive 一档 10 行
+        // + FromIndex 里那条 `2 => Aggressive,` 1 行），见下面那段注释
+        ["InputTiming.cs"] = 11,
     };
 
     public static IEnumerable<TestCaseData> PortedFiles()
@@ -65,8 +78,11 @@ public class PortFidelityTests
 
         if (isWholeFileCopy)
         {
-            Assert.That(ourLines.Count, Is.EqualTo(originalLines.Count),
-                $"{ourFileName}：整文件复制，行数必须一致（少了说明有行被删）");
+            // 有意删的行按文件名登记在 DeliberatelyRemovedLines 里；没登记的一行都不能少
+            int removed = DeliberatelyRemovedLines.GetValueOrDefault(ourFileName);
+            Assert.That(ourLines.Count + removed, Is.EqualTo(originalLines.Count),
+                $"{ourFileName}：整文件复制，行数必须一致（少了说明有行被删；"
+                + "有意删的要登记进 DeliberatelyRemovedLines 并写明依据）");
         }
     }
 
@@ -103,7 +119,15 @@ public class PortFidelityTests
         .Replace("public static readonly char[] Keys = PlayKeys.Keys;",
                  "public static readonly char[] Keys = { 'Z', 'X', 'C', 'V', 'B', 'N', 'M' };")
         .Replace("public const char TopKey = PlayKeys.TopKey;",
-                 "public const char TopKey = ',';");
-    // 原版 BuildSchedule 里的 #if HARP_TEST / #endif 两行没有搬（TraceSink 改为常开），
-    // 只出现在原版一侧，子序列判据不受影响。
+                 "public const char TopKey = ',';")
+        // 4. 「时序」收成两档（47 号，依据 docs/spec-界面改版.md 的「演奏器 —— 行级决定」）：
+        //    Names 去掉第三项。整行归一回原版形态，子序列判据才对得上；被整档删掉的那些行
+        //    在下面那段注释里逐条登记（行数账记在 DeliberatelyRemovedLines）
+        .Replace("public static string[] Names => new[] { \"稳健（30fps / 卡顿）\", \"标准（60fps 推荐）\" };",
+                 "public static string[] Names => new[] { \"稳健（30fps / 卡顿）\", \"标准（60fps 推荐）\", \"极限（高帧率）\" };");
+    // 原版有、我们没搬的行（只出现在原版一侧，子序列判据不受影响）：
+    // ① 原版 BuildSchedule 里的 #if HARP_TEST / #endif 两行没有搬（TraceSink 改为常开）。
+    // ② 47 号按 docs/spec-界面改版.md 的「演奏器 —— 行级决定」砍掉「极限」档（界面收成 30 / 60 两档），
+    //    InputTiming.cs 里少掉 11 行：`public static InputTiming Aggressive => new()` 到 `};` 那 10 行，
+    //    加上 FromIndex 里的 `2 => Aggressive,` 1 行。整文件复制的行数账记在 DeliberatelyRemovedLines。
 }

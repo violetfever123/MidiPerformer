@@ -169,13 +169,14 @@ public class FullChainParityTests
         _ => "mouse-middle"
     };
 
-    /// <summary><paramref name="all"/> = 三档时序各跑一遍；否则只跑「标准」这一档。</summary>
+    /// <summary><paramref name="all"/> = 两档时序各跑一遍；否则只跑「标准」这一档。</summary>
     private static IEnumerable<(string Name, Original.InputTiming Original, Ported.InputTiming Ported)>
         Timings(bool all)
     {
         yield return ("标准", Original.InputTiming.Standard, Ported.InputTiming.Standard);
         if (!all) yield break;
         yield return ("稳健", Original.InputTiming.Safe, Ported.InputTiming.Safe);
-        yield return ("极限", Original.InputTiming.Aggressive, Ported.InputTiming.Aggressive);
+        // 原版还有第三档「极限」，界面把它收掉了（47 号，依据 docs/spec-界面改版.md 的「演奏器 —— 行级决定」），
+        // 所以那一档没有能跟原版配对的移植档。
     }
 }
