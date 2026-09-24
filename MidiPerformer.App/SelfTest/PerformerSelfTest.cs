@@ -1,5 +1,6 @@
 using System.Reflection;
 using MidiPerformer.Core.Model;
+using MidiPerformer.Core.UseCases.Analysis;
 using MidiPerformer.Core.UseCases.Perform.Repertoire;
 using MidiPerformer.Core.UseCases.Project;
 
@@ -487,7 +488,9 @@ internal static class PerformerSelfTest
             },
             tempo);
 
-        var header = new ProjectHeader(SongProjectFile.ProjectVersion, "勾指起誓", true, @"C:\下载\起誓.mid");
+        // 可弹轨数也走真算：裁剪之后 PlayableTracks / MonophonyCheck 反射不到就当场红
+        var header = new ProjectHeader(
+            SongProjectFile.ProjectVersion, "勾指起誓", true, @"C:\下载\起誓.mid", PlayableTracks.Of(song).Count);
 
         string json = SongProjectFile.WriteProject(song, header);
         var (readHeader, read) = SongProjectFile.ReadProject(json);
@@ -509,6 +512,7 @@ internal static class PerformerSelfTest
         Diff("曲名", header.Name, readHeader.Name);
         Diff("Edited", header.Edited, readHeader.Edited);
         Diff("来路", header.ImportedFrom, readHeader.ImportedFrom);
+        Diff("可弹轨数", header.PlayableTrackCount, readHeader.PlayableTrackCount);
 
         // 曲子的骨架
         Diff("轨数", song.Tracks.Count, read.Tracks.Count);

@@ -19,8 +19,15 @@ namespace MidiPerformer.Core.UseCases.Project;
 /// </summary>
 public static class SongProjectFile
 {
-    /// <summary>当前 .mproj 的版本。读到比它大的版本就报错，不猜着读。</summary>
-    public const int ProjectVersion = 1;
+    /// <summary>
+    /// 当前 .mproj 的版本。**只认这一个版本**，读到别的（老的也好、新的也好）都不猜着读。
+    ///
+    /// 版本 2 加了 <see cref="ProjectHeader.PlayableTrackCount"/>。老的版本 1 里没有这个字段，
+    /// 而读它的 <see cref="ReadPlayableTrackCount"/> 走的是「缺了或类型不对都当没有」这条房子规矩，
+    /// 于是 v1 会读出一个 <c>0</c> —— 那不是一个错误，是一个**安静地答错**的答案
+    /// （曲库那一行会显示「不可播放」，而那首歌可能弹得了，见 <see cref="TryReadProjectHeader"/>）。
+    /// </summary>
+    public const int ProjectVersion = 2;
 
     /// <summary>
     /// <see cref="Song"/> + 文件头 → .mproj 的 JSON 文本。
@@ -45,6 +52,8 @@ public static class SongProjectFile
             else
                 writer.WriteString(nameof(ProjectHeader.ImportedFrom), header.ImportedFrom);
 
+            writer.WriteNumber(nameof(ProjectHeader.PlayableTrackCount), header.PlayableTrackCount);
+
             writer.WritePropertyName(SongFieldName);
             JsonSerializer.Serialize(writer, song, ProjectJson);
             writer.WriteEndObject();
@@ -55,6 +64,11 @@ public static class SongProjectFile
     /// <summary>
     /// .mproj 的 JSON 文本 → <see cref="Song"/> + 文件头。
     /// 读不回来时抛 <see cref="InvalidDataException"/>，消息是给人看的中文（与 <see cref="MidiReader.Read"/> 同一条规矩）。
+    ///
+    /// 版本闸门只管上界（比当前新就报错，不猜着读；老版本照读）。所以读回来的
+    /// <see cref="ProjectHeader.Version"/> 是**文件里那个数**：用它之前先看一眼 ——
+    /// 版本 1 的文件里没有 <see cref="ProjectHeader.PlayableTrackCount"/>，读出来是 <c>0</c>。
+    /// 曲库那条路不走这儿（<see cref="TryReadProjectHeader"/> 把 v1 整个判成读不出来）。
     /// </summary>
     public static (ProjectHeader Header, Song Song) ReadProject(string json)
     {
@@ -89,7 +103,8 @@ public static class SongProjectFile
                 throw new InvalidDataException($"工程文件的版本号不合法（{version}）。");
 
             Song song = ReadSong(root);
-            var header = new ProjectHeader(version, ReadName(root), ReadEdited(root), ReadImportedFrom(root));
+            var header = new ProjectHeader(
+                version, ReadName(root), ReadEdited(root), ReadImportedFrom(root), ReadPlayableTrackCount(root));
             return (header, song);
         }
     }
@@ -123,6 +138,12 @@ public static class SongProjectFile
     /// <summary>
     /// 只问文件头，不碰谱面 —— 曲库列表为每一首读一次的就是它。
     /// 不抛：坏了、不是 JSON、读不动，一律返回 null，免得一首坏曲子让整个曲库列表消失。
+    ///
+    /// ⚠️ **只认当前版本**（<see cref="ProjectVersion"/>），老的 v1 也判成读不出来。
+    /// 别把它放松成「<c>1..ProjectVersion</c> 这个区间」：两处版本闸门都只卡上界，
+    /// <c>1 &gt; 2</c> 是假、v1 照过，而 v1 里没有 <see cref="ProjectHeader.PlayableTrackCount"/>
+    /// —— 读出来是 <c>0</c>，那一行就显示「不可播放」，**而那首歌可能弹得了**。
+    /// 那是一个安静地答错；返回 null（= 读不出来 → 降级读 <c>.mid</c>）才是响亮的。
     /// </summary>
     public static ProjectHeader? TryReadProjectHeader(string path)
     {
@@ -135,9 +156,10 @@ public static class SongProjectFile
             if (root.ValueKind != JsonValueKind.Object) return null;
 
             int version = ReadVersion(root);
-            if (version < 1 || version > ProjectVersion) return null;
+            if (version != ProjectVersion) return null;
 
-            return new ProjectHeader(version, ReadName(root), ReadEdited(root), ReadImportedFrom(root));
+            return new ProjectHeader(
+                version, ReadName(root), ReadEdited(root), ReadImportedFrom(root), ReadPlayableTrackCount(root));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
             or JsonException or InvalidDataException or NotSupportedException)
@@ -273,13 +295,36 @@ public static class SongProjectFile
         element.ValueKind == JsonValueKind.String
             ? element.GetString()
             : null;
+
+    /// <summary>
+    /// 可弹轨数，和上面三个同一套规矩：缺了或类型不对都当没有（<c>0</c>），不算坏文件 ——
+    /// 它只是曲库列表那一格的一个标记，不值得为它把一份读得出来的谱面拦在门外。
+    ///
+    /// ⚠️ 这条规矩正是「**v1 文件要整个判成读不出来**」的原因：v1 里没有这个字段，
+    /// 这儿会老老实实返回 <c>0</c>（= 「不可播放」），而不是报错。
+    /// 所以认不认 v1 是**调用方**的事，见 <see cref="TryReadProjectHeader"/>。
+    /// </summary>
+    private static int ReadPlayableTrackCount(JsonElement root) =>
+        root.TryGetProperty(nameof(ProjectHeader.PlayableTrackCount), out var element) &&
+        element.ValueKind == JsonValueKind.Number &&
+        element.TryGetInt32(out int count)
+            ? count
+            : 0;
 }
 
 /// <summary>
 /// 工程文件的文件头 —— 一个 .mproj 的身份，也是曲库列表要显示的三个东西。
 /// </summary>
-/// <param name="Version">格式版本，见 <see cref="SongProjectFile.ProjectVersion"/>。</param>
+/// <param name="Version">格式版本，见 <see cref="SongProjectFile.ProjectVersion"/>。读回来的这个数是**文件里那个**，不一定是当前版本。</param>
 /// <param name="Name">曲名。也就是它存进曲库后的文件名（去扩展名）。</param>
 /// <param name="Edited">粘性标记：这首曲子被编辑过并且存过盘。撤销回初始状态也不会变回 <c>false</c>。</param>
 /// <param name="ImportedFrom">当初从哪个文件导入的（原始 MIDI 的全路径）。没导入过的工程是 null。</param>
-public sealed record ProjectHeader(int Version, string Name, bool Edited, string? ImportedFrom);
+/// <param name="PlayableTrackCount">
+/// **上次保存时**这份曲子里能弹的轨有几条（<c>PlayableTracks.Of</c> 那个数）。
+/// 缓存它是为了让曲库列表每一行只读一个数字：算它要把每条轨的音符全走一遍，
+/// 二十首就是二十趟全曲扫描。存的是**条数**而不是「能不能弹」—— 算「≥1」和算「一共几条」
+/// 是同一趟扫描，多存一个数字不多花一分钱。
+/// ⚠️ 它是缓存，不是实时读数：在别的软件里改了那份 <c>.mid</c>，它就不准了。
+/// </param>
+public sealed record ProjectHeader(
+    int Version, string Name, bool Edited, string? ImportedFrom, int PlayableTrackCount);

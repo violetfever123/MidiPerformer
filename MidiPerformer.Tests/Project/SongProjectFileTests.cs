@@ -16,8 +16,8 @@ namespace MidiPerformer.Tests.Project;
 /// </summary>
 public class SongProjectFileTests
 {
-    private static ProjectHeader Header(string name = "测试曲", bool edited = false, string? from = null) =>
-        new(SongProjectFile.ProjectVersion, name, edited, from);
+    private static ProjectHeader Header(string name = "测试曲", bool edited = false, string? from = null, int playable = 0) =>
+        new(SongProjectFile.ProjectVersion, name, edited, from, playable);
 
     // ==================== 手工拼的曲子：逐字段往返 ====================
 
@@ -311,7 +311,7 @@ public class SongProjectFileTests
     public void 文件头逐字段往返()
     {
         var song = SingleNoteSong();
-        var header = new ProjectHeader(SongProjectFile.ProjectVersion, "起风了", true, @"C:\下载\起风了.mid");
+        var header = new ProjectHeader(SongProjectFile.ProjectVersion, "起风了", true, @"C:\下载\起风了.mid", 3);
 
         var (again, _) = SongProjectFile.ReadProject(SongProjectFile.WriteProject(song, header));
 
@@ -321,6 +321,7 @@ public class SongProjectFileTests
             Assert.That(again.Name, Is.EqualTo("起风了"));
             Assert.That(again.Edited, Is.True);
             Assert.That(again.ImportedFrom, Is.EqualTo(@"C:\下载\起风了.mid"));
+            Assert.That(again.PlayableTrackCount, Is.EqualTo(3));
         });
     }
 
@@ -356,9 +357,25 @@ public class SongProjectFileTests
     [Test]
     public void 版本号一律写当前版本()
     {
-        string json = SongProjectFile.WriteProject(SingleNoteSong(), new ProjectHeader(99, "来自于未来", false, null));
+        string json = SongProjectFile.WriteProject(SingleNoteSong(), new ProjectHeader(99, "来自于未来", false, null, 0));
 
         Assert.That(json, Does.Contain($"\"Version\": {SongProjectFile.ProjectVersion}"));
+    }
+
+    /// <summary>
+    /// 可弹轨数**两端**都存得住：<c>0</c>（一条都弹不了）与一个大数。
+    /// 存的是**条数**而不是「能不能弹」—— 少了的那个信息再也拿不回来。
+    /// </summary>
+    [TestCase(0)]
+    [TestCase(1)]
+    [TestCase(38)]
+    [TestCase(9999)]
+    public void 可弹轨数两端都存得住(int playable)
+    {
+        var (again, _) = SongProjectFile.ReadProject(
+            SongProjectFile.WriteProject(SingleNoteSong(), Header(playable: playable)));
+
+        Assert.That(again.PlayableTrackCount, Is.EqualTo(playable));
     }
 
     /// <summary>写出来的是缩进过的 JSON。</summary>
@@ -438,14 +455,14 @@ public class SongProjectFileTests
         });
     }
 
-    /// <summary>文件头四个字段 + Song，平铺在顶层。</summary>
+    /// <summary>文件头五个字段 + Song，平铺在顶层。</summary>
     [Test]
     public void 顶层是文件头加Song()
     {
         using var document = JsonDocument.Parse(SongProjectFile.WriteProject(SingleNoteSong(), Header()));
 
         Assert.That(document.RootElement.EnumerateObject().Select(p => p.Name), Is.EquivalentTo(
-            new[] { "Version", "Name", "Edited", "ImportedFrom", "Song" }));
+            new[] { "Version", "Name", "Edited", "ImportedFrom", "PlayableTrackCount", "Song" }));
     }
 
     // ==================== 身份 ====================
@@ -560,7 +577,8 @@ public class SongProjectFileTests
     [Test]
     public void 没有版本号时报清楚的错不崩()
     {
-        string json = SongProjectFile.WriteProject(SingleNoteSong(), Header()).Replace("\"Version\": 1,", "");
+        string json = SongProjectFile.WriteProject(SingleNoteSong(), Header())
+            .Replace($"\"Version\": {SongProjectFile.ProjectVersion},", "");
 
         var ex = Assert.Throws<InvalidDataException>(() => SongProjectFile.ReadProject(json));
         Assert.That(ex!.Message, Does.Contain("版本号"));
@@ -676,10 +694,11 @@ public class SongProjectFileTests
     [Test]
     public void 文件头缺字段照样读得出来()
     {
-        string json = SongProjectFile.WriteProject(SingleNoteSong(), Header())
+        string json = SongProjectFile.WriteProject(SingleNoteSong(), Header(playable: 7))
             .Replace("\"Name\": \"测试曲\",", "")
             .Replace("\"Edited\": false,", "")
-            .Replace("\"ImportedFrom\": null,", "");
+            .Replace("\"ImportedFrom\": null,", "")
+            .Replace("\"PlayableTrackCount\": 7,", "");
 
         var (header, song) = SongProjectFile.ReadProject(json);
 
@@ -688,6 +707,7 @@ public class SongProjectFileTests
             Assert.That(header.Name, Is.Empty);
             Assert.That(header.Edited, Is.False);
             Assert.That(header.ImportedFrom, Is.Null);
+            Assert.That(header.PlayableTrackCount, Is.EqualTo(0), "缺了就当没有 —— 这也是 v1 要整个判成读不出来的原因");
             SongAssert.Same(SingleNoteSong(), song, "文件头缺字段的工程");
         });
     }
@@ -759,7 +779,7 @@ public class SongProjectFileTests
 
         try
         {
-            SongProjectFile.SaveProject(SingleNoteSong(), Header("夜空中最亮的星", true, "C:\\x.mid"), file);
+            SongProjectFile.SaveProject(SingleNoteSong(), Header("夜空中最亮的星", true, "C:\\x.mid", playable: 4), file);
 
             var header = SongProjectFile.TryReadProjectHeader(file);
 
@@ -770,6 +790,56 @@ public class SongProjectFileTests
                 Assert.That(header.Edited, Is.True);
                 Assert.That(header.Version, Is.EqualTo(SongProjectFile.ProjectVersion));
                 Assert.That(header.ImportedFrom, Is.EqualTo("C:\\x.mid"));
+                Assert.That(header.PlayableTrackCount, Is.EqualTo(4), "列表那一行靠这个数说「可播放 / 不可播放」");
+            });
+        }
+        finally
+        {
+            File.Delete(file);
+        }
+    }
+
+    /// <summary>
+    /// **版本 1 的工程整个读不出来** —— 这一票最重要的一条，它防的不是崩溃，是**安静地答错**。
+    ///
+    /// 手工造一份 v1：有 <c>Version: 1</c>、**没有** <c>PlayableTrackCount</c>（其余字段都在）。
+    /// 两处版本闸门都只卡上界（<c>1 &gt; 2</c> 是假），v1 照过；而 <c>ReadPlayableTrackCount</c>
+    /// 按房子规矩「缺了或类型不对都当没有」会返回 <b>0</b> ⇒ 曲库那一行显示「不可播放」，
+    /// **而那首歌可能弹得了**。所以 <see cref="SongProjectFile.TryReadProjectHeader"/> 只认当前版本：
+    /// v1 返回 <c>null</c>（= 读不出来 → 降级读 <c>.mid</c>），**不是**返回一个
+    /// <c>PlayableTrackCount == 0</c> 的 header。
+    /// </summary>
+    [Test]
+    public void 版本1的工程头读不出来()
+    {
+        string 当前版本 = SongProjectFile.WriteProject(
+            SingleNoteSong(), Header("老缓存", edited: true, playable: 5));
+
+        // 手工降级成 v1：版本号改 1、把 v2 才有的那个字段整行删掉
+        string v1 = 当前版本
+            .Replace($"\"Version\": {SongProjectFile.ProjectVersion},", "\"Version\": 1,")
+            .Replace("\"PlayableTrackCount\": 5,", "");
+
+        Assert.That(v1, Does.Not.Contain("PlayableTrackCount"), "前提：这份 v1 里真的没有那个字段");
+
+        string file = Path.Combine(Path.GetTempPath(), $"mp-v1头-{Guid.NewGuid():N}.mproj");
+
+        try
+        {
+            File.WriteAllText(file, v1);
+            var v1头 = SongProjectFile.TryReadProjectHeader(file);
+
+            // 反面：同一份 JSON 只是版本号是当前版本，就读得出来 ——
+            // 证明上面那个 null 来自版本闸门，不是「这份 JSON 本来就坏了」
+            File.WriteAllText(file, 当前版本);
+            var 当前头 = SongProjectFile.TryReadProjectHeader(file);
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(v1头, Is.Null,
+                    "v1 → 读不出来（降级读 .mid）；返回一个 PlayableTrackCount == 0 的 header 是安静地答错");
+                Assert.That(当前头, Is.Not.Null, "同一份工程的当前版本照读 —— 上面那个 null 不是假绿");
+                Assert.That(当前头!.PlayableTrackCount, Is.EqualTo(5));
             });
         }
         finally
@@ -785,6 +855,7 @@ public class SongProjectFileTests
     [TestCase("[1, 2, 3]")]                                     // 顶层不是对象
     [TestCase("{\"Name\": \"没有版本号\"}")]                        // 缺 Version
     [TestCase("{\"Version\": 9999, \"Name\": \"来自于未来\"}")]        // 版本比当前新
+    [TestCase("{\"Version\": 1, \"Name\": \"老版本\"}")]             // 版本比当前老（没有 PlayableTrackCount）
     [TestCase("{\"Version\": \"一\", \"Name\": \"版本号不是数\"}")]     // 版本号类型不对
     public void 坏文件的文件头问不出来但不崩(string content)
     {

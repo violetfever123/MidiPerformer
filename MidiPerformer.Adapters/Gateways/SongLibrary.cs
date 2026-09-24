@@ -9,6 +9,10 @@ namespace MidiPerformer.Adapters.Gateways;
 /// 字节与 JSON 本身分别归 <c>MidiReader</c> / <c>MidiWriter</c> 和 <c>SongProjectFile</c> 管；
 /// 目录由构造参数注入（默认是 exe 旁边的 .\songs\），名字一律先消毒（见 <see cref="Sanitize"/>），
 /// 名字不存在时抛中文 <see cref="InvalidDataException"/>。
+///
+/// 每首曲子**旁边还住着它自己的缓存**：<c>songs\.work\&lt;名字&gt;.mproj</c>（见 <see cref="WorkPathOf"/>）。
+/// 它装的是标准 MIDI 装不下的那几样（移调、删光的轨、轨的身份）加列表要用的两个标记，
+/// 所以**删和改名都要成对**：只动主文件会留下一份对不上号的缓存。
 /// </summary>
 public sealed class SongLibrary
 {
@@ -68,6 +72,47 @@ public sealed class SongLibrary
 
     /// <summary>曲名 → 文件全路径（先消毒）。</summary>
     public string PathOf(string name) => Path.Combine(_directory, Sanitize(name) + Extension);
+
+    /// <summary>
+    /// 缓存文件的名字：<c>.work\</c> 这个子目录名带点，在 Windows 上**不是隐藏目录**，
+    /// 它就是个普通子目录 —— 不设隐藏属性是有意的：隐藏会让「我的东西去哪了」变成一个新问题。
+    /// </summary>
+    public const string WorkDirectoryName = ".work";
+
+    /// <summary>缓存文件的后缀（工程文件，本程序自己的，不是曲库成员）。</summary>
+    public const string WorkExtension = ".mproj";
+
+    /// <summary>曲名 → 缓存文件的全路径（<c>songs\.work\&lt;名字&gt;.mproj</c>，先消毒）。</summary>
+    public string WorkPathOf(string name) =>
+        Path.Combine(_directory, WorkDirectoryName, Sanitize(name) + WorkExtension);
+
+    /// <summary>这一首有缓存吗。</summary>
+    public bool HasWork(string name) => File.Exists(WorkPathOf(name));
+
+    /// <summary>
+    /// 把一份缓存（<c>.mproj</c> 的 JSON 文本）写进 <c>.work\</c>，目录不存在就建出来。
+    /// 语义与 <see cref="Write"/> 一字不差（撞名直接覆盖、IO 故障换中文报出来），
+    /// 只是落在另一个地方：曲库成员是给别人的 <c>.mid</c>，这一份是本程序自己的。
+    /// </summary>
+    /// <exception cref="InvalidDataException">写不进去（目录建不出来、盘满、文件被占用）。</exception>
+    public void WriteWork(string name, string text)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+
+        string safe = Sanitize(name);
+        string path = WorkPathOf(safe);
+
+        // 先建目录再落盘：半截文件会被当成一份坏工程，比没有文件更坏。
+        try
+        {
+            System.IO.Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllText(path, text);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            throw new InvalidDataException($"「{safe}」的缓存存不进去（{path}）：{ex.Message}", ex);
+        }
+    }
 
     /// <summary>读一首曲子的正文（.mproj 的 JSON 文本），原样读出，一个字都不动。</summary>
     /// <exception cref="InvalidDataException">曲库里没有这个名字，或者文件读不动。</exception>
@@ -159,7 +204,11 @@ public sealed class SongLibrary
         }
     }
 
-    /// <summary>从曲库里删掉一首曲子（连文件一起删）。</summary>
+    /// <summary>
+    /// 从曲库里删掉一首曲子（连文件一起删），**连带它的缓存**。
+    /// 缓存不在就跳过（<c>songs\.work\</c> 还没建出来、或者这一首从来没有缓存）—— 那不是错误：
+    /// 删的是「曲库里有这一首」，而缓存只是跟着主文件走的一份副本。
+    /// </summary>
     /// <exception cref="InvalidDataException">曲库里没有这个名字。</exception>
     public void Delete(string name)
     {
@@ -171,6 +220,8 @@ public sealed class SongLibrary
         try
         {
             File.Delete(path);
+
+            if (HasWork(safe)) File.Delete(WorkPathOf(safe));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -179,10 +230,12 @@ public sealed class SongLibrary
     }
 
     /// <summary>
-    /// 改名 —— 就是把文件换个名字，内容一个字节都不碰。撞名抛错不覆盖，和 <see cref="Write"/> 相反：写是「保存这首」，
+    /// 改名 —— 就是把文件换个名字，内容一个字节都不碰，**缓存跟着一起搬**。
+    /// 撞名抛错不覆盖，和 <see cref="Write"/> 相反：写是「保存这首」，
     /// 改名是「把 A 叫成 B」，B 已经有人叫了，动手就等于把 B 那首悄悄删了；只有大小写不同的名字不算撞名。
+    /// 撞名看的是**主文件和缓存两样**：新名字的缓存已经躺在那儿，搬过去就是把它盖掉。
     /// </summary>
-    /// <exception cref="InvalidDataException">旧名字不在曲库里，或者新名字已经有人用了。</exception>
+    /// <exception cref="InvalidDataException">旧名字不在曲库里，或者新名字（主文件或缓存）已经有人用了。</exception>
     public void Rename(string oldName, string newName)
     {
         string from = Sanitize(oldName);
@@ -194,12 +247,15 @@ public sealed class SongLibrary
 
         string toPath = PathOf(to);
         bool sameNameDifferentCase = string.Equals(from, to, StringComparison.OrdinalIgnoreCase);
-        if (!sameNameDifferentCase && File.Exists(toPath))
+        if (!sameNameDifferentCase && (File.Exists(toPath) || HasWork(to)))
             throw new InvalidDataException($"曲库里已经有一首叫「{to}」的，换个名字。");
 
         try
         {
             File.Move(fromPath, toPath, overwrite: sameNameDifferentCase);
+
+            // 缓存不在就跳过：没缓存过的曲子改名照样得成
+            if (HasWork(from)) File.Move(WorkPathOf(from), WorkPathOf(to), overwrite: sameNameDifferentCase);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {

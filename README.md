@@ -27,6 +27,8 @@ dotnet run --project MidiPerformer.App
 
 曲库目录是 **exe 所在目录下的 `songs\`**（调试时即 `MidiPerformer.App\bin\...\songs\`）。
 它不进仓库，删 `bin` 之前先把它挪出来。
+曲库目录里还有一个 `songs\.work\` 子目录，装的是程序给每首曲子存的缓存（`.mproj`）：它跟着曲子一起写、
+**不是你的曲子本身**，整个删掉也没关系 —— 只是移调、音符被删光的那条轨这些信息会跟着没掉。
 
 ## 测试
 

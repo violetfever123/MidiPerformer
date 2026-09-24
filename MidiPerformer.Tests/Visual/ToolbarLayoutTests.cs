@@ -296,8 +296,15 @@ public class ToolbarLayoutTests
             // **保存落盘写出去的是标准 MIDI**（别顺手把工程头塞回 `.mid` —— 那会让曲库成员不再是干净 MIDI，
             // 拷给别人就带着本程序的私货）。53 号票把缓存写回来之后，这里应补回一条
             // 「缓存那一次写用的是 `_edited, _importedFrom`」——**那条才是原判据的接替者**。
-            Assert.That(花括号段(代码, "private void SaveTo", "找不到 SaveTo"), Does.Contain("MidiWriter"),
-                "保存写出去的是标准 MIDI 文件；Edited / ImportedFrom 随缓存那一票走");
+            //
+            // ⚠️ 53 号票已经落地：落盘那两笔整个搬进了 `SongCache.Save`（保存那一处不再自己写文件），
+            // 所以「SaveTo 里有 MidiWriter」这条**换了个落点**，换成了下面这一条（就是上面点名要的接替者）。
+            // 「`.mid` 是干净的标准 MIDI、工程头不许塞回去」由两处接着守：
+            // `SongProjectWriteTests.存进曲库的是标准MIDI文件不是JSON`（成员是什么格式）
+            // 与 `SongCacheTests.两份各自都读得回来`（写下去的那份 .mid 真能当标准 MIDI 读回来）。
+            Assert.That(花括号段(代码, "private void SaveTo", "找不到 SaveTo"),
+                Does.Contain("SongCache.HeaderFor(name, song, _edited, _importedFrom)"),
+                "缓存那一次写用的是这一刻的 _edited 与 _importedFrom —— 原判据的接替者");
 
             Assert.That(花括号段(代码, "private void ApplySong", "找不到 ApplySong"), Does.Contain("_edited = true;"),
                 "_edited 归曲库列表那格小字，谁也不许把它删了");

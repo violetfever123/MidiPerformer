@@ -360,6 +360,180 @@ public class SongLibraryTests
         });
     }
 
+    // ==================== 缓存（songs\.work\） ====================
+
+    /// <summary>缓存文件住在 <c>songs\.work\</c> 里，名字与主文件同名、后缀是 <c>.mproj</c>。</summary>
+    [Test]
+    public void 缓存路径是work子目录加名字加mproj()
+    {
+        Assert.Multiple(() =>
+        {
+            Assert.That(_library.WorkPathOf("起风了"),
+                Is.EqualTo(Path.Combine(_root, ".work", "起风了.mproj")));
+            Assert.That(_library.WorkPathOf("起风了"),
+                Is.Not.EqualTo(_library.PathOf("起风了")), "缓存不是主文件：两个位置不一样");
+        });
+    }
+
+    /// <summary>缓存写下去之后 <see cref="SongLibrary.HasWork"/> 认得出它；没写过的认不出。</summary>
+    [Test]
+    public void 有缓存没缓存认得出()
+    {
+        _library.WriteWork("有缓存", "{}");
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(_library.HasWork("有缓存"), Is.True);
+            Assert.That(_library.HasWork("没缓存"), Is.False);
+            Assert.That(File.Exists(_library.WorkPathOf("有缓存")), Is.True, "前提：文件真的在盘上");
+        });
+    }
+
+    /// <summary>
+    /// 写缓存时 <c>.work\</c> 还不存在（第一次保存）也得成 —— 目录得自己建出来，语义与
+    /// <see cref="SongLibrary.Write"/> 一字不差（撞名即覆盖）。
+    /// </summary>
+    [Test]
+    public void 写缓存时目录不存在会建出来()
+    {
+        Assert.That(Directory.Exists(Path.Combine(_root, ".work")), Is.False, "前提：目录还不存在");
+
+        _library.WriteWork("第一次", "第一次的缓存");
+        _library.WriteWork("第一次", "第二次的缓存");
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(File.ReadAllText(_library.WorkPathOf("第一次")), Is.EqualTo("第二次的缓存"),
+                "同名再写一次就是覆盖 —— 那是「保存」");
+            Assert.That(_library.Names(), Is.Empty, "缓存不是曲库成员，列表里不该多出一首");
+        });
+    }
+
+    /// <summary>删一首曲子**连它的缓存一起删** —— 只删主文件会留下一份对不上号的缓存。</summary>
+    [Test]
+    public void 删除两个都删()
+    {
+        _library.Write("删我", "主文件");
+        _library.WriteWork("删我", "缓存");
+
+        _library.Delete("删我");
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(File.Exists(_library.PathOf("删我")), Is.False, "主文件得没");
+            Assert.That(File.Exists(_library.WorkPathOf("删我")), Is.False, "缓存也得没");
+            Assert.That(_library.HasWork("删我"), Is.False);
+        });
+    }
+
+    /// <summary>
+    /// 只有 <c>.mid</c>、没有缓存（从别处拷进来的那一首，程序没给它存过盘）时删除照样成 ——
+    /// 缓存不在不是错误，<c>.work\</c> 可能压根还没建出来。
+    /// </summary>
+    [Test]
+    public void 删除时没有缓存也正常()
+    {
+        _library.Write("散装的", "主文件");
+
+        Assert.DoesNotThrow(() => _library.Delete("散装的"));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(_library.Contains("散装的"), Is.False);
+            Assert.That(Directory.Exists(Path.Combine(_root, ".work")), Is.False, "不该为它凭空造一个 .work 目录");
+        });
+    }
+
+    /// <summary>删一首不影响别人的缓存。</summary>
+    [Test]
+    public void 删掉一首不动别人的缓存()
+    {
+        _library.Write("留着", "A");
+        _library.WriteWork("留着", "A的缓存");
+        _library.Write("删掉", "B");
+        _library.WriteWork("删掉", "B的缓存");
+
+        _library.Delete("删掉");
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(File.ReadAllText(_library.WorkPathOf("留着")), Is.EqualTo("A的缓存"));
+            Assert.That(_library.HasWork("删掉"), Is.False);
+        });
+    }
+
+    /// <summary>改名**两个一起搬**：缓存跟着新名字走，内容一个字节都不动。</summary>
+    [Test]
+    public void 改名缓存跟着搬()
+    {
+        _library.Write("旧名字", "主文件");
+        _library.WriteWork("旧名字", "缓存的内容");
+        string oldWork = _library.WorkPathOf("旧名字");
+
+        _library.Rename("旧名字", "新名字");
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(File.Exists(oldWork), Is.False, "旧缓存得没");
+            Assert.That(_library.HasWork("新名字"), Is.True, "新名字那边得有一份");
+            Assert.That(File.ReadAllText(_library.WorkPathOf("新名字")), Is.EqualTo("缓存的内容"),
+                "内容一个字节都不该动");
+        });
+    }
+
+    /// <summary>没有缓存的曲子改名照样成（缓存不是改名的前提）。</summary>
+    [Test]
+    public void 改名时没有缓存也正常()
+    {
+        _library.Write("旧名字", "主文件");
+
+        Assert.DoesNotThrow(() => _library.Rename("旧名字", "新名字"));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(_library.Contains("新名字"), Is.True);
+            Assert.That(_library.HasWork("新名字"), Is.False);
+        });
+    }
+
+    /// <summary>
+    /// **改名撞的是缓存也要拒绝** —— 判据看主文件和缓存两样。
+    /// 只判主文件的话，「乙」的缓存会被「甲」的悄悄盖掉，而那正是「改名不覆盖」要防的事。
+    /// </summary>
+    [Test]
+    public void 改名时新名字的缓存已存在会拒绝()
+    {
+        _library.Write("甲", "甲的主文件");
+        _library.WriteWork("甲", "甲的缓存");
+        _library.WriteWork("乙", "乙的缓存");     // 乙只有缓存：有可能是「主文件被人在资源管理器里删了」那一种
+
+        var ex = Assert.Throws<InvalidDataException>(() => _library.Rename("甲", "乙"));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(ex!.Message, Does.Contain("乙"), "得说清是哪个名字被人用了");
+            Assert.That(File.ReadAllText(_library.WorkPathOf("甲")), Is.EqualTo("甲的缓存"), "甲那首还在原处");
+            Assert.That(File.ReadAllText(_library.WorkPathOf("乙")), Is.EqualTo("乙的缓存"), "撞上的缓存一个字都没被覆盖");
+        });
+    }
+
+    /// <summary>只改大小写不算撞名：缓存也跟着换大小写，且不多出一份来。</summary>
+    [Test]
+    public void 只改大小写时缓存也换名字()
+    {
+        _library.Write("Song", "主文件");
+        _library.WriteWork("Song", "缓存");
+
+        _library.Rename("Song", "SONG");
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(File.ReadAllText(_library.WorkPathOf("SONG")), Is.EqualTo("缓存"));
+            Assert.That(System.IO.Directory.GetFiles(Path.Combine(_root, ".work")).Length, Is.EqualTo(1),
+                "搬过去而不是复制一份：.work 里还是只有一个文件");
+        });
+    }
+
     // ==================== 曲名消毒 ====================
 
     /// <summary>Windows 文件名里不能出现的字符会被去掉（去掉了名字还能用）。</summary>
