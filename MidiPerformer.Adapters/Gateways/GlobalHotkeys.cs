@@ -114,6 +114,22 @@ public sealed class GlobalHotkeys : IDisposable
     /// <summary>钩子是否已经装上。</summary>
     public bool Installed => _hook != IntPtr.Zero;
 
+    /// <summary>
+    /// 「在不在跑」+「倒计时还剩几秒」合成一段 —— 界面那边知道的就是这两件事。
+    ///
+    /// 单拎出来是为了让**阶段门也能测**：<see cref="ShouldStop"/> 是纯的，
+    /// 可它吃的那个阶段是从哪儿来的、翻面翻得准不准，是另一个问题。
+    /// 这里一纯，那条「先倒计时后演奏」的状态机测试就能把倒计时一秒一秒走完，
+    /// 而不是自己拿手写的阶段去喂判定（那等于把要验的东西当成了前提）。
+    /// </summary>
+    /// <param name="running">这一场还在跑（倒计时也算在跑）。</param>
+    /// <param name="countdownSecondsLeft">倒计时还剩几秒；没在倒计时时是 0。</param>
+    public static PerformanceStage StageOf(bool running, int countdownSecondsLeft)
+    {
+        if (!running) return PerformanceStage.Idle;
+        return countdownSecondsLeft > 0 ? PerformanceStage.Countdown : PerformanceStage.Playing;
+    }
+
     /// <summary>装钩子；必须在有消息循环的线程上调用，重复调用只有第一次生效。</summary>
     public void Install()
     {

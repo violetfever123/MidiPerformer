@@ -283,11 +283,9 @@ public partial class PerformerWindow : Window
     /// </summary>
     private PerformanceStage CurrentStage()
     {
-        if (!_running) return PerformanceStage.Idle;
-
         // 倒计时读的是用例层那个剩余秒数，和悬浮层画的是同一个数 —— 不另存一份阶段记号，
         // 两份记号就有对不上的时候（对不上的那一下正好落在「按了没反应」上）。
-        return _performance.CountdownSecondsLeft > 0 ? PerformanceStage.Countdown : PerformanceStage.Playing;
+        return GlobalHotkeys.StageOf(_running, _performance.CountdownSecondsLeft);
     }
 
     /// <summary>急停的回调。弹键能走到这儿，说明判定已经放行（演奏中、非修饰键、非注入键）。</summary>

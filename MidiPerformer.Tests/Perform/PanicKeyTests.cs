@@ -141,18 +141,35 @@ public class PanicKeyTests
     // ==================== 阶段门：先倒计时，后演奏 ====================
 
     /// <summary>
-    /// 一场演奏的生命周期（就判定用得着的那几段）。判定是纯函数，所以这个状态机不用真起一场演奏，
-    /// 它只是把阶段按顺序喂进去 —— 变的只有「走到哪一段了」。
+    /// 一场演奏的生命周期。手上的事实只有两件 —— 在不在跑、倒计时还剩几秒 ——
+    /// 阶段由 <see cref="GlobalHotkeys.StageOf"/> 现推，和演奏器窗口交给钩子的是同一个函数
+    /// （<c>PerformerWindow.CurrentStage</c>）。判定是纯函数，所以这个状态机不用真起一场演奏。
     /// </summary>
     private sealed class 一场演奏
     {
-        public PerformanceStage Stage { get; private set; } = PerformanceStage.Idle;
+        private bool _在跑;
+        private int _倒计时;
 
-        public void 按下开始() => Stage = PerformanceStage.Countdown;
+        public PerformanceStage Stage => GlobalHotkeys.StageOf(_在跑, _倒计时);
 
-        public void 倒计时结束() => Stage = PerformanceStage.Playing;
+        /// <summary>按下开始：进倒计时，还剩 <paramref name="秒"/> 秒。</summary>
+        public void 按下开始(int 秒)
+        {
+            _在跑 = true;
+            _倒计时 = 秒;
+        }
 
-        public void 停完收尾() => Stage = PerformanceStage.Idle;
+        /// <summary>时钟走一秒。</summary>
+        public void 过一秒() => _倒计时 = Math.Max(0, _倒计时 - 1);
+
+        /// <summary>倒计时归零（等于把剩下的秒数一次走完）。</summary>
+        public void 倒计时走完() => _倒计时 = 0;
+
+        public void 停完收尾()
+        {
+            _在跑 = false;
+            _倒计时 = 0;
+        }
 
         /// <summary>此刻按下这一颗键，停不停。</summary>
         public bool 按键(uint vkCode, bool injected = false, bool modifierHeld = false)
@@ -160,11 +177,64 @@ public class PanicKeyTests
     }
 
     /// <summary>
-    /// <b>同一个键</b>在倒计时期间不停、进入演奏后停。
+    /// 阶段就是那两件事推出来的，边界在「还剩 1 秒」和「归零」之间。
+    /// 这一段单拎出来测：它是判定的**输入**，喂错了的话纯函数再对也白搭。
+    /// </summary>
+    [Test]
+    public void 阶段由在不在跑和倒计时剩几秒推出来()
+    {
+        Assert.Multiple(() =>
+        {
+            Assert.That(GlobalHotkeys.StageOf(running: false, countdownSecondsLeft: 0),
+                Is.EqualTo(PerformanceStage.Idle), "没在跑 = 空闲");
+            Assert.That(GlobalHotkeys.StageOf(running: false, countdownSecondsLeft: 5),
+                Is.EqualTo(PerformanceStage.Idle), "已经停了之后那个剩余秒数就没有意义了，别拿它当「在倒计时」");
+            Assert.That(GlobalHotkeys.StageOf(running: true, countdownSecondsLeft: 5),
+                Is.EqualTo(PerformanceStage.Countdown), "在跑 + 还有秒数 = 倒计时那一段");
+            Assert.That(GlobalHotkeys.StageOf(running: true, countdownSecondsLeft: 1),
+                Is.EqualTo(PerformanceStage.Countdown), "还剩 1 秒也还是倒计时");
+            Assert.That(GlobalHotkeys.StageOf(running: true, countdownSecondsLeft: 0),
+                Is.EqualTo(PerformanceStage.Playing), "在跑 + 归零 = 演奏中");
+        });
+    }
+
+    /// <summary>
+    /// 阶段门的状态机测试：**先倒计时后演奏**，同一颗键走完整场。
     ///
-    /// 写成一段走过来的过程而不是三个孤立的断言：这条要证明的是「阶段翻面，判定跟着翻面」，
-    /// 单点验不出这件事 —— 三个单点全绿，也可能只是因为判定压根没读阶段。
-    /// 同一颗键先否后肯，读没读阶段就没有第二种解释了。
+    /// 倒计时 5 秒一秒一秒走完，重点在边界那一秒 —— 判定必须正好在「还剩 1 秒 → 归零」
+    /// 之间翻面：早一秒是「用户在切窗口时自己把演奏掐了」，晚一秒是「按了没反应」，
+    /// 两个方向都是这张票要修的毛病。
+    /// </summary>
+    [Test]
+    public void 倒计时走完那一下判定正好翻面()
+    {
+        var 演奏 = new 一场演奏();
+        演奏.按下开始(5);
+
+        var 走过的阶段 = new List<PerformanceStage>();
+        var 停不停 = new List<bool>();
+
+        for (int i = 0; i < 6; i++)     // 还剩 5 / 4 / 3 / 2 / 1 秒，走完第 5 次就归零
+        {
+            走过的阶段.Add(演奏.Stage);
+            停不停.Add(演奏.按键(A));
+            if (i < 5) 演奏.过一秒();
+        }
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(走过的阶段.Take(5), Is.All.EqualTo(PerformanceStage.Countdown),
+                "倒计时那 5 秒里阶段不该动");
+            Assert.That(走过的阶段[5], Is.EqualTo(PerformanceStage.Playing),
+                "剩下的一秒走完就该进演奏那一段");
+            Assert.That(停不停.Take(5), Is.All.False,
+                "倒计时里按的那 5 下一下都不许停 —— 那几秒正是用户在切窗口的时间");
+            Assert.That(停不停[5], Is.True, "归零之后同一颗键必须停");
+        });
+    }
+
+    /// <summary>
+    /// <b>同一个键</b>在倒计时期间不停、进入演奏后停 —— 空闲那一段也一起验了。
     /// </summary>
     [Test]
     public void 倒计时期间同一个键不停进入演奏后停()
@@ -172,9 +242,9 @@ public class PanicKeyTests
         var 演奏 = new 一场演奏();
 
         bool 空闲时 = 演奏.按键(A);
-        演奏.按下开始();
+        演奏.按下开始(5);
         bool 倒计时时 = 演奏.按键(A);
-        演奏.倒计时结束();
+        演奏.倒计时走完();
         bool 演奏中 = 演奏.按键(A);
 
         Assert.Multiple(() =>
@@ -193,7 +263,7 @@ public class PanicKeyTests
     public void 倒计时里按过键不影响进入演奏后那一下()
     {
         var 演奏 = new 一场演奏();
-        演奏.按下开始();
+        演奏.按下开始(5);
 
         foreach (var vk in new[] { A, Space, Enter, F6 })
             演奏.按键(vk);
@@ -201,7 +271,7 @@ public class PanicKeyTests
         演奏.按键(Alt);
         演奏.按键(Tab, modifierHeld: true);
 
-        演奏.倒计时结束();
+        演奏.倒计时走完();
 
         Assert.That(演奏.按键(A), Is.True, "倒计时里按过的那几下把演奏中的判定带偏了");
     }
@@ -213,8 +283,8 @@ public class PanicKeyTests
     public void 停完回到空闲就不再认键()
     {
         var 演奏 = new 一场演奏();
-        演奏.按下开始();
-        演奏.倒计时结束();
+        演奏.按下开始(5);
+        演奏.倒计时走完();
 
         bool 停的那一下 = 演奏.按键(A);
         演奏.停完收尾();
