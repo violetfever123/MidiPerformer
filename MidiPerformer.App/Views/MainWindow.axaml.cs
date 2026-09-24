@@ -1049,7 +1049,12 @@ public partial class MainWindow : Window
         // 撤销 / 重做：没得撤就置灰。菜单项置灰一样点不动
         UndoMenuItem.IsEnabled = _editor.CanUndo;
         RedoMenuItem.IsEnabled = _editor.CanRedo;
-        // 没曲子可动时「操作」整组灰：「操作」里那些命令动的都是手上这份谱面
+        // 没曲子可动时「操作」整组灰：「操作」里那些命令动的都是手上这份谱面。
+        // ⚠️ 「打开日志文件夹」**不在这里**（90 号票）：它原来住在这个弹出层里，于是整组一灰
+        //    就跟着点不动 —— 而用户最想翻日志的时刻恰恰是「还没载曲子就出事了」。
+        //    真机实测（90 号票）：只给那个子项设 IsEnabled = true **顶不掉**父级这道禁用，
+        //    连菜单头本身都是灰的、弹出层根本打不开 ⇒ 它搬到了工具栏上自成一个入口
+        //    （`OpenLogFolderButton`），不进这个函数、不受 _song 影响。
         OperationMenu.IsEnabled = _song is not null;
 
         // 演奏是「弹手上这一首」，没曲子可弹就灰着 —— 开出一个没东西可弹的窗口比灰着更让人困惑
@@ -1067,7 +1072,8 @@ public partial class MainWindow : Window
         SaveAsButton.IsEnabled = SaveButton.IsEnabled;
 
         // 「歌曲库」的判据只有曲库这一半：没曲库时按下去会开出一个空窗口，灰着比那诚实。
-        // 它也是空状态里唯一亮着的那颗 —— 第一首得从那儿拿进来
+        // 它也是空状态里「拿第一首进来」的那颗（空态里亮着的还有「打开日志文件夹」——
+        // 那颗跟曲子无关，见 RefreshEditState 开头那段）
         LibraryButton.IsEnabled = _library is not null;
 
         // 有没存下去的东西时**只有「保存」那一格**穿主色：丢的是「你改了没存」这件事，
@@ -1080,8 +1086,10 @@ public partial class MainWindow : Window
     private void OnRedoClick(object? sender, RoutedEventArgs e) => Redo();
 
     /// <summary>
-    /// 「操作 ▾」里那一项「打开日志文件夹」（61 号）。跟撤销/重做**不同族**：它不动谱面，
-    /// 只把日志那个文件夹摆到用户面前 —— 所以它在菜单里前面有一道分隔。
+    /// 「打开日志文件夹」（61 号开的入口，90 号从「操作 ▾」里搬到了工具栏上）。
+    /// 它跟撤销/重做**不同族**：不动谱面，只把日志那个文件夹摆到用户面前 ——
+    /// 所以它**不在 <see cref="RefreshEditState"/> 里**，不受「手上有没曲子」影响
+    /// （搬出来的理由见 MainWindow.axaml 里那颗按钮上面那段）。
     ///
     /// <b>日志还没写出来时点它也得开得出来</b>：目录不在就（建出来再）打开，**不是弹一句错**。
     /// 会走到 <see cref="ShowError"/> 的只有「连建都建不出来」那一档（盘满了、权限被拒），

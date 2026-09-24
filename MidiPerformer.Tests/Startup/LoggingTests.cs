@@ -386,28 +386,48 @@ public class LoggingTests
     // ==================== E. 菜单 ====================
 
     /// <summary>
-    /// 「操作 ▾」里：撤销 → 重做 → <b>一道分隔</b> → 「打开日志文件夹」。
-    /// 位置和那道分隔都在这儿钉死 —— 少了分隔它看起来就是第三个编辑动作，
-    /// 而「看起来像编辑动作」不会让任何东西报错。
+    /// 「打开日志文件夹」**不在「操作 ▾」里** —— 它在工具栏上自成一个入口（一颗素按钮）。
+    ///
+    /// 61 号当初把它加在「操作 ▾」里、还在前面加了一道分隔（那条注释写着「跟撤销/重做**不同族**」）。
+    /// 90 号票把那个矛盾坐实了：**注释说不同族，代码却把它按同族关掉** —— 那一组整组跟着
+    /// 「手上有没曲子」灰（`OperationMenu.IsEnabled = _song is not null`），
+    /// 于是「还没载曲子就出事了」这个**最想翻日志的时刻**它正好点不动。
+    /// 90 号在真机上量过：只给这一个子项设 <c>IsEnabled = true</c> 顶不掉父级那道禁用
+    /// （菜单头本身也是灰的、弹出层根本打不开）⇒ 留在原地是留不住的，只能搬出来。
+    ///
+    /// 这条钉的就是「搬出来」这件事：它的家**不在**「操作」那棵子树里 —— 这才是它在空态下
+    /// 点得动的原因（真机上「点得动」那一条在 <c>tools/uitest/verify-90.ps1</c> 里）。
     /// </summary>
     [Test]
-    public void 菜单_打开日志文件夹在撤销重做之后且前面有一道分隔()
+    public void 菜单_打开日志文件夹不在操作那一组里()
     {
-        var 项 = 操作菜单().Elements().ToList();
-        var 名字们 = 项.Select(e => e.Name.LocalName).ToList();
+        // 前置：这一项确实在（不在「操作」里 ≠ 没了）—— 少了这个前置，下面那条否证是空过的
+        var 那一颗 = 主窗口().Descendants()
+            .Where(e => e.Name.LocalName == "Button" && 名字(e) == "OpenLogFolderButton")
+            .ToList();
 
         Assert.Multiple(() =>
         {
-            Assert.That(名字们, Is.EqualTo(new[] { "MenuItem", "MenuItem", "Separator", "MenuItem" }),
-                "「操作」里的排法变了 —— 要的是 撤销 / 重做 / 分隔 / 打开日志文件夹");
+            Assert.That(那一颗, Has.Count.EqualTo(1), "工具栏上该有且只有一颗「打开日志文件夹」");
+            if (那一颗.Count == 1)
+            {
+                Assert.That((string?)那一颗[0].Attribute("Content"), Is.EqualTo("打开日志文件夹"),
+                    "那一颗上的字变了");
+                Assert.That((string?)那一颗[0].Attribute("Click"), Is.EqualTo("OnOpenLogFolderClick"),
+                    "那一颗没接上处理函数");
+            }
 
-            Assert.That((string?)项[0].Attribute("Header"), Is.EqualTo("撤销"));
-            Assert.That((string?)项[1].Attribute("Header"), Is.EqualTo("重做"));
-            Assert.That((string?)项[3].Attribute("Header"), Is.EqualTo("打开日志文件夹"));
+            // 🔴 正题：它不在「操作」那棵子树里（在里面的，会跟着 `_song` 一起灰）
+            Assert.That(操作菜单().DescendantsAndSelf()
+                    .Any(e => 名字(e) == "OpenLogFolderButton"),
+                Is.False,
+                "「打开日志文件夹」又回到「操作 ▾」里了 —— 那一组整组跟着谱面灰，"
+                + "没载曲子时它就点不动（90 号票的病根）");
 
-            Assert.That(名字(项[3]), Is.EqualTo("OpenLogFolderMenuItem"), "有测试按这个名字找它");
-            Assert.That((string?)项[3].Attribute("Click"), Is.EqualTo("OnOpenLogFolderClick"),
-                "那一项没接上处理函数");
+            // 那一组里现在剩的是「撤销 / 重做」两项，一个不多一个不少
+            Assert.That(操作菜单().Elements().Select(e => 名字(e)).ToList(),
+                Is.EqualTo(new[] { "UndoMenuItem", "RedoMenuItem" }),
+                "「操作」里该只剩撤销 / 重做（那两项确实该跟着谱面走）");
         });
     }
 

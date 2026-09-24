@@ -245,8 +245,8 @@
       <StackPanel Spacing="8">
         <Grid ColumnDefinitions="Auto,*">
           <!--
-            工具栏左边这一排，间距一样（8px）：歌曲库 | [保存 │ 另存为…] | 操作 ▾ | 演奏。
-            分组按的是这件事是什么：进出盘的一簇、动谱面的一簇、开窗口的两颗。
+            工具栏左边这一排，间距一样（8px）：歌曲库 | [保存 │ 另存为…] | 操作 ▾ | 演奏 | 打开日志文件夹。
+            分组按的是这件事是什么：进出盘的一簇、动谱面的一簇、开窗口的两颗、诊断一颗。
             新增的编辑动作往「操作」里加。
 
             这一排里除了存盘组，其余都是「按一下就干一件事、没有下拉」的入口，所以是 Button
@@ -255,6 +255,8 @@
 
             原来那两颗「还没搬走」的已经不在了：导入去了曲库窗口右上角（55 号），
             导出被「另存为…」吸收掉（54 号）。两颗都不是消失，是各有去处。
+            「打开日志文件夹」是 90 号从「操作 ▾」里搬出来的第五样 —— 它按的就是上面那条规矩
+            （按一下就干一件事、没有下拉），搬出来的理由写在它自己那段注释里。
           -->
           <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8">
           <!-- 歌曲库：按一下开一个窗口（SongLibraryWindow），挑一首打开、或者把不要的删掉。没配曲库时置灰。 -->
@@ -290,17 +292,6 @@
               <MenuItem x:Name="RedoMenuItem" Header="重做" IsEnabled="False"
                         InputGesture="Ctrl+Y"
                         Click="OnRedoClick" />
-
-              <!--
-                分隔：下面那一项跟撤销/重做**不同族**。上面两项动的是手上这份谱面（所以跟着
-                「有没有曲子」灰），这一项动的是这台机器上的一个文件夹 —— 它跟谱面没有关系。
-                所以中间得有一道分隔，不然它看起来像第三个编辑动作。
-              -->
-              <Separator />
-
-              <!-- 打开日志文件夹：61 号。出事之后要能翻到痕迹，入口就在这儿。见 OnOpenLogFolderClick。 -->
-              <MenuItem x:Name="OpenLogFolderMenuItem" Header="打开日志文件夹"
-                        Click="OnOpenLogFolderClick" />
             </MenuItem>
           </Menu>
 
@@ -309,6 +300,22 @@
           <Button x:Name="PerformerButton" Classes="menubar" Content="演奏"
                   Click="OnPerformerClick"
                   ToolTip.Tip="另开一个窗口，把选中的轨弹到别的程序里去" />
+
+          <!--
+            打开日志文件夹：61 号开的入口，90 号从「操作 ▾」里搬到了台面上。
+
+            原来它住在那个弹出层里、跟撤销/重做共用一道门（`OperationMenu.IsEnabled`），
+            于是**最想翻日志的那一刻它正好点不动** —— 刚装好、还没载曲子就出事了，
+            而那一刻整组是灰的。90 号票在真机上量过：只给这一个子项设 IsEnabled = true
+            **顶不掉**父级那道禁用，连菜单头本身都是灰的、弹出层根本打不开
+            （真机读数：头 能点=False、弹出层 0 条）⇒ 想留在原地是留不住的，只能搬出来。
+
+            它动的是这台机器上的一个文件夹、跟谱面毫无关系，所以它跟「歌曲库」「演奏」
+            一样是一颗素按钮：**不进 RefreshEditState、不受 `_song` 影响**，空态里也亮着。
+          -->
+          <Button x:Name="OpenLogFolderButton" Classes="menubar" Content="打开日志文件夹"
+                  Click="OnOpenLogFolderClick"
+                  ToolTip.Tip="把这个程序的日志文件夹开出来：出事之后要翻痕迹就点它" />
           </StackPanel>
 
           <!-- 6 而不是 14：外面那个 StackPanel 自己给了 8px 间距，加起来还是原来那 14 -->
