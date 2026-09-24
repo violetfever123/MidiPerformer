@@ -558,6 +558,12 @@ public class KeyRateReadoutTests
     ///
     /// 用户的原话：「对于按键速度的测量，可以尽量在播放之前就计算出来吗？我不希望在播放的时候
     /// 临时看」。
+    ///
+    /// 74 号票把算的地方从三处加到**四处**：动一次微调也算一遍。理由是同一个「真相源」——
+    /// 微调会进事件表（<c>StartPerformanceRequest.TransposeOffset</c> → <c>EventTable.Build</c>），
+    /// 表变了读数不跟着变，屏幕上那两个数说的就是另一张表了。原型那句写的正是
+    /// 「这两个数在**选好轨 / 动微调**的时候就算出来」，所以第四处不是多出来的。
+    /// 「播放那条路上一次都不算」这一半一个字都没动（下面那四条还在）。
     /// </summary>
     [Test]
     public void 读数在播放之前算完播放期间一下都不算()
@@ -568,8 +574,8 @@ public class KeyRateReadoutTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(数一数(只读代码(原文), "_ = RefreshKeyRate();"), Is.EqualTo(3),
-                "算的地方该有三处：装曲子 / 换一条轨 / 换一次时序，一个不多");
+            Assert.That(数一数(只读代码(原文), "_ = RefreshKeyRate();"), Is.EqualTo(4),
+                "算的地方该有四处：装曲子 / 换一条轨 / 换一次时序 / 动一次微调，一个不多");
             Assert.That(数一数(构造函数, "_ = RefreshKeyRate();"), Is.EqualTo(2),
                 "构造期挂的两处：换时序、换一条轨");
             Assert.That(构造函数, Does.Contain("new KeyRateView("), "控件在这儿认领");

@@ -13,12 +13,21 @@ namespace MidiPerformer.Core.Ports.Inbound;
 /// 让可演奏区容下最多音符，同分时取平均八度最近的（见 <c>NoteMapper.AutoBaseOctave</c>）。</param>
 /// <param name="Timing">时序档位，原样用 <see cref="InputTiming"/>。</param>
 /// <param name="CountdownSeconds">盲倒计时秒数：用户用这段时间切到游戏窗口，倒计时结束才发第一个音。</param>
+/// <param name="TransposeOffset">演奏器的**微调**（半音，−1 / 0 / +1）：叠在这条轨自己的
+/// <see cref="Track.Transpose"/> 上面，**这一次演奏**的偏移。
+/// <para>
+/// 它**不写回** <see cref="Track.Transpose"/>（演奏器是「放」的，不是「改」的：写回等于在用户没保存的
+/// 情况下动了他的曲子，而这一屏根本没有保存的概念），所以它只能跟着这一次请求走 ——
+/// 也就是说，它必须**进事件表**（见 <c>EventTable.Build</c>）：条子上亮的那几格和真按下去的
+/// 那几格是同一件事的两半，微调只挪读数不挪事件表的话，越界那 2 个音符照样会被弹出去。
+/// </para></param>
 public sealed record StartPerformanceRequest(
     Song Song,
     int TrackIndex,
     int? BaseOctave,
     InputTiming Timing,
-    double CountdownSeconds);
+    double CountdownSeconds,
+    int TransposeOffset = 0);
 
 /// <summary>
 /// 预检的结论：放行，或者三种失败之一。文案是界面的事 —— Core 只回一个原因，

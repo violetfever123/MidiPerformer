@@ -224,7 +224,7 @@ public sealed class StartPerformance
         // 中间那个是这张表铺了多久 —— 派发这一路用不上（进度条读的是 Song.TotalSeconds），
         // 它是按键速度读数的分母
         var (events, _, walker) = EventTable.Build(
-            request.Song, request.TrackIndex, request.Timing, request.BaseOctave);
+            request.Song, request.TrackIndex, request.Timing, request.BaseOctave, request.TransposeOffset);
         return (events, walker);
     }
 }

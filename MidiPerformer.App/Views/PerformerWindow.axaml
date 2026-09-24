@@ -303,6 +303,61 @@
       <Setter Property="Background" Value="{DynamicResource TokenStop}" />
     </Style>
 
+    <!-- ==================== 微调（±1 半音） ==================== -->
+    <!--
+      形状照抄轨编辑器那个移调步进器（TrackLaneView.axaml 的 Border.stepper / Button.step /
+      Border.step-value）：同样的圆角框、同样的透明步进键、同样的中间那格 ——
+      两个窗口里认的是同一个东西。档位只给 ±1：八度一级的偏差由打开曲子时算出来的基准八度解决，
+      而且算完就钉住（原型 S1/S2：「抄形状，不抄 ±12 那两格」）。
+      （那格在编辑器里是只读的 Border.step-value，形状照抄，但它是**按键** —— 见下面那一段。）
+    -->
+    <Style Selector="Border.stepper">
+      <Setter Property="Background" Value="{DynamicResource TokenSurface}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource TokenLine}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="{DynamicResource TokenRadiusControl}" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+
+    <!-- 步进按钮：贴着外框，所以自己不要边框、不要圆角，比普通按钮矮一号 -->
+    <Style Selector="Button.step">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="CornerRadius" Value="0" />
+      <Setter Property="Padding" Value="6,2" />
+      <Setter Property="FontSize" Value="11.5" />
+      <Setter Property="MinHeight" Value="0" />
+      <!-- 三颗等宽：选中那颗要重一档字重，不定宽的话它一粗就把中间那格挤窄一点 -->
+      <Setter Property="MinWidth" Value="28" />
+      <Setter Property="Foreground" Value="{DynamicResource TokenInkMuted}" />
+    </Style>
+
+    <!--
+      中间那格 0：左右各一条竖线把它和按钮分开（编辑器里是 Border.step-value 干的）。
+      这儿它是**按键**不是只读的值格 —— 「0」也是一个要能选回来的档位，所以竖线直接画在按钮上。
+
+      ⚠️ 除了宽度和这两条竖线，**别的什么都不许加**：字体 / 高度 / 内外边距一动，三颗的盒子尺寸就不一样了。
+      实机量到过——给这格加过 TokenFontMono（等宽字的行高和默认字体不一样），中间那颗就成了 36 px 高、顶边低 2 px，
+      另两颗 40 px（「三颗一样高、顶边一格不差」当场不过）。编辑器那个值格本来也没用等宽字，
+      所以去掉它既是修盒子，也是更贴「抄形状」。
+    -->
+    <Style Selector="Button.step.mid">
+      <Setter Property="MinWidth" Value="58" />
+      <Setter Property="BorderBrush" Value="{DynamicResource TokenLine}" />
+      <Setter Property="BorderThickness" Value="1,0" />
+    </Style>
+
+    <!--
+      选中的那一档。取别的控件「选中」用的那一套（ListBoxItem:selected：accent-soft 底 + 重一档字重），
+      不另发明一种选中态。只换底色 / 字重，不换边框粗细 —— 一改边框宽度，三颗的盒子尺寸就变了。
+      排在 .step 之后（同优先级谁后写谁赢），而且比它多一个类。
+    -->
+    <Style Selector="Button.step.on">
+      <Setter Property="Background" Value="{DynamicResource TokenAccentSoft}" />
+      <Setter Property="Foreground" Value="{DynamicResource TokenInk}" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+
   </Window.Styles>
 
   <StackPanel Margin="14" Spacing="11">
@@ -389,11 +444,42 @@
 
     </StackPanel>
 
+    <!-- ============ 微调（±1 半音） ============ -->
+    <!--
+      位置是**钉死的**：在「按键速度」下面、38 根细条正上面，中间不插任何东西 ——
+      这两块是一个东西的两半（一挪挪的是整首歌，条子整片跟着挪一根），
+      隔开一行的话，微调一动，眼睛还得往下跳一段才看得见图变了（原型 S3 / W1 ③）。
+
+      三颗按钮 = 三个档位（−1 / 0 / +1），默认选 0。中间那颗是「值格」的样子 ——
+      形状照抄轨编辑器那个步进器，所以两个窗口里认的是同一个东西。
+
+      「一档一个半音，挪的是整首歌，窗口不动」是**代码**保证的：
+      这个值不写回 track.Transpose（演奏器是「放」的，不是「改」的），
+      而是化作 StartPerformanceRequest.TransposeOffset 进事件表 —— 条子上亮的那几格和真按下去的
+      那几格因此还是同一张表；而窗口（基准八度）在载入时就算定、算完钉住，微调一动不动它。
+    -->
+    <Grid ColumnDefinitions="74,*" ColumnSpacing="10">
+      <TextBlock Grid.Column="0" Classes="row-label" Text="微调" />
+      <Border Grid.Column="1" Classes="stepper" HorizontalAlignment="Left">
+        <StackPanel Orientation="Horizontal">
+          <!--
+            Tag 里是 ASCII 减号（要被 int.Parse 读），按钮上写的是排版用的减号 U+2212 ——
+            和编辑器那几颗一样，两个字符不一样是有意的。
+          -->
+          <Button x:Name="FineMinus" Classes="step" Content="−1" Tag="-1"
+                  Click="OnFineTune" ToolTip.Tip="整首歌低一个半音" />
+          <Button x:Name="FineZero" Classes="step mid" Content="0" Tag="0"
+                  Click="OnFineTune" ToolTip.Tip="不微调" />
+          <Button x:Name="FinePlus" Classes="step" Content="+1" Tag="1"
+                  Click="OnFineTune" ToolTip.Tip="整首歌高一个半音" />
+        </StackPanel>
+      </Border>
+    </Grid>
+
     <!-- ============ 音域读数（38 根细条） ============ -->
     <!--
       这一块横跨整行、不缩进 84px：原型里 .p38 就是 .pwin 的直接子元素，和 .prow 平级。
       位置在「微调」下面、中间不插任何东西（这两块是一个东西的两半：挪半音，条子整片跟着挪一根）。
-      本批还没有微调那一行，所以它现在直接压在「时序」上面 —— 微调落地时插在它上面即可。
 
       四段 = 手上四段：前三段各 12 个半音（低八度 / 基准八度 / 高八度），
       尾巴两个是「右键 + 逗号」（B+2 的 do 和 #do）—— 12:12:12:2 这个比例是格子的权重给的，

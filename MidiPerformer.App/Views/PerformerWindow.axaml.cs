@@ -85,6 +85,16 @@ public partial class PerformerWindow : Window
     /// <summary>上一次画到条子上的那个音。<see cref="OnProgressTick"/> 100ms 一次，同一个音不必重画。</summary>
     private string _rangeNote = "";
 
+    /// <summary>
+    /// 微调：整首歌相对窗口平移几个半音（−1 / 0 / +1），默认 0。
+    ///
+    /// **它不写回 <c>track.Transpose</c>** —— 演奏器是「放」的，不是「改」的：写回就是用户没保存
+    /// 的情况下动了他的曲子，而这一屏根本没有保存这个概念。所以它只跟着**这一次**走：
+    /// 连同一个基准八度交给 <see cref="StartPerformanceRequest.TransposeOffset"/> 进事件表，
+    /// 同时喂给音域读数 —— 条子上亮的那几格和真按下去的那几格因此还是同一张表。
+    /// </summary>
+    private int _fineTune;
+
     private Song? _song;
     private bool _running;
 
@@ -117,6 +127,10 @@ public partial class PerformerWindow : Window
         TimingCombo.SelectedIndex = 1;              // 标准档（InputTiming.FromIndex(1)）
         CountdownCombo.ItemsSource = CountdownNames;
         CountdownCombo.SelectedIndex = 1;           // 5 秒
+
+        // 微调默认 0（三颗里选中的是中间那颗）。XAML 里三颗都不带 .on —— 选中态是**代码**刷的
+        // （见 MarkFineTune），所以「默认选谁」只有 _fineTune 这一个真相源。
+        MarkFineTune();
 
         // 时序是事件表的一个输入（帧宽 / 提前量 / 重触发间隔都在它里面）：换了档位就是另一张表，
         // 按键速度读数得跟着重量一遍 —— 摆着旧数就是「读数」和「真按下去那张表」两个真相源。
@@ -281,14 +295,70 @@ public partial class PerformerWindow : Window
     private static string Describe(PlayableTrack r)
         => $"{r.SongTrackIndex + 1:D2} {r.Track.Name} · {r.Track.NoteCount} 个音";
 
+    // ==================== 微调（±1 半音） ====================
+
+    /// <summary>
+    /// 三颗微调按钮（−1 / 0 / +1）。按钮只说「要哪一档」，值在这儿落地：选中的那档刷上 <c>.on</c>，
+    /// 条子跟着重画，按键速度也重量一遍。
+    ///
+    /// **为什么读数要重量一遍**：微调改的是「要发出去的那张表」（它进 <c>EventTable.Build</c>），
+    /// 表变了，靠这张表量出来的两个数（平均 / 峰值）和直方图就跟着那一份 —— 摆着旧数就是
+    /// 「读数」和「真按下去那张表」两个真相源。原型写的就是「这两个数在选好轨 / 动微调的时候就算出来」。
+    ///
+    /// 窗口（基准八度）**不跟着挪**：它载入时算定（见 <see cref="WindowBaseOctave"/>），
+    /// 所以条子整片平移一根，而不是「挪一格、顺手换个窗口再挪一格」。
+    ///
+    /// 演奏期间这三颗是灰的（<see cref="SetRunning"/>）：这一场的事件表按下开始那一刻就建好了，
+    /// 中途再挪半音只挪得动读数 —— 屏幕上说挪了，耳朵里那张旧表照发，那正是要防的那种「对不上」。
+    /// </summary>
+    private void OnFineTune(object? sender, RoutedEventArgs e)
+    {
+        // Tag 里是 ASCII 的 -1 / 0 / 1（按钮上写的是排版用的减号 U+2212，两个字符不一样是有意的）。
+        // 取不出档位就什么都不做 —— 三颗按钮的字与档位对不上是写错了，不该顺手当成 0。
+        if (sender is not Button { Tag: string tag } || !int.TryParse(tag, out int value)) return;
+
+        _fineTune = value;
+        MarkFineTune();
+        RefreshRange();
+        _ = RefreshKeyRate();
+    }
+
+    /// <summary>三颗按钮里挂着 <c>.on</c> 的只有选中的那一档（默认 0，见构造器）。</summary>
+    private void MarkFineTune()
+    {
+        FineMinus.Classes.Set("on", _fineTune == -1);
+        FineZero.Classes.Set("on", _fineTune == 0);
+        FinePlus.Classes.Set("on", _fineTune == 1);
+    }
+
+    /// <summary>下拉框选中的那条轨（<c>null</c> = 还没曲子 / 一条能弹的都没有）。</summary>
+    private PlayableTrack? CurrentTrack()
+    {
+        // 和 OnStart / RefreshRange 同一个下标含义：这张表里的第几条，不是原曲里的第几条
+        int index = TrackCombo.SelectedIndex;
+        return index >= 0 && index < _playable.Count ? _playable[index] : null;
+    }
+
+    /// <summary>
+    /// 这 38 格窗口压在哪儿（基准八度）。**算一次就钉住** —— 它从这条轨的音高与它自己的移调来，
+    /// **不含微调**：一档一个半音，挪的是整首歌、窗口不动（原型那句）。所以 −1 / 0 / +1 来回按，
+    /// 窗口始终是同一个，条子整片平移。
+    ///
+    /// 算法和执行时那个窗口是同一个：<see cref="PitchRangeReadout.Measure"/> 挑的就是
+    /// <c>NoteMapper.AutoBaseOctave</c>，而微调这边又把它当 <c>Map</c> 的 manualBaseOctave 递回去 ——
+    /// 屏幕上的窗口和发出去的那些音用的是同一个八度，不各挑各的。
+    /// </summary>
+    private static int? WindowBaseOctave(IReadOnlyList<int>? pitches, int transpose)
+        => pitches is null ? null : PitchRangeReadout.Measure(pitches, transpose).BaseOctave;
+
     // ==================== 音域读数（38 根细条） ====================
 
     /// <summary>
     /// 把当前这条轨的音域画到那 38 格上。
     ///
-    /// 喂进去的是**原谱**音高加这条轨的移调 —— 和执行时 <c>StartPerformance</c> 递给
-    /// <c>NoteMapper.Map</c> 的是同一对；基准八度也不在这儿另算（<c>NoteMapper.AutoBaseOctave</c>，
-    /// 两个真相源迟早会对不上）。所以条子上亮的那几格，就是真按下去的那几格。
+    /// 喂进去的是**原谱**音高加这条轨的移调**加微调** —— 和执行时 <c>StartPerformance</c> 递给
+    /// <c>NoteMapper.Map</c> 的是同一对；基准八度由这条轨算定、微调不含在里面
+    /// （见 <see cref="WindowBaseOctave"/>）。所以条子上亮的那几格，就是真按下去的那几格。
     ///
     /// 「正在响的那个音」从事件表那串字（<c>NoteMapper.Describe</c>）反解出来：
     /// 派发线程递到界面的只有那串字，音高是它带过来的唯一一样东西。
@@ -297,14 +367,15 @@ public partial class PerformerWindow : Window
     {
         _rangeNote = _currentNote;
 
-        // 和 OnStart / ShowReady 同一个下标含义：这张表里的第几条，不是原曲里的第几条
-        int index = TrackCombo.SelectedIndex;
-        var track = index >= 0 && index < _playable.Count ? _playable[index].Track : null;
+        var track = CurrentTrack();
+        var pitches = track?.Track.Notes.Select(n => n.Pitch).ToList();
+        int transpose = track?.Track.Transpose ?? 0;
 
         _range.Show(
-            track?.Notes.Select(n => n.Pitch).ToList(),
-            track?.Transpose ?? 0,
-            PitchRangeReadout.PitchOfLabel(_currentNote));
+            pitches,
+            transpose + _fineTune,
+            PitchRangeReadout.PitchOfLabel(_currentNote),
+            WindowBaseOctave(pitches, transpose));
     }
 
     // ==================== 按键速度（平均 + 峰值 + 每秒直方图） ====================
@@ -313,8 +384,9 @@ public partial class PerformerWindow : Window
     /// 把当前这条轨量成一块按键速度读数，画到窗口上。
     ///
     /// **在播放之前算**（用户的原话：「可以尽量在播放之前就计算出来吗？我不希望在播放的时候
-    /// 临时看」）—— 载入、换一条演奏轨、换一次时序就重算一遍，演奏期间一个数都不动，
-    /// 没有计时器、没有节流，也没有一边弹一边更新这回事。
+    /// 临时看」）—— 载入、换一条演奏轨、换一次时序、动一次微调就重算一遍，演奏期间一个数都不动，
+    /// 没有计时器、没有节流，也没有一边弹一边更新这回事。微调也算在里面，是因为它改的是那张表
+    /// （<c>TransposeOffset</c> 进了 <c>EventTable.Build</c>）：表变了，读数不跟着变就是两个真相源。
     ///
     /// 三个数都从 <see cref="EventTable.Build"/> 那张**事件表**来：就是真按下去时
     /// <see cref="StartPerformance"/> 递给派发器的那一张（它自己也走同一个方法，连时序都是
@@ -339,7 +411,8 @@ public partial class PerformerWindow : Window
         var state = await Task.Run(() =>
         {
             var (events, seconds, _) = EventTable.Build(
-                request.Song, request.TrackIndex, request.Timing, request.BaseOctave);
+                request.Song, request.TrackIndex, request.Timing, request.BaseOctave,
+                request.TransposeOffset);
             return KeyRateReadout.Measure(events, seconds);
         });
 
@@ -348,7 +421,7 @@ public partial class PerformerWindow : Window
     }
 
     /// <summary>
-    /// 手上这份选择拼出来的那一次「演奏」：选中的轨 + 时序 + 倒计时。
+    /// 手上这份选择拼出来的那一次「演奏」：选中的轨 + 时序 + 倒计时 + 微调。
     ///
     /// 按下开始、以及算按键速度读数，要的是**同一份**参数 —— 各拼一遍的话，
     /// 读数会和真按下去的那张事件表错开（比如时序换了读数没换）。给不出就是 <c>null</c>
@@ -360,17 +433,23 @@ public partial class PerformerWindow : Window
 
         // 下拉框的选中项是「能弹的轨」那张表里的下标，不是 song.Tracks 的下标（中间筛掉过几条），
         // 所以递给用例的是原曲里的下标 _playable[index].SongTrackIndex。
-        int index = TrackCombo.SelectedIndex;
-        if (index < 0 || index >= _playable.Count) return null;
+        if (CurrentTrack() is not { } track) return null;
+
+        var pitches = track.Track.Notes.Select(n => n.Pitch).ToList();
 
         return new StartPerformanceRequest(
             song,
-            _playable[index].SongTrackIndex,
-            // 基准八度永远自动（null）：按音域挑那个能容下最多音符的八度。人工选八度是程序算得比人准的事，
-            // 「基准八度」那一行连同它的下拉框已经按界面改版删掉了。
-            BaseOctave: null,
+            track.SongTrackIndex,
+            // 基准八度：载入这条轨时算出来、算完钉住的那一个。从前这儿是 null（每次让 Map 自己再挑
+            // 一遍），而微调要的是「挪的是整首歌，窗口不动」—— 每次都重挑的话，挪到边界上会突然
+            // 跳一整段，用户看到的就不是整片平移一根了。人工选八度仍然是程序算得比人准的事，
+            // 「基准八度」那一行连同它的下拉框早就按界面改版删掉了。
+            BaseOctave: WindowBaseOctave(pitches, track.Track.Transpose),
             InputTiming.FromIndex(TimingCombo.SelectedIndex),
-            CountdownOptions[Math.Clamp(CountdownCombo.SelectedIndex, 0, CountdownOptions.Length - 1)]);
+            CountdownOptions[Math.Clamp(CountdownCombo.SelectedIndex, 0, CountdownOptions.Length - 1)],
+            // 微调：这一次演奏的偏移（−1 / 0 / +1）。它进事件表 —— 条子上亮的那几格和真按下去的
+            // 那几格因此还是同一张表。**不写回 track.Transpose**：演奏器是「放」的，不是「改」的。
+            TransposeOffset: _fineTune);
     }
 
     // ==================== 开始 / 急停 ====================
@@ -555,6 +634,12 @@ public partial class PerformerWindow : Window
         TrackCombo.IsEnabled = canPick;
         TimingCombo.IsEnabled = !running;
         CountdownCombo.IsEnabled = !running;
+
+        // 微调三颗：演奏期间锁死。这一场的事件表在按下开始那一刻就建好了，中途再挪半音
+        // 只挪得动读数 —— 屏幕上说挪了，耳朵里那张旧表照发（见 OnFineTune 那段的理由）。
+        FineMinus.IsEnabled = !running;
+        FineZero.IsEnabled = !running;
+        FinePlus.IsEnabled = !running;
     }
 
     // ==================== 状态行 ====================

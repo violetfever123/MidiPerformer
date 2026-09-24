@@ -85,7 +85,14 @@ public static class PitchRangeReadout
     /// 越界的统计则按原型：每个音都算数，重复的音各算一个（「漏了多少个音符」才是用户关心的事），
     /// 而列出来的音名去重。
     /// </summary>
-    public static PitchRangeState Measure(IReadOnlyList<int> pitches, int transpose)
+    /// <param name="manualBaseOctave">手给基准八度；<c>null</c> = 按这里的音自动选。
+    /// **演奏器的微调走的是「手给」这一支**，理由是这个类与 <see cref="NoteMapper.Map"/> 共用的那条契约：
+    /// 窗口在**载入时**定下，微调只挪歌、不挪窗口（原型那句「挪的是整首歌，窗口不动」）。
+    /// 每次微调都重算一遍自动八度的话，那就不叫微调了 —— 那叫「顺着微调把窗口也挪一下再挑个新的」，
+    /// 挪到边界上会突然跳一整段，用户看到的就不是「整片平移一根」。
+    /// 参数形状和 <see cref="NoteMapper.Map"/> 的 <c>manualBaseOctave</c> 一模一样，两处读法一致。</param>
+    public static PitchRangeState Measure(
+        IReadOnlyList<int> pitches, int transpose, int? manualBaseOctave = null)
     {
         var all = new List<int>(pitches.Count);
         var valid = new List<int>(pitches.Count);
@@ -96,7 +103,7 @@ public static class PitchRangeReadout
             if (shifted is >= 0 and <= 127) valid.Add(shifted);
         }
 
-        int baseOctave = NoteMapper.AutoBaseOctave(valid);
+        int baseOctave = manualBaseOctave ?? NoteMapper.AutoBaseOctave(valid);
 
         var used = new SortedSet<int>();
         var outside = new SortedSet<int>();
@@ -326,9 +333,12 @@ public sealed class PitchRangeView
     /// 是它的整轨移调加上微调；<paramref name="nowPitch"/> 是这一刻正在响的那个音（没有就给 null）。
     /// 没有曲子時传 <c>null</c>：细条全暗、读数行整行不出现 —— 读数是**这首歌**的量，没歌就没得说。
     /// </summary>
-    public void Show(IReadOnlyList<int>? pitches, int transpose, int? nowPitch)
+    /// <param name="baseOctave">手给基准八度（窗口在哪儿）；<c>null</c> = 按传进来的音自动选。
+    /// 演奏器给的是**载入时钉住的那一个**，所以微调动来动去窗口都不动
+    /// （见 <see cref="PitchRangeReadout.Measure"/> 上那段）。</param>
+    public void Show(IReadOnlyList<int>? pitches, int transpose, int? nowPitch, int? baseOctave = null)
     {
-        var state = PitchRangeReadout.Measure(pitches ?? Array.Empty<int>(), transpose);
+        var state = PitchRangeReadout.Measure(pitches ?? Array.Empty<int>(), transpose, baseOctave);
 
         // 一根一根照着这一帧的样子刷。顺序**就是**条的先后（四段依次、每段从左到右），
         // 所以这里的下标必须一格不错 —— 错了就是「亮的那片整体挪了一根」，看着还挺像回事。

@@ -567,8 +567,8 @@ public class PitchRangeReadoutTests
     }
 
     /// <summary>
-    /// 块的位置：在「演奏轨」下面、「时序」上面 —— 也就是**正好压在时序上面**。
-    /// 微调那一行落地时插在它上面（那两块的先后是规格里点名的：条子直接贴在微调下面，中间不插任何东西）。
+    /// 块的位置：在「演奏轨」下面、「时序」上面。上面压着「按键速度」，下面紧挨着「微调」——
+    /// 微调那一行落地之后（74 号票），**微调那一行紧挨着它**（条子直接贴在微调下面，中间不插任何东西）。
     /// </summary>
     [Test]
     public void 音域块的位置在时序上面()
@@ -579,11 +579,343 @@ public class PitchRangeReadoutTests
         Assert.Multiple(() =>
         {
             Assert.That(位("PitchRange"), Is.GreaterThan(位("TrackCombo")), "音域块该在演奏轨下面");
+            Assert.That(位("PitchRange"), Is.GreaterThan(位("FinePlus")), "微调那一行在它上面");
             Assert.That(位("PitchRange"), Is.LessThan(位("TimingCombo")), "音域块该压在时序上面");
             Assert.That(位("RangeBar"), Is.LessThan(位("RangeKeys")), "段头在条子下面");
             Assert.That(位("RangeKeys"), Is.LessThan(位("RangeSummary")), "读数行在段头下面");
             Assert.That(位("RangeSummary"), Is.LessThan(位("RangeAlert")),
                 "越界那一声和读数行是互斥的两块，排在它后面");
+        });
+    }
+
+    // ==================== 74：微调那一行（±1 半音） ====================
+
+    /// <summary>仓库根（<c>MidiPerformer.App</c> 的上一层）。</summary>
+    private static string 仓库根 => Path.GetFullPath(Path.Combine(AppDir, ".."));
+
+    /// <summary>按相对路径读一个文件（判据要跨 Core / App 两边看）。</summary>
+    private static string 读(params string[] 段) => File.ReadAllText(Path.Combine(段.Prepend(仓库根).ToArray()));
+
+    /// <summary>演奏器窗口的代码（接线那一半）。</summary>
+    private static string 演奏器代码 => 读("MidiPerformer.App", "Views", "PerformerWindow.axaml.cs");
+
+    /// <summary>取两处标记之间的原文（两头的标记都得在，第二个在第一个之后）。</summary>
+    private static string 一段(string source, string 起, string 止)
+    {
+        int a = source.IndexOf(起, StringComparison.Ordinal);
+        Assert.That(a, Is.GreaterThanOrEqualTo(0), $"源码里找不到「{起}」");
+
+        int b = source.IndexOf(止, a + 起.Length, StringComparison.Ordinal);
+        Assert.That(b, Is.GreaterThan(a), $"「{起}」之后找不到「{止}」");
+
+        return source[a..b];
+    }
+
+    /// <summary>数一段代码里某串字出现了几次。</summary>
+    private static int 数一数(string source, string 找)
+    {
+        int 数 = 0;
+        for (int i = source.IndexOf(找, StringComparison.Ordinal); i >= 0;
+             i = source.IndexOf(找, i + 找.Length, StringComparison.Ordinal))
+        {
+            数++;
+        }
+        return 数;
+    }
+
+    /// <summary>亮着的那几根的下标（0 起，从窗口最低那个音数）。</summary>
+    private static List<int> 亮格(PitchRangeState 状态) =>
+        PitchRangeReadout.BarsOf(状态, null)
+            .Select((b, i) => (b, i))
+            .Where(t => t.b.Lit)
+            .Select(t => t.i)
+            .ToList();
+
+    /// <summary>
+    /// 位置是**钉死的**：在「按键速度」下面、38 根细条正上面，**中间不插任何东西**。
+    ///
+    /// 这一条盯的是「谁挨着谁」：微调那一行在窗口最外层那排孩子里，**下一个**就得是音域块
+    /// （原型 W1 ③：条子直接贴在微调下面，中间不插任何东西 —— 这两块是一个东西的两半，
+    /// 隔开一行的话，微调一动，眼睛还得往下跳一段才看得见图变了）。
+    /// </summary>
+    [Test]
+    public void 微调那一行夹在按键速度与三十八根细条中间()
+    {
+        var 根 = 窗();
+        var 顺序 = 根.Descendants().ToList();
+        int 位(string 名) => 顺序.FindIndex(e => 名字(e) == 名);
+
+        // 微调那一行 = 三颗按钮的爷爷：Button → StackPanel → Border.stepper → Grid
+        var 行 = 控件(根, "FineZero").Parent!.Parent!.Parent!;
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(行.Name.LocalName, Is.EqualTo("Grid"), "三颗按钮该装在一个 Grid 里（别的行同一套格子）");
+            Assert.That(属性(行, "ColumnDefinitions"), Is.EqualTo("74,*"), "和别的行同一套格子");
+            Assert.That(行.Elements().First().Attribute("Text")?.Value, Is.EqualTo("微调"), "标签写「微调」");
+
+            Assert.That(位("FineMinus"), Is.GreaterThan(位("KeyRate")), "微调该在按键速度下面");
+            Assert.That(位("FinePlus"), Is.LessThan(位("RangeBar")), "微调该在 38 根细条上面");
+            Assert.That(位("FineZero"), Is.LessThan(位("TimingCombo")), "整行都在时序上面");
+
+            // 「中间不插任何东西」：最外层那排孩子里，微调那一行的下一个就是音域块
+            var 孩子 = 行.Parent!.Elements().ToList();
+            int 我 = 孩子.IndexOf(行);
+            Assert.That(我, Is.GreaterThanOrEqualTo(0), "微调那一行该是窗口最外层那排孩子之一");
+            Assert.That(我 + 1, Is.LessThan(孩子.Count), "微调那一行后面还有个音域块");
+            Assert.That(孩子[我 + 1].DescendantsAndSelf().Any(e => 名字(e) == "RangeBar"), Is.True,
+                "微调下面紧挨着的就得是那 38 根细条 —— 中间不插任何东西");
+        });
+    }
+
+    /// <summary>
+    /// 三颗按钮 = 三个档位（−1 / 0 / +1），形状照抄轨编辑器那个步进器：
+    /// 外框 <c>Border.stepper</c>、三颗都是 <c>Button.step</c>、中间那颗多一个 <c>mid</c>（值格的样子）。
+    ///
+    /// **默认选谁不在 XAML 里写**：三颗都不带 <c>.on</c>，选中态由代码按 <c>_fineTune</c> 刷
+    /// （XAML 里写死一颗 = 和 _fineTune 两个真相源）。
+    /// </summary>
+    [Test]
+    public void 微调是三颗按钮中间那颗是值格的样子()
+    {
+        var 根 = 窗();
+        var 三颗 = new[] { "FineMinus", "FineZero", "FinePlus" }.Select(n => 控件(根, n)).ToList();
+        var 框 = 控件(根, "FineZero").Parent!.Parent!;
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(三颗.Select(e => e.Name.LocalName), Is.All.EqualTo("Button"),
+                "三个档位都是按钮，不是只读的值格（「0」也是一个要能选回来的档位）");
+            Assert.That(三颗.Select(e => 属性(e, "Content")), Is.EqualTo(new[] { "−1", "0", "+1" }),
+                "按钮上写的是排版用的减号（U+2212）");
+            Assert.That(三颗.Select(e => 属性(e, "Tag")), Is.EqualTo(new[] { "-1", "0", "1" }),
+                "Tag 里是 ASCII 的减号（要被 int.Parse 读）—— 和编辑器那几颗一样，两个字符不一样是有意的");
+            Assert.That(三颗.Select(e => 属性(e, "Click")), Is.All.EqualTo("OnFineTune"));
+
+            Assert.That(框.Name.LocalName, Is.EqualTo("Border"));
+            Assert.That(属性(框, "Classes"), Is.EqualTo("stepper"), "外框就是编辑器的那个圆角框");
+            Assert.That(属性(框, "HorizontalAlignment"), Is.EqualTo("Left"), "整框靠左，不铺满那一栏");
+
+            Assert.That(属性(控件(根, "FineMinus"), "Classes"), Is.EqualTo("step"));
+            Assert.That(属性(控件(根, "FineZero"), "Classes"), Is.EqualTo("step mid"));
+            Assert.That(属性(控件(根, "FinePlus"), "Classes"), Is.EqualTo("step"));
+
+            Assert.That(三颗.SelectMany(e => (属性(e, "Classes") ?? "").Split(' ')).Contains("on"), Is.False,
+                "XAML 里写死选中态 = 和 _fineTune 两个真相源");
+
+            // 样式：照抄编辑器那一套，选中那一档取别的控件「选中」用的那套（accent-soft 底 + 重一档字重）
+            Assert.That(样式(根, "Border.stepper")["Background"], Is.EqualTo("{DynamicResource TokenSurface}"));
+            Assert.That(样式(根, "Border.stepper")["CornerRadius"],
+                Is.EqualTo("{DynamicResource TokenRadiusControl}"));
+            Assert.That(样式(根, "Button.step")["Background"], Is.EqualTo("Transparent"),
+                "步进键贴着外框，自己不要底色");
+            Assert.That(样式(根, "Button.step.mid")["MinWidth"], Is.EqualTo("58"), "中间那格宽一档（照抄值格）");
+
+            // ⚠️ 这条守卫是**实机量出来的**：74 第一次上机时中间那颗加了 TokenFontMono，
+            //    等宽字的行高和默认字体不一样 ⇒ 它 36 px 高、顶边比另两颗低 2 px（40 / 36 / 40），
+            //    「三颗一样高、顶边一格不差」当场不过。所以除了宽度和那两条竖线，什么都不许往这格上加。
+            var 中间 = 样式(根, "Button.step.mid");
+            Assert.That(中间.Keys, Has.None.EqualTo("FontFamily"),
+                "中间那格不许换字体 —— 行高一变，三颗的盒子就不一样高（实机量到过 40/36/40 px）");
+            Assert.That(中间.Keys, Has.None.EqualTo("Height"), "高度不许单独设：一设就和另两颗不一样");
+            Assert.That(中间.Keys, Has.None.EqualTo("MinHeight"), "最小高度不许单独设：同上");
+            Assert.That(中间.Keys, Has.None.EqualTo("Padding"), "内外边距不许单独设：盒子尺寸会跟着变");
+
+            var 选中 = 样式(根, "Button.step.on");
+            Assert.That(选中["Background"], Is.EqualTo("{DynamicResource TokenAccentSoft}"));
+            Assert.That(选中["FontWeight"], Is.EqualTo("SemiBold"));
+            Assert.That(选中.Keys, Has.None.EqualTo("BorderThickness"),
+                "选中态不许改边框粗细 —— 三颗的盒子尺寸会跟着变");
+
+            var 次序 = 规则次序(根);
+            Assert.That(次序.IndexOf("Button.step"), Is.LessThan(次序.IndexOf("Button.step.on")),
+                "选中那条排在步进键那条后面才盖得住它");
+        });
+    }
+
+    /// <summary>
+    /// **这一票的验收**：微调一挪，亮的那一片**整片平移一根**，而窗口一动不动。
+    ///
+    /// 拿真数据测（曲库里那首基线）：0 → 20 根；+1 → 还是 20 根，每根的下标各 +1；
+    /// −1 → 19 根，每根各 −1，最左那根（C3）掉到窗外去了（2 个音符）。
+    /// 窗口在三种状态下都是 48 起（C3）—— 挪的是整首歌，不是窗口。
+    /// </summary>
+    [Test]
+    public void 微调一挪亮的那片整片平移一根()
+    {
+        var 音 = 这首歌();
+
+        // 窗口 = 载入这首歌时算定的那一个（它不含微调，见下一条）
+        int 窗口 = PitchRangeReadout.Measure(音, 0).BaseOctave;
+
+        var 零 = PitchRangeReadout.Measure(音, 0, 窗口);
+        var 升 = PitchRangeReadout.Measure(音, +1, 窗口);
+        var 降 = PitchRangeReadout.Measure(音, -1, 窗口);
+
+        var 零格 = 亮格(零);
+        var 升格 = 亮格(升);
+        var 降格 = 亮格(降);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(窗口, Is.EqualTo(4), "这首歌的窗口就是 C4 那个（曲库里的基线，自动算出来也是它）");
+            Assert.That(new[] { 零.WindowLow, 升.WindowLow, 降.WindowLow }, Is.All.EqualTo(48),
+                "微调一动都不动窗口（挪的是整首歌）");
+            Assert.That(new[] { 零.BaseOctave, 升.BaseOctave, 降.BaseOctave }, Is.All.EqualTo(4));
+
+            Assert.That(零格, Has.Count.EqualTo(20), "微调 0：亮着的是那 20 个音");
+            Assert.That(升格, Is.EqualTo(零格.Select(i => i + 1).ToList()),
+                "微调 +1：亮的 20 根整片往右挪一格");
+            Assert.That(降格, Is.EqualTo(零格.Select(i => i - 1).Where(i => i >= 0).ToList()),
+                "微调 −1：整片往左挪一格，最左那根掉了出去");
+
+            Assert.That(升格, Has.Count.EqualTo(20), "微调 +1 一根都没掉出去（A#5 升到 B5 还在条子里）");
+            Assert.That(降格, Has.Count.EqualTo(19), "微调 −1：19 根还亮着");
+            Assert.That(降.OutsideNotes, Is.EqualTo(2), "掉出去 2 个音符（C3 → B2，同一个音高出现两次）");
+            Assert.That(降.Outside.Select(Music.NoteName), Is.EqualTo(new[] { "B2" }));
+
+            Assert.That(new[] { 零.OutOfRange, 升.OutOfRange }, Is.All.False, "微调 0 / +1 都不越界");
+            Assert.That(降.OutOfRange, Is.True, "越界了就该整片换红 + 底下换成红字那一组");
+        });
+    }
+
+    /// <summary>
+    /// **窗口为什么必须钉住**：不钉的话，微调一挪，自动八度会跟着重挑 —— 撞上边界时整片不是平移一格，
+    /// 而是**跳到另一个八度去**（用户看到的就不是「整片平移一根」了）。
+    ///
+    /// 这条用一对人造音高把那个跳变逼出来（真数据那首歌三种状态下自动八度恰好都是 4，看不出这个差别）：
+    /// <c>{B2, C3}</c> 的自动八度在 2 / 3 上是平手（都容得下 2 个音），平手取平均八度最近的 → 2；
+    /// 整首 +1 之后 <c>{C3, C#3}</c> 只落在 3 那一档 → 自动重挑会跳到 3（窗口整整挪一个八度）。
+    /// 钉住（载入时那个 2）之后，才是「两根条子各往右挪一格」。
+    /// </summary>
+    [Test]
+    public void 窗口是载入时钉住的不跟着微调重挑()
+    {
+        var 音 = new[] { 47, 48 };
+
+        Assert.That(NoteMapper.AutoBaseOctave(音), Is.EqualTo(2), "这条基线的自动八度是 2（窗口 24 起）");
+        Assert.That(PitchRangeReadout.Measure(音, +1).BaseOctave, Is.EqualTo(3),
+            "不钉住的话，+1 之后自动八度会跳到 3 —— 窗口整整挪一个八度");
+
+        var 零 = PitchRangeReadout.Measure(音, 0, 2);
+        var 升 = PitchRangeReadout.Measure(音, +1, 2);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(升.BaseOctave, Is.EqualTo(2), "微调不许把窗口也挪了");
+            Assert.That(new[] { 零.WindowLow, 升.WindowLow }, Is.All.EqualTo(24), "窗口一直是 B1 那个");
+            Assert.That(亮格(零), Is.EqualTo(new[] { 23, 24 }), "B2 和 C3 落在第 24 / 25 根上");
+            Assert.That(亮格(升), Is.EqualTo(new[] { 24, 25 }), "钉住之后才是整片平移一根");
+            Assert.That(升.OutsideNotes, Is.EqualTo(0), "钉住之后不会有音掉出去");
+        });
+    }
+
+    /// <summary>
+    /// **微调只跟着这一次走，不写回曲子**（票面上那处岔路的判定）：演奏器是「放」的，不是「改」的，
+    /// 所以它不写回 <c>track.Transpose</c>，而是化作 <c>StartPerformanceRequest.TransposeOffset</c>。
+    ///
+    /// 它必须一路走到**事件表**里（<c>EventTable.Build</c>）：条子上亮的那几格和真按下去的那几格
+    /// 是同一件事的两半 —— 只挪读数不挪表的话，微调 −1 时那 2 个越界音符照样会被发出去。
+    /// 按键速度读数走的是同一张表，所以它也得带上这个偏移。
+    /// </summary>
+    [Test]
+    public void 微调进的是这一次演奏的事件表不写回曲子()
+    {
+        string 代码 = 演奏器代码;
+        string 链 = 读("MidiPerformer.Core", "UseCases", "Perform", "EventTable.cs");
+        string 用例 = 读("MidiPerformer.Core", "UseCases", "Perform", "StartPerformance.cs");
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(代码, Does.Contain("TransposeOffset: _fineTune"), "微调要跟着这一次请求走");
+            Assert.That(一段(代码, "BaseOctave: WindowBaseOctave(", "InputTiming.FromIndex("),
+                Does.Not.Contain("_fineTune"),
+                "基准八度**不含**微调 —— 窗口不动，挪的是整首歌");
+
+            Assert.That(链, Does.Contain("track.Transpose + transposeOffset"),
+                "微调叠在曲子自己的移调上面（两者都是「整首歌挪几格」）");
+            Assert.That(用例, Does.Contain("request.TransposeOffset"), "演奏那一路要把微调递进链子");
+
+            Assert.That(一段(代码, "EventTable.Build(", "return KeyRateReadout.Measure("),
+                Does.Contain("request.TransposeOffset"),
+                "按键速度读数和演奏共用一张表：这张表也得带上微调");
+
+            Assert.That(代码, Does.Not.Contain(".Transpose ="), "不许把微调写回 track.Transpose");
+            Assert.That(链, Does.Not.Contain(".Transpose ="), "链子那边也不许写回");
+
+            // 读数那一行：字全由 PitchRangeReadout 写，窗口这层不另算一遍
+            Assert.That(一段(代码, "private void OnFineTune(", "private void MarkFineTune()"),
+                Does.Not.Contain("NoteName").And.Not.Contain("SummarySlots").And.Not.Contain("AlertSub"),
+                "读数行的字归 PitchRangeReadout，界面这一层只递参数");
+            Assert.That(一段(代码, "_range.Show(", ");"), Does.Contain("transpose + _fineTune"),
+                "条子收到的移调就是「曲子自己的移调 + 微调」—— 和事件表加的是同一个数");
+        });
+    }
+
+    /// <summary>
+    /// 窗口不跟着微调走，靠的是 <c>PitchRangeReadout.Measure</c> 那个手给基准八度的那一支
+    /// （形状与 <c>NoteMapper.Map</c> 的 <c>manualBaseOctave</c> 一模一样）：不给就还是自动那条老路。
+    /// 窗口那一层要把钉住的那个八度一路递到 <c>Measure</c>，不能半路丢了又去自动挑一个。
+    /// </summary>
+    [Test]
+    public void 窗口不跟着微调走是拿手给的基准八度做的()
+    {
+        string 读数 = 读("MidiPerformer.App", "Views", "PitchRangeReadout.cs");
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(读数, Does.Contain("int? manualBaseOctave = null"),
+                "手给八度那一支要有个默认值 —— 老调用方（49 的那些测试）一个字都不用改");
+            Assert.That(读数, Does.Contain("manualBaseOctave ?? NoteMapper.AutoBaseOctave(valid)"),
+                "不给的时候还是自动那一条老路");
+            Assert.That(读数,
+                Does.Contain("PitchRangeReadout.Measure(pitches ?? Array.Empty<int>(), transpose, baseOctave)"),
+                "窗口那一层要把钉住的八度递下去，不能半路丢了");
+        });
+    }
+
+    /// <summary>
+    /// 默认选 0，而且「选中的是哪一档」**只有一处**说了算：三颗按钮的 <c>.on</c> 全在
+    /// <c>MarkFineTune</c> 里按 <c>_fineTune</c> 刷（XAML 里一颗都不带），构造期先刷一遍。
+    /// </summary>
+    [Test]
+    public void 选中的那一档由代码刷默认是零()
+    {
+        string 代码 = 演奏器代码;
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(代码, Does.Contain("private int _fineTune;"), "默认 0（不写初值就是 0）");
+            Assert.That(一段(代码, "private void MarkFineTune()", "private PlayableTrack? CurrentTrack()"),
+                Does.Contain("FineZero.Classes.Set(\"on\", _fineTune == 0)"), "0 那一档");
+            Assert.That(数一数(代码, "Classes.Set(\"on\""), Is.EqualTo(3),
+                "选中态只该在 MarkFineTune 里刷那三行");
+            Assert.That(一段(代码, "public PerformerWindow(IClock clock, InputSender sender)",
+                    "protected override void OnOpened"),
+                Does.Contain("MarkFineTune();"), "构造期就得把默认那一档刷上");
+        });
+    }
+
+    /// <summary>
+    /// 演奏期间三颗微调都锁死：这一场的事件表在按下开始那一刻就建好了，中途再挪半音只挪得动读数 ——
+    /// 屏幕上说挪了、耳朵里那张旧表照发，正是要防的那种「对不上」。
+    /// 判据仍然只有 <c>SetRunning</c> 一处（73 号票）。
+    /// </summary>
+    [Test]
+    public void 微调那三颗在演奏期间锁死()
+    {
+        string 一处 = 一段(演奏器代码, "private void SetRunning(bool running)", "private Status _status");
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(一处, Does.Contain("FineMinus.IsEnabled = !running"));
+            Assert.That(一处, Does.Contain("FineZero.IsEnabled = !running"));
+            Assert.That(一处, Does.Contain("FinePlus.IsEnabled = !running"));
+
+            // 三颗按钮的「能不能按」不许在别处再写一份
+            Assert.That(数一数(演奏器代码, "FineMinus.IsEnabled"), Is.EqualTo(1));
+            Assert.That(数一数(演奏器代码, "FineZero.IsEnabled"), Is.EqualTo(1));
+            Assert.That(数一数(演奏器代码, "FinePlus.IsEnabled"), Is.EqualTo(1));
         });
     }
 }
