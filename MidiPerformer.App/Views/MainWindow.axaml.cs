@@ -36,6 +36,13 @@ public partial class MainWindow : Window
     /// <summary>播放时把播放头放在屏幕的哪个位置：偏左约三分之一，右边留出前瞻。</summary>
     private const double FollowFraction = 0.32;
 
+    /// <summary>
+    /// 缩略条算得动的最小宽度（像素）。窄过它就是**布局还没把它摆开**，不是「一条真的很窄的条」——
+    /// 窗口最小宽度 720 撑得住缩略条远不止 20，所以这个数只用来挡「还没排到布局」那一档
+    /// （见 <see cref="RefreshView"/>）。
+    /// </summary>
+    private const double MinNavWidth = 20;
+
     /// <summary>认得出的文件类型：midi 和 mid 都收，导入导出两侧共用同一份。</summary>
     private static readonly FilePickerFileType MidiFileType = new("MIDI 文件")
     {
@@ -159,6 +166,12 @@ public partial class MainWindow : Window
         // 窗口改宽 = 每小节变宽（固定 4 小节，没有缩放），所以要按新的宽度重算场景
         SizeChanged += (_, _) => RefreshView();
         LanesHost.SizeChanged += (_, _) => RefreshView();
+        // ★ 缩略条**自己的**尺寸落定也得重算一次。上面那两处都在布局排到缩略条之前就喊了，
+        // 那一刻 NavStrip.Bounds 还是上一次布局留下的旧值（首屏是 0 或几百像素）——
+        // 上一版就死在这儿：整张缩略图按一个过期的小宽度被压在条的最左边一小截，
+        // 而没有任何人在缩略条真的摆到最终宽度之后再算一次，所以它**一直**错着，
+        // 缩放一次窗口才归位（缩放会再喊一次 SizeChanged，正好补上那一帧）。
+        NavStrip.SizeChanged += (_, _) => RefreshView();
 
         // 隧道阶段接方向键与撤销 / 重做：先于任何控件拿到它。焦点在输入框里时让开（见 OnWindowKeyDown）
         AddHandler(KeyDownEvent, OnWindowKeyDown, RoutingStrategies.Tunnel);
@@ -1657,8 +1670,21 @@ public partial class MainWindow : Window
 
         foreach (var lane in _lanes) lane.Refresh(playhead, !_draggingNav);
 
+        // ⚠️ 缩略条的宽度只认**布局落定之后**的那个数。NavStrip.Bounds 是**上一次**布局排出来的：
+        // 首屏那几趟刷新跑在缩略条被摆开之前，读到的是 0 或几百像素的旧值，而按它算出来的
+        // 「整曲铺满这一条」自然全挤在条的左边一小截里 —— 看上去就是「红杠跑到缩略图外面」。
+        // 宽度真的定下来之后，NavStrip.SizeChanged 会再喊一次 RefreshView（见构造函数），
+        // 到那时才算得对，所以这里只挡住「还没排到布局」那一档，不承担算准的责任。
         double navWidth = NavStrip.Bounds.Width;
-        if (navWidth >= 20)
+        if (navWidth < MinNavWidth)
+        {
+            // ⚠️ 这里**不能**把整趟刷新丢掉。上一版是「宽度不合法就跳过这一块、也不管后面有没有人来补」，
+            // 于是缩略条停在上一张场景上**一直**不更新（这正是「不是闪一下、而是一直错着」的来源）。
+            // 现在：把这张过期场景清掉（宁可空一帧，也不要留着一张错的），下面位置读数、速度框
+            // 照常更新，补场景那一帧归布局回调管。
+            NavStrip.SetScene(null);
+        }
+        else
         {
             // 缩略图画的是焦点轨：Ctrl+↑/↓ 换了焦点、或者点了别条轨上的音符，下一帧它就跟着换。
             // 焦点轨的轨对象要按下标取，而「轨被删光」那一帧 FocusedTrack 已经越界，
