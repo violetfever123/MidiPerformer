@@ -43,11 +43,17 @@ Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, System.Drawing, Sy
 # 反面教材（67 号实测）：给辅助函数加前置逗号 `, @(...)` 看着更「治本」，其实把**管道**废了 ——
 # `找类型 $CT::Button | Where-Object {...}` 收到的是「一整个数组」这一个对象，当场数成 1。
 #
-# ⚠️ 搬过来了，但**今天跑不到第 4 节收尾**（问题不在搬）：`开一首` 依赖演奏器窗口里的 `OpenButton`，
-# 而那颗按钮已被 47 号票按规格删除（`PerformerWindow.axaml.cs` 的「曲目」行连同文件选择器一起没了），
-# 于是走到第 2 节 `开一首` 的第一句 `某根编号 (...) 'OpenButton'` 取不到、当场 throw。
-# 本脚本要等 71 号票（`71-performer-gets-the-current-song`）把主窗那首曲子递进演奏器之后
-# 才有可改的目标路径。在那之前第 3 节（**含末尾那三条自检**）的那些断言**量不到**，别当成绿。
+# ✅ **80 号票已修**（依据：71 号 `4fd9f40`「点『演奏』把主窗那首递给演奏器」+ 78 号把素材种进 Debug 曲库）。
+# 改的是**两件事**：
+#   · 载歌不再走演奏器里那颗文件选择器（47 号已按规格把它连同「曲目」行一起删了）——
+#     改成**在主窗的曲库模态窗里装上那一首**（`开一首` 的新身体），曲库里那份 `sm_mol.mid`
+#     就是取证要的那一首（78 号种的，18236 字节，与语料那分同源）；
+#   · **顺序倒过来：先载歌、后按「演奏」**。42 号之后 `PerformerButton.IsEnabled = _song is not null`，
+#     主窗里没歌时那颗按钮是灰的，对灰按钮 Invoke 抛的是个**光秃秃的 System.Exception** ——
+#     80 号实测：改之前这一份**开跑 20 秒内就死**（红在第 1 节那句 Invoke，压根走不到载歌）。
+# 曲目那一行（`SongValue`）也是同一次改版删掉的（探针 `probe-47-*` 的零命中清单里有它），
+# 所以「递进来的是哪一首」改由**提示行那两个数**坐实：sm_mol = 13 条轨里 8 条可演奏（78 号量）。
+# 这一票不碰产品代码，也不碰曲库（只读它、点开一首曲子）。
 
 $AE = [System.Windows.Automation.AutomationElement]
 $TS = [System.Windows.Automation.TreeScope]
@@ -73,16 +79,13 @@ function 矩形($e) { $e.Current.BoundingRectangle }
 function 中心($e) { $r = 矩形 $e; @([int]($r.X + $r.Width/2), [int]($r.Y + $r.Height/2)) }
 function 支持的模式($e) { @($e.GetSupportedPatterns() | ForEach-Object { $_.ProgrammaticName }) }
 function 某属性($e, [string]$名) { try { $e.Current.$名 } catch { "（取不到 $名）" } }
-function 类名([IntPtr]$w) {
-  $缓 = New-Object System.Text.StringBuilder 256
-  [void][P40]::GetClassName($w, $缓, 256)
-  $缓.ToString()
-}
+# 原先这儿还有 `类名` 和 `找原生框` 两个（认 `#32770*`，是给原生文件框用的）：47 号删掉演奏器
+# 的文件选择器之后，这条路上再也不会冒出 `#32770` 了，留着就是两个「调用不报错、永远返回空」
+# 的陷阱。80 号把它们连同 `开一首` 的老身体一起删掉。
 function 别的顶层窗 { @([P40]::Others($脚本PID, $h)) }
-function 找原生框 {
-  foreach ($w in 别的顶层窗) { if ((类名 $w) -like '#32770*') { return $w } }
-  return $null
-}
+# TextBox 里的字在 ValuePattern 上，不在 `Current.Name` 上（那个多半是空的）——
+# 主窗那个曲名框（`SongNameBox`）就得这么读（verify-27 里那个 `取值` 是同一个东西）。
+function 取值($e) { $e.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value }
 function 查别的窗([string]$标) {
   $o = @(别的顶层窗)
   $说 = if ($o.Count) { ($o | ForEach-Object { $r = [P40]::RectOf($_); "$([P40]::Describe($_)) 框=$($r[0]),$($r[1]) $($r[2])x$($r[3])" }) -join ' ;; ' } else { '没有' }
@@ -143,13 +146,98 @@ while ((Get-Date) -lt $期限 -and -not (@(某根编号 $root 'SongNameBox').Cou
 Start-Sleep -Seconds 2
 $root = $AE::FromHandle($h)
 
-# 「停车点」= 窗口里那块没有悬浮提示的空地（卷帘区中部）：每次点之前先停这儿，
-# 把上一下遗留下来的悬浮提示关掉。挑卷帘区是因为工具栏、轨头、曲库行上的元素大多挂着 ToolTip，
-# 而卷帘区只有悬停读数、没有 ToolTip。
-$停车点 = @([int]($win.X + $win.Width * 0.6), [int]($win.Y + $win.Height * 0.45))
+# 原先这儿还有个「停车点」（点的落点是原生文件框里那颗「打开」）：80 号起这一份不再点鼠标了 ——
+# 载歌靠 UIA 选中曲库那一行 + 回车，按「演奏」靠 InvokePattern，两个都不落点。
 
 # =====================================================================
-"`n=== 1. 打开演奏器窗口 ==="
+"`n=== 1. 在主窗里载入 sm_mol.mid（判别力全在这首曲子上）==="
+# =====================================================================
+# ⚠️ **顺序是这一票的一半：先载歌、后按「演奏」（第 2 节）。**
+#   · 主窗里没歌的时候那颗「演奏」是灰的（`PerformerButton.IsEnabled = _song is not null`，42 号票），
+#     对灰按钮 Invoke 抛的是个**光秃秃的 System.Exception** —— 80 号实测：改之前这一份就死在那儿
+#     （开跑 20 秒内报 `Exception of type 'System.Exception' was thrown.`，压根走不到载歌那一步）；
+#   · 71 号之后的真实用户路径也是这个顺序：曲子先在主窗手上，点「演奏」由主窗把它递进演奏器。
+#
+# 载歌走**曲库模态窗**（主窗工具栏「歌曲库」那颗开出来的，里面才有 `SongList`；直接数主窗的
+# ListItem 是 0 行 —— 40 号把曲库搬出去之后主窗一个都不剩）。47 号把演奏器里的「曲目」行
+# 连同那颗文件选择器一起删了，曲子不再由演奏器自己挑，「载一首」这件事现在只发生在主窗。
+#
+# 曲库那扇窗是**模态**的，装上了它自己才关（`MainWindow.axaml.cs` 的 `OnLibraryClick` 里
+# `dialog.OpenRequested` 那两行：`TryOpenLibrarySong(name) is { } error` → `window.ShowMessage(error)`，
+# 否则 `window.Close()`；那句话落在页脚的 `StatusText`，见 `SongLibraryWindow.axaml.cs` 的 `ShowMessage`），
+# 所以「窗口关了」本身就是「装上了」的判据；下面再拿主窗曲名框对一遍名字。
+# 列表是异步填的，每一段都得轮询等。
+function 开一首([string]$曲名) {
+  $库钮 = @(某根编号 ($AE::FromHandle($h)) 'LibraryButton')
+  if ($库钮.Count -ne 1) { throw "工具栏上找不到「歌曲库」那颗按钮（按 AutomationId=LibraryButton 数到 $($库钮.Count) 颗）" }
+  [void]$库钮[0].GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+
+  # 等模态窗：它是 app 的另一个可见顶层窗，里面有 SongList
+  $期限 = (Get-Date).AddSeconds(20)
+  $库窗 = [IntPtr]::Zero
+  while ((Get-Date) -lt $期限 -and $库窗 -eq [IntPtr]::Zero) {
+    foreach ($w in 别的顶层窗) {
+      try { if (@(某根编号 ($AE::FromHandle($w)) 'SongList').Count -gt 0) { $库窗 = $w; break } } catch { }
+    }
+    if ($库窗 -eq [IntPtr]::Zero) { Start-Sleep -Milliseconds 400 }
+  }
+  if ($库窗 -eq [IntPtr]::Zero) { throw '点了「歌曲库」之后没等到带 SongList 的那个窗口' }
+  Start-Sleep -Milliseconds 800
+  $库根 = $AE::FromHandle($库窗)
+
+  # 行的 Name **不是曲名**（是容器的类名，实测 'Avalonia.Controls.Grid'），曲名在行里的 Text 上；
+  # 也不能拿「行里所有文字拼起来的串」比 —— 那是 '曲名 / 没动过'，多一格状态字（verify-27 量过这两个坑）。
+  # 所以挖子树找**正好等于曲名**的那个 Text。
+  $期限 = (Get-Date).AddSeconds(20)
+  $行 = $null
+  while ((Get-Date) -lt $期限 -and $null -eq $行) {
+    $行 = @(某根里 $库根 $CT::ListItem | Where-Object {
+      @(某根里 $_ $CT::Text | Where-Object { $_.Current.Name -eq $曲名 }).Count -gt 0
+    }) | Select-Object -First 1
+    if ($null -eq $行) { Start-Sleep -Milliseconds 400 }
+  }
+  if ($null -eq $行) {
+    $在 = (@(某根里 $库根 $CT::ListItem | ForEach-Object {
+      @(某根里 $_ $CT::Text | ForEach-Object { $_.Current.Name }) }) -join ' / ')
+    throw "曲库里没有「$曲名」这一行（现在有：$在）"
+  }
+
+  # 回车送给**库窗**：SendKeys 投给「当前有焦点的窗口」，别的程序盖在上面时这一下会往人家的
+  # 编辑器里敲一个回车（32 号实测栽过）。模态期间主窗是死的，焦点给主窗这一下就白敲了。
+  [void][P40]::Take($库窗)
+  [void]$行.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select()
+  Start-Sleep -Milliseconds 400
+  [void]$行.SetFocus()
+  Start-Sleep -Milliseconds 400
+  [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+
+  # 装上了才关窗（没装上窗口不走）
+  $期限 = (Get-Date).AddSeconds(30)
+  while ((Get-Date) -lt $期限 -and (@(别的顶层窗) -contains $库窗)) { Start-Sleep -Milliseconds 300 }
+  if (@(别的顶层窗) -contains $库窗) {
+    $页脚 = (@(某根编号 $库根 'StatusText') | ForEach-Object { $_.Current.Name }) -join ' / '
+    throw "曲库窗口没关掉 —— 多半是没装上（页脚：「$页脚」）"
+  }
+  Start-Sleep -Seconds 4
+}
+
+# 取证的曲子：**从曲库里开**。曲库里那份 `sm_mol.mid` 就是 41 号探针量过的那一首
+# （探针量的是语料目录 `...\drywetmidi\...\Middle\` 里那份，78 号把它种进了 Debug 曲库：
+# 18236 字节）。参数是**曲名**（= 文件名去掉 .mid），不是全路径 —— 曲库窗口只认它自己列表里的名字。
+$曲名 = 'sm_mol'
+开一首 $曲名
+$root = $AE::FromHandle($h)
+$名字格 = @(某根编号 $root 'SongNameBox')
+$读到的主窗名 = if ($名字格.Count) { 取值 $名字格[0] } else { '（没有）' }
+断言真 '载进来的是曲库里点的那一首' ($读到的主窗名 -eq $曲名) "点了曲库里的「$曲名」，主窗曲名框写着「$读到的主窗名」"
+
+# 反证：上面那条在「一首都没载进来」的空窗口上也照样成立的话就没意思了 —— 轨头得真在场。
+# 轨数用「折叠」按钮数（每条轨的头上都有一颗，和 verify-23/27 同一把尺子）。
+$轨头数 = @(找类型 $CT::Button | Where-Object { $_.Current.Name -eq '折叠' }).Count
+断言真 '反证：曲子真的载进来了（13 条轨的轨头都在场）' ($轨头数 -eq 13) "$轨头数 条轨"
+
+# =====================================================================
+"`n=== 2. 点「演奏」：主窗把手上的 sm_mol 递给演奏器 ==="
 # =====================================================================
 # 按 AutomationId 找，不按名字：这颗按钮屏幕上写的是「演奏」（MainWindow.axaml 里
 # `x:Name="PerformerButton" Content="演奏"`）。verify-27 里头写的是『演奏器…』——
@@ -157,6 +245,11 @@ $停车点 = @([int]($win.X + $win.Width * 0.6), [int]($win.Y + $win.Height * 0.
 $开钮 = @(某根编号 $root 'PerformerButton')
 断言真 '工具栏上那颗「演奏」按钮还在（入口没被顺手删掉）' ($开钮.Count -eq 1) "数到 $($开钮.Count) 颗（按 PerformerButton 找的）"
 if ($开钮.Count -ne 1) { throw '没有 PerformerButton 这颗按钮，下面全都没得验' }
+# 刚载完歌，这一颗就不该还是灰的。它灰着的话下面那句 Invoke 抛的是个光秃秃的
+# System.Exception（哪一颗按钮灰、为什么灰，那句话里一个字都没有）—— 先自己报清楚。
+$开钮可按 = $开钮[0].Current.IsEnabled
+断言真 '「演奏」不再是灰的（载了歌就亮 —— 判据就是 _song is not null）' $开钮可按 "IsEnabled=$开钮可按"
+if (-not $开钮可按) { throw '「演奏」是灰的 —— 主窗里没装上曲子（IsEnabled = _song is not null）' }
 [void]$开钮[0].GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
 
 $期限 = (Get-Date).AddSeconds(20)
@@ -167,86 +260,26 @@ while ((Get-Date) -lt $期限 -and $演奏器 -eq [IntPtr]::Zero) {
   }
   if ($演奏器 -eq [IntPtr]::Zero) { Start-Sleep -Milliseconds 400 }
 }
-if ($演奏器 -eq [IntPtr]::Zero) { throw '等不到演奏器窗口（按了「演奏器…」之后没多出 StartButton 那个顶层窗）' }
+if ($演奏器 -eq [IntPtr]::Zero) { throw '等不到演奏器窗口（按了「演奏」之后没多出 StartButton 那个顶层窗）' }
 Start-Sleep -Seconds 2
 $根二 = $AE::FromHandle($演奏器)
 $r二 = [P40]::RectOf($演奏器)
 断言真 '演奏器窗口开出来了' ($r二[2] -gt 300) "$([P40]::Describe($演奏器)) 框=$($r二[0]),$($r二[1]) $($r二[2])x$($r二[3])"
 
-# =====================================================================
-"`n=== 2. 载入 sm_mol.mid（判别力全在这首曲子上）==="
-# =====================================================================
-# ---------- 把「在那个原生框里开一首曲子」封成一个函数 ----------
-# verify-27 的结论是「这个框里什么都暴露成 Pane：没有 Edit、也没有 Button，只能从列表里
-# 选中一行再真点『打开』那颗」。那个结论**只在框正好开在目标目录时**才够用 ——
-# 而实测这个框记得的是上次用过的目录（这台机上是 `C:\Users\cao17\Downloads\songs`，用户自己的曲库），
-# 取证的曲子住在语料目录 `...\drywetmidi\Resources\MIDI files\Valid\MultiTrack\Middle\`。
-# 只认列表就永远够不着。
-#
-# 所以 probe-41-dlg 把 Win32 子窗口树整个倒了一遍，结论是：**那两样都是实打实的窗口** ——
-# 文件名那格是 `ComboBoxEx32 → ComboBox → Edit`，确定那颗是 `Button '打开(&O)'`。
-# UIA 里读不到它们（躲在两层同名 Pane 后面），但 Win32 里摸得到、也能写、也能按。
-# 于是这一票走全路径：
-#   把全路径 WM_CHAR 进文件名格 → BM_CLICK「打开」。
-# 附带解决两件事：不用管框开在哪个目录；不用管 UIA 的 id='1' 撞车（verify-27 那个坑）。
-function 开一首([string]$全路径) {
-  $开钮2 = @(某根编号 ($AE::FromHandle($演奏器)) 'OpenButton')
-  if ($开钮2.Count -ne 1) { throw "演奏器窗口里找不到「打开 MIDI…」（数到 $($开钮2.Count) 颗）" }
-  [void]$开钮2[0].GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
-  $期限 = (Get-Date).AddSeconds(25)
-  $原生框 = $null
-  while ((Get-Date) -lt $期限 -and -not $原生框) { $原生框 = 找原生框; if (-not $原生框) { Start-Sleep -Milliseconds 400 } }
-  if (-not $原生框) { throw '等不到「打开 MIDI 文件」的原生框' }
-  Start-Sleep -Milliseconds 1200
-  $r框 = [P40]::RectOf($原生框)
-
-  # 文件名那格：取**可见**的那个 Edit。框里有两个 Edit —— 文件名格（显）和地址栏那个（隐，
-  # Ctrl+L 之类才会露头），按类名一次捞出来两个，所以必须靠可见性挑，不能取第一个。
-  $编辑 = @([P40]::KidsOfClass($原生框, 'Edit') | Where-Object { [P40]::Visible($_) })
-  if ($编辑.Count -ne 1) { throw "文件名那格找不准（可见的 Edit 数到 $($编辑.Count) 个，该是 1）" }
-  [P40]::TypeInto($编辑[0], $全路径)
-  Start-Sleep -Milliseconds 700
-
-  # 「打开(&O)」那颗。框里还有「取消」「帮助」两颗 Button，认文字。
-  $开 = @([P40]::KidsOfClass($原生框, 'Button') | Where-Object { [P40]::TxtOf($_) -like '打开*' })
-  if ($开.Count -ne 1) { throw "「打开」那颗找不准（数到 $($开.Count) 个）" }
-  $能按 = [P40]::Enabled($开[0])
-  # 地址栏那条 ToolbarWindow32 的文字就是「地址: <当前目录>」—— 打印出来是为了留证：
-  # 万一以后框的默认目录变了、全路径这条路失灵，日志里能直接看见它开在哪儿。
-  $地址条 = @([P40]::KidsOfClass($原生框, 'ToolbarWindow32') | Where-Object { [P40]::TxtOf($_) -like '地址*' })
-  $开到哪 = if ($地址条.Count) { [P40]::TxtOf($地址条[0]) } else { '（没读到地址栏）' }
-  Write-Host "  框 $($r框[2])x$($r框[3]) $开到哪"
-  # 不把文件名格的内容读回来印：那是 app 进程里的控件，跨进程 GetWindowText 读回来是空的
-  # （地址栏那条 ToolbarWindow32 读得到，是系统控件的特例）。写进去了多少、按不按得动，看这两个。
-  Write-Host "  把「$全路径」写进文件名格，「$([P40]::TxtOf($开[0]))」可按=$能按"
-  if (-not $能按) { throw '「打开」是灰的 —— 路径写进去了但它没认，BM_CLICK 下去也会什么都不做' }
-  [void][P40]::SendMessage($开[0], [P40]::BM_CLICK, [IntPtr]::Zero, [IntPtr]::Zero)
-
-  $期限 = (Get-Date).AddSeconds(20)
-  while ((Get-Date) -lt $期限 -and (找原生框)) { Start-Sleep -Milliseconds 500 }
-  if (找原生框) { throw '按了「打开」框没关 —— 文件没打开' }
-  Start-Sleep -Seconds 4
-}
-
-# 取证的曲子 + 它的来处。语料路径写死：那是 drywetmidi 那份测试语料，探针 probe-41 量的就是它。
-$语料 = 'C:\Users\cao17\Desktop\midiplayer\drywetmidi\Resources\MIDI files\Valid\MultiTrack\Middle'
-$曲子 = 'sm_mol.mid'
-$全路径 = Join-Path $语料 $曲子
-$曲名 = [IO.Path]::GetFileNameWithoutExtension($曲子)
-if (-not (Test-Path $全路径)) { throw "取证用的曲子不在：$全路径" }
-开一首 $全路径
-$根二 = $AE::FromHandle($演奏器)
-$曲值 = @(某根编号 $根二 'SongValue')
-$读到的曲名 = if ($曲值.Count) { $曲值[0].Current.Name } else { '（没有）' }
-断言真 '载进来的是点的那一首' ($读到的曲名 -eq $曲名) "点了「$全路径」，曲目那一行写着「$读到的曲名」"
-
+# 「递进来的到底是哪一首」：曲目那一行（`SongValue`）跟「打开 MIDI…」那颗按钮是**同一次改版
+# （47 号）一起删掉的**（探针 `probe-47-*` 那份零命中清单里两个都在），所以只能拿**提示行那两个数**坐实 ——
+# 它们不只是「有没有提示行」，还是这首歌的指纹，而且是 Core 数出来的
+#（`PerformerWindow.ApplySong` 里那句 `只列出单声部轨 · {轨数} 条轨里 {可弹数} 条可演奏`）。
+# 78 号用产品自己的判据（`PlayableTracks.Of` / `MonophonyCheck.IsMonophonic`）量过：
+# sm_mol.mid = 13 条轨 / 1927 音 / PPQ 384 / **8 条可弹**。所以这里**逐字**对，
+# 不写 `-like '只列出单声部轨 · *'` —— 软写法任何一首 13 轨 8 弹的歌都过得去，等于没验身份。
 $轨提示 = @(某根编号 $根二 'TrackHint')
 $提示文 = if ($轨提示.Count) { $轨提示[0].Current.Name } else { '（没有提示行）' }
 Write-Host "  提示行：「$提示文」"
-断言真 '提示行还是「只列出单声部轨 · …」（27 号那条断言要求的字样没被这一票改掉）' `
-  ($提示文 -like '只列出单声部轨 · *') "「$提示文」"
+$指纹 = '只列出单声部轨 · 13 条轨里 8 条可演奏'
+断言真 '递进来的是那首 sm_mol（提示行逐字对得上 13 条轨里 8 条可演奏）' ($提示文 -eq $指纹) "「$提示文」，期望「$指纹」"
 
-# 提示行里的两个数：M 条轨里 N 条可演奏。N 就是**另一个独立的证人** ——
+# 提示行里那个 N 是**另一个独立的证人** ——
 # 下拉框那几项是界面自己列的，提示行这个是 Core 数出来的，两个数对不上就是有一边在撒谎。
 $提示数 = $null
 if ($提示文 -match '条轨里\s*(\d+)\s*条可演奏') { $提示数 = [int]$Matches[1] }
