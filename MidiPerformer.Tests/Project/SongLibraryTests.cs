@@ -5,8 +5,9 @@ namespace MidiPerformer.Tests.Project;
 
 /// <summary>
 /// 曲库：硬盘上一个平铺的目录，文件名就是曲名。每份测试用它自己的临时目录，跑完就删。
-/// 盯的是目录操作这一层：有哪些名字、名字对应哪个文件、改名 / 删除真的动了盘；
-/// 文件里装的 JSON 对不对是 <see cref="SongProjectFile"/> 的事。
+/// 盯的是目录操作这一层：有哪些名字、名字对应哪个文件、改名 / 删除真的动了盘。
+/// 曲库成员是**标准 MIDI（<c>.mid</c>）**；文件里的字节 / JSON 对不对分别是
+/// <c>MidiReader</c> / <see cref="SongProjectFile"/> 的事，这一层不解析内容。
 /// </summary>
 public class SongLibraryTests
 {
@@ -71,25 +72,86 @@ public class SongLibraryTests
         });
     }
 
-    /// <summary>只认 .mproj：说明文件、备份文件、没后缀的都不算曲子。</summary>
+    /// <summary>
+    /// 曲库成员就是这种文件：后缀是 <c>.mid</c>（标准 MIDI）。
+    /// 这个常量是 <c>const</c>、会被内联进调用方的程序集，改它必须整体重建，所以在这儿钉一条明文。
+    /// </summary>
     [Test]
-    public void 不是mproj的文件不算曲子()
+    public void 曲库成员的后缀是mid()
+    {
+        Assert.Multiple(() =>
+        {
+            Assert.That(SongLibrary.Extension, Is.EqualTo(".mid"));
+            Assert.That(_library.PathOf("起风了"), Is.EqualTo(Path.Combine(_root, "起风了.mid")));
+        });
+    }
+
+    /// <summary>只认 .mid：说明文件、老的工程文件、备份文件、没后缀的都不算曲子。</summary>
+    [Test]
+    public void 不是mid的文件不算曲子()
     {
         _library.Write("正经曲子", "{}");
         File.WriteAllText(Path.Combine(_root, "说明.txt"), "这个文件夹是放曲子的");
-        File.WriteAllText(Path.Combine(_root, "backup.mproj.bak"), "{}");
+        File.WriteAllText(Path.Combine(_root, "老的工程.mproj"), "{}");
+        File.WriteAllText(Path.Combine(_root, "backup.mid.bak"), "{}");
         File.WriteAllText(Path.Combine(_root, "没有后缀"), "{}");
 
         Assert.That(_library.Names(), Is.EqualTo(new[] { "正经曲子" }));
     }
 
-    /// <summary>后缀大小写不敏感：自己写的是小写，但 ".MPROJ" 不该被漏掉。</summary>
+    /// <summary>后缀大小写不敏感：自己写的是小写，但 ".MID" 不该被漏掉。</summary>
     [Test]
     public void 后缀大小写不影响认出曲子()
     {
-        File.WriteAllText(Path.Combine(_root, "大写后缀.MPROJ"), "{}");
+        File.WriteAllText(Path.Combine(_root, "大写后缀.MID"), "{}");
+        File.WriteAllText(Path.Combine(_root, "混合大小写.Mid"), "{}");
 
-        Assert.That(_library.Names(), Is.EqualTo(new[] { "大写后缀" }));
+        Assert.That(_library.Names(), Is.EquivalentTo(new[] { "大写后缀", "混合大小写" }));
+    }
+
+    /// <summary>
+    /// 曲库目录里的**子目录**内容不上列表（下一票的缓存住在 <c>songs\.work\</c> 里）。
+    /// 这条靠的是 <see cref="SongLibrary.Names"/> 用的是无参的 <c>EnumerateFiles()</c>，
+    /// 默认只扫本层（TopDirectoryOnly）—— **不是**别的排除逻辑。
+    ///
+    /// 子目录里那个文件特意用 <c>.mid</c>：只放 .mproj 的话后缀过滤本身就会把它挡掉，
+    /// 「不递归」这个机制根本没被测到（换成递归枚举那条断言照样绿）。
+    /// </summary>
+    [Test]
+    public void 子目录里的东西不上列表()
+    {
+        _library.Write("台面上的", "{}");
+
+        string work = Path.Combine(_root, ".work");
+        Directory.CreateDirectory(work);
+        File.WriteAllBytes(Path.Combine(work, "藏在子目录里的.mid"), new byte[] { 1, 2, 3 });
+        File.WriteAllText(Path.Combine(work, "缓存.mproj"), "{}");
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(File.Exists(Path.Combine(work, "藏在子目录里的.mid")), Is.True,
+                "前提：那个 .mid 真的在盘上，否则上面那条断言是空转");
+            Assert.That(_library.Names(), Is.EqualTo(new[] { "台面上的" }));
+        });
+    }
+
+    /// <summary>
+    /// Q29 的过渡期守卫：老曲库（<c>.mproj</c>）还在 <c>songs\</c> 里躺着，程序照常跑 ——
+    /// 只是列表按后缀认，看不见它们。**只是看不见，不是被清理掉**。
+    /// </summary>
+    [Test]
+    public void 残留的老工程文件自动无视()
+    {
+        File.WriteAllText(Path.Combine(_root, "夜的钢琴曲.mproj"), "{\"Version\": 1}");
+        _library.Write("新存的", "{}");
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(_library.Names(), Is.EqualTo(new[] { "新存的" }));
+            Assert.That(_library.Contains("夜的钢琴曲"), Is.False, "老文件不是曲库成员");
+            Assert.That(File.Exists(Path.Combine(_root, "夜的钢琴曲.mproj")), Is.True,
+                "它还在盘上 —— 过渡期不该顺手把人家的老文件删掉");
+        });
     }
 
     // ==================== 读 / 写 ====================
@@ -332,14 +394,14 @@ public class SongLibraryTests
     }
 
     /// <summary>
-    /// Windows 保留的设备名当不了文件名：带后缀也一样会被当成设备，"CON.mproj" 建不出来。
+    /// Windows 保留的设备名当不了文件名：带后缀也一样会被当成设备，"CON.mid" 建不出来。
     /// </summary>
     [TestCase("CON")]
     [TestCase("con")]
     [TestCase("NUL")]
     [TestCase("COM1")]
     [TestCase("lpt9")]
-    [TestCase("CON.mproj")]
+    [TestCase("CON.mid")]
     public void 保留设备名会被拒绝(string written)
     {
         Assert.Multiple(() =>

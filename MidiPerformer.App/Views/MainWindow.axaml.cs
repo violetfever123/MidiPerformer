@@ -85,11 +85,20 @@ public partial class MainWindow : Window
     /// <summary>曲名框里那个名字，也是「这首叫什么」的显示来源。和 <see cref="_currentName"/> 分开：有一类曲子只在手上、不在曲库里（导入时取消了命名），它有名字可显示却没有曲库里的位置。</summary>
     private string _title = "";
 
+    // ⚠️ 下面这两个要等到 53 号票（缓存）才有地方写：52 号票把曲库成员换成了标准 MIDI，
+    // 保存那条路不再写工程头了，于是这两个字段**暂时只写不读**。
+    // 53 号票把 `songs\.work\<名字>.mproj` 写回来时它们会被读回去（`Edited` / `ImportedFrom`），
+    // **到那时把这段 pragma 删掉** —— 它是临时的脚手架，不是「这个字段没用」的判决。
+    // 现在不能删字段：`ApplySong` 的粘性语义（`_edited = true;`）和曲库列表那一格的小字都指着它。
+#pragma warning disable CS0414
+
     /// <summary>这份是从哪个 .mid 导入的，写进工程文件头。合并成一首、或从曲库打开的都可能是 null。</summary>
     private string? _importedFrom;
 
     /// <summary>这份工程「动过没有」，跟着文件头走。它是粘的：一旦编辑过就永远是 true，撤销回初始状态、存盘都不清（见 <see cref="ProjectHeader.Edited"/>）。</summary>
     private bool _edited;
+
+#pragma warning restore CS0414
 
     /// <summary>
     /// 手上有「还没存下去的东西」—— 工具栏上「保存」那一格穿不穿主色看它。
@@ -508,7 +517,7 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// 曲库窗口里双击了某一首：把工程读出来装上。
+    /// 曲库窗口里双击了某一首：把曲子读出来装上。
     /// 装上了返回 null，没装上返回那句要报的中文 —— 报错写哪儿交给调用方（这一趟是模态框
     /// 底下那次点击引起来的，提示行写了也看不见），也顺手回答了「窗口关不关」。
     /// </summary>
@@ -518,14 +527,22 @@ public partial class MainWindow : Window
 
         try
         {
-            var (header, song) = SongProjectFile.LoadProject(library.PathOf(name));
+            // 曲库里躺着的就是标准 MIDI，读它。
+            //
+            // ⚠️ 这一趟是**有损的**，而且是故意的：MIDI 里装不下 <c>Track.Transpose</c>
+            //（写出去时已经烧进音高，读回来只能是 0）、装不下「音符被删光的轨」（读回来那条轨没了）、
+            // 也装不下「这份是哪来的、改过没有」。下一票的缓存才把这些带回来 ——
+            // 那组「故意断言它会丢」的测试就立在这儿挡着「缓存没用，删了吧」。
+            var song = MidiReader.ReadBytes(library.ReadBytes(name));
 
             LoadSong(song, name);
             // LoadSong 把这四个都清空了（它不知道新来的是哪一份），所以在这儿补上
             _currentName = name;
             _title = name;
-            _importedFrom = header.ImportedFrom;
-            _edited = header.Edited;
+            // .mid 里没有「来路」和「改过没有」这两样东西：没有缓存就是没有，一个标记都不显示
+            //（「从别处拷进来的 .mid」和「本程序存过的」那点区别，下一票靠缓存认）
+            _importedFrom = null;
+            _edited = false;
             // 刚才是从曲库里读出来的这一份 —— 它**就是**「曲库里存的那份」
             _storedSong = song;
 
@@ -534,7 +551,7 @@ public partial class MainWindow : Window
         }
         catch (InvalidDataException ex)
         {
-            // 读不出来的工程：把那句中文交出去，**不动**手上正开着的那一份
+            // 读不出来的曲子：把那句中文交出去，**不动**手上正开着的那一份
             return ex.Message;
         }
     }
@@ -605,8 +622,13 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// 把手上这份写进曲库的某个名字。写出去的是此刻手上的那一份（含刚做完、还没撤销的编辑），
-    /// 不是屏幕：<c>Track.Transpose</c>、卷帘视口、播放头都不进文件。
+    /// 把手上这份写进曲库的某个名字，落成 <c>songs\&lt;名字&gt;.mid</c>（标准 MIDI，能拷给别人、
+    /// 能用别的软件打开）。写出去的是此刻手上的那一份（含刚做完、还没撤销的编辑），不是屏幕。
+    ///
+    /// ⚠️ 这一趟同样是**有损的、故意**的：<c>Track.Transpose</c> 在这儿被烧进音高
+    ///（写出去的音高 = <see cref="Note.Pitch"/> + <c>Transpose</c>，见 <c>MidiWriter</c>），
+    /// 音符被删光的轨在文件里只剩一个空轨块。下一票的缓存把它们带回来。
+    /// 卷帘视口、播放头这两样从来不进文件。
     /// </summary>
     private void SaveTo(SongLibrary library, string name)
     {
@@ -614,8 +636,8 @@ public partial class MainWindow : Window
 
         try
         {
-            library.Write(name, SongProjectFile.WriteProject(song, new ProjectHeader(
-                SongProjectFile.ProjectVersion, name, _edited, _importedFrom)));
+            // 整份先在内存里拼成 MIDI 再落盘（MidiWriter 的规矩），IO 故障由曲库换成中文报出来
+            library.WriteBytes(name, MidiWriter.WriteBytes(song));
         }
         catch (InvalidDataException ex)
         {

@@ -267,10 +267,13 @@ public class ToolbarLayoutTests
     /// <summary>
     /// 「有没存的东西」和「这份工程动过没有」是**两个**标记，不能合并。
     ///
-    /// <c>_edited</c> 是粘的：写进工程头，给曲库列表那格「改过 / 没动过」用 ——
+    /// <c>_edited</c> 是粘的：写进工程文件头，给曲库列表那格「改过 / 没动过」用 ——
     /// 存盘不清、撤销回原样也不清。工具栏那一格答的是另一个问题（现在这份和盘上那份对不对得上），
     /// 所以载入和存盘都要清零。合成一个的话，一首存过又重开的曲子一上来就穿着主色，
     /// 而那正是用户说的「载入之后是普通态」。
+    ///
+    /// ⚠️ 52 号票之后那个文件头住在**缓存**里（`songs\.work\<名字>.mproj`，见 53 号票），
+    /// 不再住曲库成员（`.mid`）里 —— 所以下面那条「头里写的是谁」的断言换了个落点，理由写在原地。
     /// </summary>
     [Test]
     public void 没存的东西和动过没有是两个标记()
@@ -286,9 +289,16 @@ public class ToolbarLayoutTests
             Assert.That(花括号段(代码, "private void SaveTo", "找不到 SaveTo"), Does.Contain("_dirty = false;"),
                 "存下去之后又对上了，主色该褪下来");
 
-            // 工程头里那个还是粘性的 _edited：曲库列表那格「改过 / 没动过」靠它
-            Assert.That(花括号段(代码, "private void SaveTo", "找不到 SaveTo"), Does.Contain("_edited, _importedFrom"),
-                "写进工程头的还得是 _edited（粘性标记），别顺手换成 _dirty");
+            // ⚠️ 52 号票（曲库换成 `.mid`）：保存**不再写工程头**了 —— `.mid` 里装不下
+            // Edited / ImportedFrom，这两样连同那个粘性标记归 53 号票的缓存
+            //（`songs\.work\<名字>.mproj`）。所以「头里写的是 `_edited`」这条**在这一票里没有落点**
+            //（SaveTo 里已经一个工程头都不写了），先钉住那一头还成立、而且更该守着的事：
+            // **保存落盘写出去的是标准 MIDI**（别顺手把工程头塞回 `.mid` —— 那会让曲库成员不再是干净 MIDI，
+            // 拷给别人就带着本程序的私货）。53 号票把缓存写回来之后，这里应补回一条
+            // 「缓存那一次写用的是 `_edited, _importedFrom`」——**那条才是原判据的接替者**。
+            Assert.That(花括号段(代码, "private void SaveTo", "找不到 SaveTo"), Does.Contain("MidiWriter"),
+                "保存写出去的是标准 MIDI 文件；Edited / ImportedFrom 随缓存那一票走");
+
             Assert.That(花括号段(代码, "private void ApplySong", "找不到 ApplySong"), Does.Contain("_edited = true;"),
                 "_edited 归曲库列表那格小字，谁也不许把它删了");
         });

@@ -4,18 +4,21 @@ namespace MidiPerformer.Adapters.Gateways;
 
 /// <summary>
 /// 曲库：硬盘上一个平铺的目录，一首曲子一个文件，文件名就是曲名。
-/// 只做目录操作，收发字符串（.mproj 的 JSON 文本本身归 <c>SongProjectFile</c> 管）；目录由构造参数注入
-/// （默认是 exe 旁边的 .\songs\），名字一律先消毒（见 <see cref="Sanitize"/>），名字不存在时抛中文 <see cref="InvalidDataException"/>。
+/// 只做目录操作，不解析内容 —— 曲库成员是**标准 MIDI**（<see cref="ReadBytes"/> / <see cref="WriteBytes"/>），
+/// 工程文件那半（<c>.mproj</c> 的 JSON 文本）走 <see cref="Read"/> / <see cref="Write"/>，
+/// 字节与 JSON 本身分别归 <c>MidiReader</c> / <c>MidiWriter</c> 和 <c>SongProjectFile</c> 管；
+/// 目录由构造参数注入（默认是 exe 旁边的 .\songs\），名字一律先消毒（见 <see cref="Sanitize"/>），
+/// 名字不存在时抛中文 <see cref="InvalidDataException"/>。
 /// </summary>
 public sealed class SongLibrary
 {
     /// <summary>曲库文件的后缀。文件名去掉它就是曲名 —— 改名就是改文件名。</summary>
-    public const string Extension = ".mproj";
+    public const string Extension = ".mid";
 
     /// <summary>Windows 文件名里不能出现的字符；冒号同时是盘符分隔符，放进去会让一个曲名变成一条路径。</summary>
     private static readonly char[] InvalidNameChars = { '<', '>', ':', '"', '/', '\\', '|', '?', '*' };
 
-    /// <summary>Windows 保留的设备名，不带扩展名时会被系统当成设备，"CON.mproj" 根本建不出来。</summary>
+    /// <summary>Windows 保留的设备名，不带扩展名时会被系统当成设备，"CON.mid" 根本建不出来。</summary>
     private static readonly string[] ReservedNames =
     {
         "CON", "PRN", "AUX", "NUL",
@@ -41,7 +44,11 @@ public sealed class SongLibrary
     public string Directory => _directory;
 
     /// <summary>
-    /// 曲库里所有曲名，按名字排序。目录不存在就是空的 —— 还没导入过曲子的机器上它本来就不存在；只认 .mproj。
+    /// 曲库里所有曲名，按名字排序。目录不存在就是空的 —— 还没导入过曲子的机器上它本来就不存在；只认 .mid。
+    ///
+    /// 用的是无参的 <see cref="DirectoryInfo.EnumerateFiles()"/>，它默认只枚举本层，
+    /// 所以曲库目录里的子目录（<c>songs\.work\</c>，工程文件住在那里）**天然一个都进不来** ——
+    /// 这是枚举 API 的默认语义，不是这儿另外写的排除逻辑。
     /// </summary>
     public IReadOnlyList<string> Names()
     {
@@ -82,7 +89,28 @@ public sealed class SongLibrary
     }
 
     /// <summary>
-    /// 把一首曲子的正文写进曲库，目录不存在就建出来（第一次导入时它还不存在）；撞名直接覆盖，这正是「保存」。
+    /// 读一首曲子的字节（标准 MIDI 那条路，内容交给 <c>MidiReader</c>）。原样读出，一个字节都不动。
+    /// </summary>
+    /// <exception cref="InvalidDataException">曲库里没有这个名字，或者文件读不动。</exception>
+    public byte[] ReadBytes(string name)
+    {
+        string safe = Sanitize(name);
+        string path = PathOf(safe);
+
+        if (!File.Exists(path)) throw new InvalidDataException($"曲库里没有叫「{safe}」的曲子。");
+
+        try
+        {
+            return File.ReadAllBytes(path);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            throw new InvalidDataException($"曲库里的「{safe}」读不出来：{ex.Message}", ex);
+        }
+    }
+
+    /// <summary>
+    /// 把一首曲子的正文（.mproj 的 JSON 文本）写进曲库，目录不存在就建出来（第一次导入时它还不存在）；撞名直接覆盖，这正是「保存」。
     /// </summary>
     public void Write(string name, string text)
     {
@@ -96,6 +124,34 @@ public sealed class SongLibrary
         {
             System.IO.Directory.CreateDirectory(_directory);
             File.WriteAllText(path, text);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            throw new InvalidDataException($"「{safe}」存不进曲库（{path}）：{ex.Message}", ex);
+        }
+    }
+
+    /// <summary>
+    /// 把一首曲子的字节（标准 MIDI）写进曲库。语义与 <see cref="Write"/> 一字不差 ——
+    /// 目录不存在就建出来、撞名直接覆盖（这正是「保存」）、IO 故障换成中文的
+    /// <see cref="InvalidDataException"/>。分成两个方法而不是一个带 <c>object</c> 的：
+    /// 文本那条用 <c>ReadAllText</c> / <c>WriteAllText</c>（带编码），字节这条用
+    /// <c>ReadAllBytes</c> / <c>WriteAllBytes</c>，混用会把二进制写坏。
+    /// </summary>
+    /// <exception cref="InvalidDataException">写不进去（目录建不出来、盘满、文件被占用）。</exception>
+    public void WriteBytes(string name, byte[] data)
+    {
+        ArgumentNullException.ThrowIfNull(data);
+
+        string safe = Sanitize(name);
+        string path = PathOf(safe);
+
+        // 先建目录再落盘：半截文件会被当成一份坏曲子，比没有文件更坏。
+        // 调用方给的是**整份**字节（MidiWriter 先在内存里拼完），所以半截只会来自磁盘故障，不是拼装失败。
+        try
+        {
+            System.IO.Directory.CreateDirectory(_directory);
+            File.WriteAllBytes(path, data);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -192,7 +248,7 @@ public sealed class SongLibrary
         }
     }
 
-    /// <summary>保留设备名按第一个点之前那截判：Windows 就是这么认的，"CON.mproj" 一样建不出来。</summary>
+    /// <summary>保留设备名按第一个点之前那截判：Windows 就是这么认的，"CON.mid" 一样建不出来。</summary>
     private static bool IsReservedDeviceName(string name)
     {
         int dot = name.IndexOf('.');
