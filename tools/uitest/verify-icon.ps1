@@ -44,6 +44,19 @@ $出 = Join-Path $PSScriptRoot 'appicon-preview'
 New-Item -ItemType Directory -Force -Path $出 | Out-Null
 $script:图 = $null
 
+# ── 81 号票：这一条修前**一条判据都没有**（量完三处就走人），却在总表里占着一个「绿」——
+#    「绿」必须等于「有一批判据真的通过了」，它一条都没有。这是本票要杀的病。
+#    补的判据全是它自己一直在量、抬头也早就承诺过的东西（没有新造需求）：
+#      · 窗口标题 / 窗口矩形（量的是不是我们那个窗口，截图那一块有没有意义）
+#      · PrintWindow 成功（它没成功的话「标题栏左上角」那张图就不作数 —— 整个结论没有根据）
+#      · 三张证据图真写出去了（抬头说「量的是三处」，那三张图就是这次的产物）
+#  🔴 一条像素值判据都没有（硬规矩：像素读回只能进 probe，不能进 verify）——
+#     「图标到底画成什么样」是要人看图判断的，本脚本只保证**证据真的产出了**。
+$fail = 0
+function 断言真([string]$名, [bool]$条件, [string]$原文) {
+  if ($条件) { Write-Host "  OK   $名（$原文）" } else { Write-Host "  FAIL $名（$原文）" -ForegroundColor Red; $script:fail++ }
+}
+
 function 截区域([int]$x, [int]$y, [int]$w, [int]$ht) {
   $b = [System.Drawing.Bitmap]::new($w, $ht)
   $g = [System.Drawing.Graphics]::FromImage($b)
@@ -117,11 +130,16 @@ Start-Sleep -Seconds 3
 
 $r = [ICO]::矩形($h)
 Write-Host "窗口矩形：$($r[0]),$($r[1]) $($r[2])x$($r[3])"
+$proc.Refresh()
+$标 = $proc.MainWindowTitle
+断言真 '窗口标题是「MIDI 演奏器」（量的是我们那个窗口）' ($标 -eq 'MIDI 演奏器') "「$标」"
+断言真 '窗口矩形非零（标题栏那一块才截得到）' ($r[2] -gt 0 -and $r[3] -gt 0) "$($r[2])x$($r[3])"
 
 # ── 1. 窗口自己画一遍（不受遮挡影响），再从里面裁标题栏左上角 ──
 Write-Host "`n── 1. 标题栏左上角（图标就画在这一块里）──"
 $好 = 抓窗口 $h
 Write-Host "  PrintWindow 成功 = $好"
+断言真 'PrintWindow 成功（下面那张放大的图才作数）' ([bool]$好) "PrintWindow=$好"
 if (-not $好) { Write-Host '  ⚠️ PrintWindow 没成功，下面这张图不作数' }
 存位图 'window-full.png'
 裁 0 0 150 52
@@ -153,8 +171,22 @@ if ($小 -eq [IntPtr]::Zero -and $大 -eq [IntPtr]::Zero) {
 
 # ── 收尾：只关我自己这一个 ──
 Write-Host "`n── 收尾 ──"
+# 抬头说「量的是三处」，那三张图就是这次的产物 —— 少一张或者是个空文件，这趟就白跑了。
+foreach ($图名 in @('window-full.png', 'titlebar-corner-6x.png', 'taskbar.png')) {
+  $图路径 = Join-Path $出 $图名
+  断言真 "证据图 $图名 写出来了（非空）" ((Test-Path -LiteralPath $图路径) -and (Get-Item -LiteralPath $图路径).Length -gt 0) `
+    "$(if (Test-Path -LiteralPath $图路径) { "$((Get-Item -LiteralPath $图路径).Length) 字节" } else { '文件不在' })"
+}
 [void]$proc.CloseMainWindow()
 if (-not $proc.WaitForExit(8000)) { $proc.Kill(); Write-Host '  我这个实例不肯退，强杀了' }
 else { Write-Host "  关掉了我这个实例（PID $($proc.Id)）" }
 $还在 = @(Get-Process -Name MidiPerformer -EA SilentlyContinue | ForEach-Object { $_.Id })
 Write-Host "本来就在跑的那些现在还在吗：$(if ($还在.Count) { $还在 -join ', ' } else { '（一个都不剩 —— 有问题！）' })"
+# ⚠️ 「本来就在跑的还在不在」**不判红**：run-all.ps1 的抬头专门写过为什么
+#    （这一轮桌上同时有别人的实例来来去去，拿它判红等于让结论看别人脸色）。
+#    它是必须看见的信息，不是判据。
+
+"`n$(if ($fail -eq 0) { '全过' } else { "$fail 条红" })"
+# 81 号票：裁决行 + 退出码（run-all.ps1 拿这行复核退出码，对不上就降级成红）。
+"==== uitest 裁决 不过=$fail"
+exit $fail

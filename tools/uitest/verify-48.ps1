@@ -277,6 +277,8 @@ finally {
   if ($null -ne $script:proc) { Write-Host "收了实例 PID $($script:proc.Id)" }
 }
 
-if ($失败) { Write-Host "`n$失败 条没过" -ForegroundColor Red; exit 1 }
-Write-Host "`n全过（另有 2 条本机验不了，见上）" -ForegroundColor Green
-exit 0
+if ($失败) { Write-Host "`n$失败 条没过" -ForegroundColor Red } else { Write-Host "`n全过（另有 2 条本机验不了，见上）" -ForegroundColor Green }
+# 81 号票：裁决行（run-all.ps1 拿它跟退出码复核，对不上就把这一条降级成红）。
+# 这一条的红数变量叫 `$失败`，不是 `$fail` —— 照它自己的写。
+"==== uitest 裁决 不过=$失败"
+exit $失败

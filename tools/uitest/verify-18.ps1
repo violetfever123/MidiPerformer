@@ -114,9 +114,22 @@ function 轨号文字([int]$序) {
 function 轨号们 { @(1..@(轨锚).Count | ForEach-Object { 轨号文字 $_ }) }
 
 # 「选中」那一格的值：先找到「选中」标签，再取它右边紧挨着的那格值 —— 不写死 Y
+#
+# 81 号票顺带修的一处（**只加诊断，判据一个字没动**）：定位不到标签时，光看比对那行
+# `(找不到「选中」标签)` 分不出「标签被版式删了」和「读数条这会儿读不出来」。
+# 这里补**一行**（只说一次）把话说明白 —— 免得后面十条 FAIL 看起来像十个不同的毛病。
+# ⚠️ 返回的哨兵字符串**保持原样**：它是 82 号票要处理的东西（改判据或者删），
+#    这一票只让它更好读。也**不 throw**：一 throw 就死在第一处，后面九条断言一条都跑不到，
+#    那反而更不好读（断点之后那些断言**一条都没验过**）。
 function 选中读数 {
   $lbl = 文本 | Where-Object { $_.Current.Name -eq '选中' } | Select-Object -First 1
-  if (-not $lbl) { return '(找不到「选中」标签)' }
+  if (-not $lbl) {
+    if (-not $script:说过找不到选中) {
+      $script:说过找不到选中 = $true
+      Write-Host '  ! 读数条上定位不到「选中」那一格 —— 后面每条要读它的断言都会 FAIL（十条一起红是同一个原因，不是十个毛病）'
+    }
+    return '(找不到「选中」标签)'
+  }
   $lr = $lbl.Current.BoundingRectangle
   $t = 文本 | Where-Object { $r = $_.Current.BoundingRectangle
       [Math]::Abs($r.Y - $lr.Y) -lt 14 -and $r.X -gt $lr.X -and $r.X -lt ($lr.X + 120) } |
@@ -289,3 +302,7 @@ if (-not $落对) { throw '点下去被别的窗口挡了' }
 ""
 
 if ($fail -eq 0) { "全过" } else { "$fail 条没过" }
+# 81 号票：裁决行 + 退出码。裁决行是给 run-all.ps1 复核用的记号（它拿这行跟退出码对，
+# 对不上就把这一条降级成红）—— 少了它，这条脚本在总表里会被当成「没有裁决」而**降级成红**。
+"==== uitest 裁决 不过=$fail"
+exit $fail

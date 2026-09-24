@@ -335,4 +335,6 @@ $后 = $小节框.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pa
 断言 '按钮没被空格带动' (按钮字) '▶ 播放'
 
 "`n$(if ($fail -eq 0) { '全过' } else { "$fail 条不过" })"
+# 81 号票：裁决行 —— run-all.ps1 拿它跟退出码复核，对不上就把这一条降级成红（别删）。
+"==== uitest 裁决 不过=$fail"
 exit $fail

@@ -52,6 +52,19 @@ $出 = Join-Path $PSScriptRoot 'verify-compressed'
 New-Item -ItemType Directory -Force -Path $出 | Out-Null
 $script:图 = $null
 
+# ── 81 号票：这一条修前**一条判据都没有**（只 print、拍图、走人），可它在总表里照样占着一个
+#    「绿」——「绿」的意思是「有一批判据真的通过了」，而它一条都没有。这是本票要杀的病。
+#    现在补的判据**全是它自己一直在量、抬头也早就承诺过的东西**（没有新造需求）：
+#      · 抬头第 7-8 行：发布目录下 songs\ 里的曲子是不是都在、中文名有没有乱码
+#      · 窗口标题（裁剪把 CJK 弄坏就看得出来）+ 截图证据是不是真的有效（PrintWindow 没成功，
+#        那张「开窗后长什么样」就不作数，整个体检结论就没有根据）
+#  🔴 **一条像素值判据都没有**（硬规矩：像素读回只能进 probe，不能进 verify）——
+#     判的是「窗口/标题/文件」这类前提，不是「某个像素该是什么颜色」。
+$fail = 0
+function 断言真([string]$名, [bool]$条件, [string]$原文) {
+  if ($条件) { Write-Host "  OK   $名（$原文）" } else { Write-Host "  FAIL $名（$原文）" -ForegroundColor Red; $script:fail++ }
+}
+
 function 抓窗口([IntPtr]$h) {
   $r = [SHR]::矩形($h)
   $b = [System.Drawing.Bitmap]::new($r[2], $r[3])
@@ -78,9 +91,33 @@ $曲库 = Join-Path (Split-Path $exe -Parent) 'songs'
 Write-Host "用 $exe"
 $exeInfo = Get-Item $exe
 Write-Host "产物 $([math]::Round($exeInfo.Length / 1MB, 2)) MB，改动于 $($exeInfo.LastWriteTime)"
-Write-Host "曲库 $曲库"
-Get-ChildItem $曲库 -Filter *.mproj | Sort-Object Name | ForEach-Object {
-  Write-Host ("  {0,-8} {1}" -f $_.Length, $_.Name)
+Write-Host "`n── 曲库（发布目录下 songs\）──"
+$曲们 = @(if (Test-Path -LiteralPath $曲库 -PathType Container) {
+    Get-ChildItem -LiteralPath $曲库 -Filter *.mproj -File | Sort-Object Name
+  } else { @() })
+foreach ($曲 in $曲们) {
+  Write-Host ("  {0,-8} {1}" -f $曲.Length, $曲.Name)
+}
+断言真 '发布产物里带着曲库目录' (Test-Path -LiteralPath $曲库 -PathType Container) $曲库
+断言真 '曲库里至少有一份 .mproj' ($曲们.Count -gt 0) "$($曲们.Count) 份"
+# 抬头承诺的「曲子是不是都在、中文名有没有乱码」——这里真去读一遍（载入时 App 也是这么读的：
+# 一份 .mproj 走一遍 JSON 反序列化）。名字里出现 U+FFFD = 乱码；JSON 读不动 / 没有轨 = 坏曲子。
+foreach ($曲 in $曲们) {
+  $坏 = ''
+  $详 = ''
+  if ($曲.Name.IndexOf([char]0xFFFD) -ge 0) { $坏 = '文件名里有乱码字符（U+FFFD）' }
+  else {
+    try {
+      $j = Get-Content -LiteralPath $曲.FullName -Raw -Encoding UTF8 | ConvertFrom-Json
+      $轨数 = if ($j.Song) { @($j.Song.Tracks).Count } else { 0 }
+      $详 = "Name=$($j.Name)，轨道 $轨数 条"
+      if (-not $j.Name) { $坏 = 'JSON 里没有 Name' }
+      elseif ($j.Name.IndexOf([char]0xFFFD) -ge 0) { $坏 = 'Name 里有乱码字符（U+FFFD）' }
+      elseif ($轨数 -eq 0) { $坏 = 'JSON 里一条轨都没有' }
+    }
+    catch { $坏 = "JSON 读不动：$($_.Exception.Message)" }
+  }
+  断言真 "曲库「$($曲.BaseName)」完好（无乱码 + JSON 有 Name 有轨）" ($坏 -eq '') $(if ($坏) { $坏 } else { $详 })
 }
 
 $本来就有 = @(Get-Process -Name MidiPerformer -EA SilentlyContinue | ForEach-Object { $_.Id })
@@ -102,12 +139,19 @@ Start-Sleep -Seconds 4
 
 $r = [SHR]::矩形($h)
 Write-Host "窗口矩形：$($r[0]),$($r[1]) $($r[2])x$($r[3])"
-Write-Host "窗口标题：$([SHR]::标题($h))"
+$标 = [SHR]::标题($h)
+Write-Host "窗口标题：$标"
+断言真 '窗口矩形非零（截图才有意义）' ($r[2] -gt 0 -and $r[3] -gt 0) "$($r[2])x$($r[3])"
+断言真 '窗口标题还是「MIDI 演奏器」（裁剪没把标题弄坏）' ($标 -eq 'MIDI 演奏器') "「$标」"
 
 Write-Host "`n── 开窗后长什么样 ──"
 $好 = 抓窗口 $h
 Write-Host "  PrintWindow 成功 = $好"
 存位图 '1-开窗.png'
+断言真 'PrintWindow 成功（体检那张图才作数）' ([bool]$好) "PrintWindow=$好"
+$图路径 = Join-Path $出 '1-开窗.png'
+断言真 '开窗那张图真写出去了（非空）' ((Test-Path -LiteralPath $图路径) -and (Get-Item -LiteralPath $图路径).Length -gt 0) `
+  "$(if (Test-Path -LiteralPath $图路径) { "$((Get-Item -LiteralPath $图路径).Length) 字节" } else { '文件不在' })"
 
 if ($点偏移.Trim()) {
   $n = 0
@@ -131,3 +175,11 @@ if (-not $proc.WaitForExit(8000)) { $proc.Kill(); Write-Host '  不肯退，强�
 else { Write-Host "  关掉了 PID $($proc.Id)" }
 $还在 = @(Get-Process -Name MidiPerformer -EA SilentlyContinue | ForEach-Object { $_.Id })
 Write-Host "别人那些现在还在吗：$(if ($还在.Count) { $还在 -join ', ' } else { '（一个都不剩）' })"
+# ⚠️ 「本来就在跑的还在不在」**不判红**：run-all.ps1 的抬头专门写过为什么
+#    （这一轮桌上同时有别人的实例来来去去，拿它判红等于让结论看别人脸色）。
+#    它是必须看见的信息，不是判据。
+
+"`n$(if ($fail -eq 0) { '全过' } else { "$fail 条红" })"
+# 81 号票：裁决行 + 退出码（run-all.ps1 拿这行复核退出码，对不上就降级成红）。
+"==== uitest 裁决 不过=$fail"
+exit $fail

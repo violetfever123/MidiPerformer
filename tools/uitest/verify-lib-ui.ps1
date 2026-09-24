@@ -92,6 +92,19 @@ public class UIW {
 $出 = Join-Path $PSScriptRoot 'verify-lib-ui'
 New-Item -ItemType Directory -Force -Path $出 | Out-Null
 
+# ── 81 号票：这一条修前**一条判据都没有**（拍完图就走人），却在总表里占着一个「绿」——
+#    「绿」必须等于「有一批判据真的通过了」，它一条都没有。这是本票要杀的病。
+#    补的判据全是它自己一直在量、抬头也早就承诺过的东西（没有新造需求）：
+#      · 窗口标题（起的是不是我们那个 app）
+#      · 「点了按钮之后弹出了什么」拍得到（枚举到窗口 + PrintWindow 成功 + 图真写出去了）
+#      · 调用方**点名**要在曲库窗口里点时，曲库窗口必须在场 —— 修前是「找不到就跳过、
+#        什么都不做」，那正是这套 harness 最怕的「不响的门」（看着像验过了，其实一步没走）
+#  🔴 一条像素值判据都没有（硬规矩：像素读回只能进 probe，不能进 verify）。
+$fail = 0
+function 断言真([string]$名, [bool]$条件, [string]$原文) {
+  if ($条件) { Write-Host "  OK   $名（$原文）" } else { Write-Host "  FAIL $名（$原文）" -ForegroundColor Red; $script:fail++ }
+}
+
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $exe = Join-Path $repo 'MidiPerformer.App\bin\Release\net8.0\win-x64\publish\MidiPerformer.exe'
 if (-not (Test-Path $exe)) { throw "没有发布产物：$exe" }
@@ -111,6 +124,8 @@ if ($proc.MainWindowHandle -eq 0) { throw '等不到窗口句柄' }
 $主 = $proc.MainWindowHandle
 $pid_ = [uint32]$proc.Id
 Write-Host "我这个实例：PID $pid_，主窗口 $主"
+$主标 = [UIW]::标题($主)
+断言真 '主窗口标题是「MIDI 演奏器」' ($主标 -eq 'MIDI 演奏器') "「$主标」"
 [void][UIW]::SetWindowPos($主, [UIW]::TOPMOST, 0, 0, 0, 0, [UIW]::SWP_NOMOVE -bor [UIW]::SWP_NOSIZE -bor [UIW]::SWP_NOACTIVATE)
 [void][UIW]::SetForegroundWindow($主)
 Start-Sleep -Seconds 4
@@ -120,6 +135,8 @@ function 拍一轮([string]$标签) {
   $r = [UIW]::矩形($主)
   Write-Host "`n===== $标签（窗口内坐标 ＝ 屏幕坐标 - ($($r[0]),$($r[1]))）====="
   $n = 0
+  $没截到 = 0
+  $没写出 = 0
   foreach ($h in [UIW]::本进程窗口($pid_)) {
     $n++
     $wr = [UIW]::矩形($h)
@@ -136,8 +153,13 @@ function 拍一轮([string]$标签) {
     $b.Save($p, [System.Drawing.Imaging.ImageFormat]::Png)
     $b.Dispose()
     Write-Host "       写出 $(Split-Path $p -Leaf)（PrintWindow=$好）"
+    if (-not $好) { $没截到++ }
+    if (-not (Test-Path -LiteralPath $p) -or (Get-Item -LiteralPath $p).Length -le 0) { $没写出++ }
   }
   if ($n -eq 0) { Write-Host '  （一个可见顶层窗口都没有？）' }
+  断言真 "$标签：枚举到可见顶层窗口" ($n -gt 0) "$n 个"
+  断言真 "$标签：每个窗口都截下来了（PrintWindow 全成功）" ($没截到 -eq 0) "没截到 $没截到 个"
+  断言真 "$标签：图都写出去了（非空）" ($没写出 -eq 0) "没写出 $没写出 个"
   return $r
 }
 
@@ -164,7 +186,11 @@ if ($曲库第几行 -gt 0 -or $曲库内点.Trim()) {
   foreach ($h in [UIW]::本进程窗口($pid_)) {
     if ([UIW]::标题($h) -eq '歌曲库') { $库 = $h; break }
   }
-  if ($库 -eq [IntPtr]::Zero) { Write-Host "`n⚠️ 没找到「歌曲库」窗口" }
+  if ($库 -eq [IntPtr]::Zero) {
+    Write-Host "`n⚠️ 没找到「歌曲库」窗口"
+    断言真 '点名要在曲库窗口里点，曲库窗口就得在场' $false `
+      '枚举本进程的可见顶层窗口，没有一个标题是「歌曲库」（修前这里是「找不到就什么都不做」——一次点击都没发生，却看着像验过了）'
+  }
   else {
     # **曲库窗口也得提到最前**：TOP 只加在主窗口上时，这个被它拥有的模态窗口并不跟着置顶，
     # 于是点在它身上的鼠标事件会被压在它上面的窗口（我自己的终端）截走 ——
@@ -202,3 +228,11 @@ if (-not $proc.WaitForExit(8000)) { $proc.Kill(); Write-Host '  不肯退，强�
 else { Write-Host "  关掉了 PID $pid_" }
 $还在 = @(Get-Process -Name MidiPerformer -EA SilentlyContinue | ForEach-Object { $_.Id })
 Write-Host "别人那些现在还在吗：$(if ($还在.Count) { $还在 -join ', ' } else { '（一个都不剩）' })"
+# ⚠️ 「本来就在跑的还在不在」**不判红**：run-all.ps1 的抬头专门写过为什么
+#    （这一轮桌上同时有别人的实例来来去去，拿它判红等于让结论看别人脸色）。
+#    它是必须看见的信息，不是判据。
+
+"`n$(if ($fail -eq 0) { '全过' } else { "$fail 条红" })"
+# 81 号票：裁决行 + 退出码（run-all.ps1 拿这行复核退出码，对不上就降级成红）。
+"==== uitest 裁决 不过=$fail"
+exit $fail

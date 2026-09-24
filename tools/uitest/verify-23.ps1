@@ -631,4 +631,8 @@ if ($开后.Count) {
 }
 
 ""
-if ($fail) { "$fail 条不过"; exit 1 } else { '全过' }
+if ($fail) { "$fail 条不过" } else { '全过' }
+# 81 号票：修前这一行是 `if ($fail) { "$fail 条不过"; exit 1 } else { '全过' }` ——
+# 绿的半边是「走到底自然退 0」，红的半边才显式 exit。裁决行 + 末尾统一 exit，两头都传得出去。
+"==== uitest 裁决 不过=$fail"
+exit $fail

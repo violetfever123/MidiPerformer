@@ -360,4 +360,6 @@ $带底 = ($栏 | ForEach-Object { $_.底 } | Measure-Object -Maximum).Maximum
 [V24]::Click([int]($win.X + 60), [int]($win.Y + $按Y))
 
 "`n$(if ($fail -eq 0) { '全过' } else { "$fail 条不过" })"
+# 81 号票：裁决行 —— run-all.ps1 拿它跟退出码复核，对不上就把这一条降级成红（别删）。
+"==== uitest 裁决 不过=$fail"
 exit $fail

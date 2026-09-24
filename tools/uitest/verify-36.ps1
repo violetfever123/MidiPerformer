@@ -663,6 +663,8 @@ if (-not $跑完了) {
   '★ 跑到一半断了：断点之后的每一条都没验过，这不是全过'
   $fail = $fail + 1
 } elseif ($fail -eq 0) { '全过' } else { "$fail 条红" }
+# 81 号票：裁决行 —— run-all.ps1 拿它跟退出码复核，对不上就把这一条降级成红（别删）。
+"==== uitest 裁决 不过=$fail"
 [void][V36]::ShowWindow($h, 9)
 [void]$proc.CloseMainWindow()
 if (-not $proc.WaitForExit(8000)) { $proc.Kill() }
