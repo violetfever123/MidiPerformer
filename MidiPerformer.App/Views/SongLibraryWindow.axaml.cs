@@ -1,3 +1,4 @@
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using MidiPerformer.Adapters.Gateways;
@@ -41,6 +42,21 @@ public sealed partial class SongLibraryWindow : Window
 
         PanelHost.Content = _panel;
         RefreshLibrary(current);
+    }
+
+    /// <summary>
+    /// 开窗那一下把底子交给面板：**主窗口**的内容。规格要的是「曲库面板透出底下的卷帘」，
+    /// 而这个面板今天住在一个独立窗口里 —— 它自己底下只有一层窗口底色，
+    /// 真正有东西可透的是身后那份卷帘。见 <see cref="SongLibraryPanel.ShowBackdrop"/>。
+    ///
+    /// 挂在 <c>OnOpened</c> 而不是构造里：<c>Owner</c> 要 <c>ShowDialog</c> 才设得上，
+    /// 而窗口的位置也要到这时候才定下来（位图是按屏幕坐标从主窗口里抠的）。
+    /// </summary>
+    protected override void OnOpened(EventArgs e)
+    {
+        base.OnOpened(e);
+
+        if (Owner?.Content is Visual backdrop) _panel?.ShowBackdrop(backdrop);
     }
 
     /// <summary>列表里双击了某一首（或者选中它按了回车）：请主窗口把它装上。</summary>
