@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Globalization;
 using Avalonia.Controls;
 using Avalonia.Input;
@@ -67,6 +68,17 @@ public partial class MainWindow : Window
     /// 见 <see cref="LoggingSetup"/> 与 <c>FileLoggerProvider</c> 的类注释。
     /// </summary>
     private readonly ILogger _log;
+
+    /// <summary>
+    /// **正在从曲库开的那一首**的分段秒表（62 号）。只有 <see cref="TryOpenLibrarySong"/> 那条路
+    /// 会挂上它，别处（导入 / 编辑）一律 <c>null</c> ⇒ 那两条路上 <c>Mark</c> 全是空转。
+    ///
+    /// 为什么走**字段**而不是给 <see cref="LoadSong"/> 加个尾参：这次调用在源码里必须保持
+    /// <c>LoadSong(song, name)</c> 这个形状 —— 项目里有一条测试拿它当锚（<c>SongCacheTests</c> 的
+    /// 「补文件头排在装曲子之后」），加了参数就会红在一个跟它要测的顺序毫无关系的地方。
+    /// 字段只在这一处赋值、<c>finally</c> 里清掉，生命周期就是这个方法的调用。
+    /// </summary>
+    private LoadPlan? _loadingPlan;
 
     /// <summary>编辑脊柱。撤销是装饰器加的能力，界面拿到的就是装饰器，命令本身（<see cref="SongEditor"/>）不知道有撤销这回事。</summary>
     private readonly UndoableSongEditor _editor = new(new SongEditor());
@@ -324,9 +336,50 @@ public partial class MainWindow : Window
         SaveTo(library, name);
     }
 
+    /// <summary>
+    /// 开曲那条路的分段秒表（62 号）。**只服务「打开一首曲子」**：导入 / 编辑那两条路上
+    /// <c>_loadingPlan</c> 是 <c>null</c>，那些 <c>Mark</c> 调用全是空转。
+    ///
+    /// 每一段记一个毫秒数，收尾那一行把整条路摊平写进日志。它要的是一个**基线** ——
+    /// 以后谁把这块改慢了，日志里有对照。**不判过不过、没有阈值**：机器快慢差异会把阈值变成噪音。
+    /// </summary>
+    private sealed class LoadPlan
+    {
+        private readonly string _title;
+        private readonly ILogger _log;
+        private readonly Stopwatch _watch = Stopwatch.StartNew();
+        private readonly List<string> _segments = new();
+        private long _mark;
+
+        public LoadPlan(string title, ILogger log)
+        {
+            _title = title;
+            _log = log;
+        }
+
+        /// <summary>把「从上一段到现在」记成一段。名字是给日志读的，别用英文。</summary>
+        public void Mark(string stage)
+        {
+            long now = _watch.ElapsedMilliseconds;
+            _segments.Add($"{stage} {now - _mark}ms");
+            _mark = now;
+        }
+
+        /// <summary>收尾：记上最后一段，然后把整条路写进日志。</summary>
+        public void Done(string lastStage)
+        {
+            Mark(lastStage);
+            _log.LogInformation("打开「{Title}」耗时 {Total}ms：{Segments}",
+                _title, _watch.ElapsedMilliseconds, string.Join(" / ", _segments));
+        }
+    }
+
     /// <summary>装一首曲子：重建卷帘、把事件表交给试听、把界面复位。</summary>
     private void LoadSong(Song song, string title)
     {
+        // 开曲那条路挂上的分段秒表（见 _loadingPlan）。别处是 null ⇒ 下面那些 Mark 全是空转。
+        LoadPlan? plan = _loadingPlan;
+
         // 先验 tick 装不装得下，再动任何状态：TempoMap.SecondsAt 在 tick 换算出的微秒数
         // 超过 long 的十分之一时会抛「时间跨度太大」，而这是每首曲子进窗口的唯一入口。
         if (!song.TryMeasure(out _, out string? reason))
@@ -335,6 +388,8 @@ public partial class MainWindow : Window
             ShowError(reason!);
             return;
         }
+
+        plan?.Mark("校验");
 
         HideMessages();
 
@@ -357,8 +412,10 @@ public partial class MainWindow : Window
         // 换曲子一律重建轨控件：轨数碰巧一样时「就地重挂」是拿另一首曲子的轨接着用上一首的控件，
         // 折叠、改名框这些控件上的状态会跨曲子漏过去。编辑那条路才是「同一首曲子的新一份」
         SyncLanes(rebuildAll: true);
+        plan?.Mark("挂轨");
         // 换曲子这一路折叠一律是空的，照旧现问一次
         _playback.Load(song, MutedTracks());
+        plan?.Mark("试听");
 
         SongNameBox.Text = title;
         EmptyHint.IsVisible = false;
@@ -376,6 +433,8 @@ public partial class MainWindow : Window
         // 这一趟多半算不出场景（控件刚建出来、宽度还是 0），但位置读数、导航条这些要它；
         // 卷帘自己会在尺寸落定那一帧补上（挂在 TrackLaneView 的 Roll.SizeChanged 上）
         RefreshView();
+
+        plan?.Done("收尾");
     }
 
     /// <summary>
@@ -389,6 +448,9 @@ public partial class MainWindow : Window
     /// </param>
     private void SyncLanes(bool rebuildAll = false)
     {
+        // 只服务开曲那条路的分段秒表（见 _loadingPlan）：编辑那条路上它是 null。
+        LoadPlan? plan = _loadingPlan;
+
         if (_song is not { } song) return;
 
         // 聚焦轨跟那条轨走，不跟下标走：删掉第 0 条之后下标整体前移，按下标带会把高亮挪到别人身上。
@@ -396,6 +458,7 @@ public partial class MainWindow : Window
         var focused = rebuildAll ? null : FocusedIdentity();
 
         _controller = new PianoRollController(song, rebuildAll ? null : MutedTracks());
+        plan?.Mark("控制器");
 
         if (!rebuildAll && _lanes.Count == song.Tracks.Count)
         {
@@ -613,6 +676,10 @@ public partial class MainWindow : Window
     {
         if (_library is not { } library) return null;
 
+        var plan = new LoadPlan(name, _log);
+        // 挂给 LoadSong / SyncLanes（它们自己读这个字段）—— 这条路上才挂，导入 / 编辑不挂
+        _loadingPlan = plan;
+
         try
         {
             // 曲库里躺着的是一份标准 MIDI（**你的文件**）+ 一份本程序自己的缓存
@@ -623,6 +690,8 @@ public partial class MainWindow : Window
             // ⚠️ 代价写在明处：降级那一趟**移调和删光的轨会一起没掉**，程序不会拦你。
             var loaded = SongCache.Load(library, name);
             var song = loaded.Song;
+
+            plan.Mark("读盘");
 
             LoadSong(song, name);
             // LoadSong 把这四个都清空了（它不知道新来的是哪一份），所以在这儿补上 ——
@@ -641,6 +710,11 @@ public partial class MainWindow : Window
         {
             // 读不出来的曲子：把那句中文交出去，**不动**手上正开着的那一份
             return ex.Message;
+        }
+        finally
+        {
+            // 这一趟开完了（成功或失败）：秒表摘掉，别让下一次装曲子接着上一份的分段记
+            _loadingPlan = null;
         }
     }
 
