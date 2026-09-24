@@ -1,7 +1,9 @@
 # 19 号工单：Delete/Backspace 删选中 + 空白处拖框改成「只选中」。
 #
 # 判据分两层：
-#   · 读数条上「选中」那一格 —— 说清「现在选着谁」「有没有落回邻居」。
+#   · 读数条上「轨」那一格 —— 说清「现在选着谁」「有没有落回邻居」。
+#     （82 号：改版前读的是另一格——「选中」。21 号把读数条上两套读数并成了一套，
+#      那一格**被有意删掉**了，改指到并进来之后的「轨」那一格；详见下面 读数条 那一段。）
 #   · **像素** —— 说清「那个音到底还在不在」。这一条是这张工单的正题：
 #     从前框选是「松手就删」，所以「拖完那个音还在不在」正是新旧两版的分水岭，
 #     而读数条说不清这件事（框住的音还在，读数条也照样报得出一个音）。
@@ -20,10 +22,14 @@
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 Add-Type -AssemblyName System.Windows.Forms, UIAutomationClient, UIAutomationTypes
 Add-Type @"
-using System; using System.Runtime.InteropServices;
+using System; using System.Runtime.InteropServices; using System.Text;
 public class V19 {
   [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
   [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, IntPtr pid);
+  // 82 号：拽不回前台时**把「现在前台是谁」打进日志**（只有一个「拽不到」看不出所以然）
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetClassName(IntPtr h, StringBuilder s, int n);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowText(IntPtr h, StringBuilder s, int n);
+  [DllImport("user32.dll", EntryPoint = "GetWindowThreadProcessId")] public static extern uint PidOf(IntPtr h, out uint pid);
   [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint a, uint b, bool attach);
   [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
   [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int c);
@@ -51,6 +57,21 @@ public class V19 {
     SetFocus(h); System.Threading.Thread.Sleep(400);
     return GetForegroundWindow() == h;
   }
+  /// 前台是不是就是它 —— Take 之后复检一次（Take 里那 400ms 里别人也可能插进来）。
+  public static bool Mine(IntPtr h) { return GetForegroundWindow() == h; }
+  /// 一个窗口是谁（类名 / 标题 / 句柄 / PID）—— 只给诊断用。
+  public static string Desc(IntPtr h) {
+    if (h == IntPtr.Zero) { return "（没有窗口）"; }
+    var c = new StringBuilder(256); GetClassName(h, c, 256);
+    var t = new StringBuilder(256); GetWindowText(h, t, 256);
+    uint pid; PidOf(h, out pid);
+    return "类名「" + c.ToString() + "」标题「" + t.ToString() + "」句柄 " + h.ToString() + " PID " + pid;
+  }
+  /// 某个屏幕坐标上压着的是谁（**点/拖「不算数」时把它打进日志**：
+  /// 光说一句「被别的窗口挡了」，看日志的人不知道挡的是谁，也分不出「外人的窗」和「自家弹出来的东西」）。
+  public static string At(int x, int y) { PT p; p.X = x; p.Y = y; return Desc(WindowFromPoint(p)); }
+  /// 现在压在前台的是谁。
+  public static string Fg() { return Desc(GetForegroundWindow()); }
   /// 点下去，并回答「这一下落在谁身上」。false = 被别的窗口挡了，这一下不算数。
   public static bool Click(int x, int y, IntPtr app) {
     SetCursorPos(x, y); System.Threading.Thread.Sleep(250);
@@ -60,6 +81,8 @@ public class V19 {
     mouse_event(0x0004,0,0,0,IntPtr.Zero); System.Threading.Thread.Sleep(500);
     return mine;
   }
+  /// 把鼠标停在某处（挪开鼠标用）。set 完等一拍，让 Avalonia 来得及处理 PointerExited。
+  public static void Hover(int x, int y) { SetCursorPos(x, y); System.Threading.Thread.Sleep(300); }
   /// 横拖一道。分几步走：一步跳到终点的话，Avalonia 只收到「按下 → 抬起」，
   /// 中间那一串 PointerMoved 一个都没有，拖动就白拖了。
   public static bool Drag(int x1, int y1, int x2, int y2, IntPtr app) {
@@ -126,34 +149,160 @@ function 轨号文字([int]$序) {
 }
 function 轨号们 { @(1..@(轨锚).Count | ForEach-Object { 轨号文字 $_ }) }
 
-# 「选中」那一格的值：先找到「选中」标签，再取它右边紧挨着的那格值 —— 不写死 Y
-function 选中读数 {
-  $lbl = 文本 | Where-Object { $_.Current.Name -eq '选中' } | Select-Object -First 1
-  if (-not $lbl) { return '(找不到「选中」标签)' }
-  $lr = $lbl.Current.BoundingRectangle
-  $t = 文本 | Where-Object { $r = $_.Current.BoundingRectangle
-      [Math]::Abs($r.Y - $lr.Y) -lt 14 -and $r.X -gt $lr.X -and $r.X -lt ($lr.X + 120) } |
-    Sort-Object { $_.Current.BoundingRectangle.X } | Select-Object -First 1
-  if ($t) { $t.Current.Name } else { '(读不到)' }
+# ==================== 读数条（82 号票改的就是这一段）====================
+#
+# 原文读的是**「选中」那一格**。21 号把读数条上**两套**读数并成了**一套**：
+#   轨 / 音高 / 小节 / 拍位 / 时值，值是「**悬浮的音优先，没悬浮就用主选中的音**」
+#   —— 见 MidiPerformer.App/Views/MainWindow.axaml 里 `<Border Grid.Row="3" Classes="readoutbar">`
+#   那一段（ReadoutDetail + 五个 readout-key/readout-value），
+#   依据是 docs/wireframe.html 那一段的注释（`<div class="readout">` 上面，见标注 6），原话：
+#     「**一套读数，不是两套。** 从前左边是「悬停」那一套、右边是「选中」那一套，同一个音
+#       在两处各显示一半，鼠标一移开左边变空、右边还留着 —— 看着像两台机器。现在合成一套：
+#       轨 / 音高 / 小节 / 拍位 / 时值，**悬浮的音优先，没悬浮就用主选中的音**。」
+#   以及 .scratch/midi-performer/issues/21-readout-merge-and-position-move.md
+#   （它顺手删了 `Format.Selection` 和那条测试；验收里写着「悬停」「选中」两个旧标签都不在了）。
+# **那一格「选中」是被有意删掉的，没有搬到别处**（全仓 .axaml 里 `Text="选中"` 零命中）——
+# 所以这一票的路子是「**改指到并进来之后的那一格『轨』**」：轨号原本就在说
+# 「刚才那个音在哪条轨」（21 号原话：「轨号要留下。合并之后它是「这个音在哪条轨」的唯一线索」）。
+#
+# 🔴 合并带来一件**必须处理**的事：这一格**悬浮优先**。鼠标正压在一个音上时，
+#    它报的是**那个悬停的音**，与选中集无关 —— 而本脚本要验的一直是
+#    「**选中的音**」是谁、有没有落到邻居。不处理的话，删完再读就会读到鼠标底下那个音
+#    （第 5 步「删完落到邻居」于是变成假红/假绿）。⇒ 每次读之前**先把鼠标挪出卷帘**
+#    （挪开鼠标），让读数回落到选中：指针一离开 PianoRollLane，它就在 OnPointerExited
+#    里把悬停清成 null
+#    （21 号在真机上量过这条路：「点中甲 → 悬停乙，读数跟着乙走；再移开 → 回到甲，不是变空」）。
+#
+# 五格连标签一起藏起来（没悬停也没选中）是**有意的** —— wireframe.html 标注 6 原话：
+#   「两个都没有的时候，这五格**连标签一起藏起来**（不是显示一排破折号）——「还没载曲子」和
+#     「载了但没悬停」是同一件事，不该一个一排 `—`、一个整块消失。」
+# 那是「什么都没选中」这个**状态**，不是定位失败 ⇒ 返回 没有读数 这一格记号，
+# 好让 FAIL 那行看得见它（而**不是**拿它去跟 `—` 比 —— 那个比较是假的：
+# 读数读不到时它照样成立，看着绿而已）。而「读数条那一行在、五格却缺了某一格」
+# 才是定位失败 —— 那种一律 **throw**（照上面 轨号文字 那句的规矩：定位不到就是定位不到）。
+$读数标签 = @('轨','音高','小节','拍位','时值')
+$没有读数 = '（没有读数：没悬停也没选中）'
+$停车点 = $null
+
+# 读数条那一行在哪：拿**「拍位」**当锚 —— 这个标签只在读数条上出现（拿全等比）；
+# 「小节」会撞上导航条那句「跳到 … 小节」，「轨」会撞上轨头（见 轨号文字 的注释）。
+# 整块藏起来时五格一个都不在，退回**提示行**那一行（提示行分两层，两句各留一个记号）。
+function 读数条Y([object[]]$t) {
+  $e = @($t | Where-Object { $_.Current.Name -eq '拍位' } | Select-Object -First 1)
+  if ($e.Count) { return [int]$e[0].Current.BoundingRectangle.Y }
+  $h = @($t | Where-Object {
+      $_.Current.Name -like '空格 播放*' -or $_.Current.Name -like '*取消选中*' } | Select-Object -First 1)
+  if ($h.Count) { return [int]$h[0].Current.BoundingRectangle.Y }
+  return -1
 }
+# 取某格的标签右边紧挨着的那格值（不写死 Y）
+function 取格([string]$标签, [int]$带Y, [object[]]$t) {
+  $lbl = @($t | Where-Object {
+      $_.Current.Name -eq $标签 -and [Math]::Abs($_.Current.BoundingRectangle.Y - $带Y) -lt 14 } |
+    Select-Object -First 1)
+  if ($lbl.Count -eq 0) { throw "读数条上找不到「$标签」那一格（这一行在 Y=$带Y）—— 定位不到就是定位不到，不返回空（82 号）" }
+  $lr = $lbl[0].Current.BoundingRectangle
+  # 值那一格**不可能是标签之一** —— 抽掉这个过滤，「某一格的值不见了」会被误判成
+  # 「右边那个标签就是它的值」，于是该 throw 的地方悄悄返回一个看起来正常的字符串。
+  $v = @($t | Where-Object { $r = $_.Current.BoundingRectangle
+      [Math]::Abs($r.Y - $lr.Y) -lt 14 -and $r.X -gt $lr.X -and $r.X -lt ($lr.X + 120) -and
+      $读数标签 -notcontains $_.Current.Name } |
+    Sort-Object { $_.Current.BoundingRectangle.X } | Select-Object -First 1)
+  if ($v.Count -eq 0) { throw "读数条上「$标签」右边没有值那一格 —— 定位不到就是定位不到（82 号）" }
+  $v[0].Current.Name
+}
+# 五格拼成一行。形状照改版前那一格「选中」（它当时是 `轨 01 · C4（1）· 1.00 拍`）：
+# 开头一定是「轨 NN」，后面几格留着 —— 第 5 步「删完落到邻居上」要看得见**换了哪个音**
+#（光看轨号的话，邻居还在同一条轨上，前后两读**一模一样**，那条断言就成了假的）。
+function 读数一行([object[]]$t, [int]$带Y) {
+  "轨 $(取格 '轨' $带Y $t) · $(取格 '音高' $带Y $t) · $(取格 '小节' $带Y $t) 小节 · $(取格 '拍位' $带Y $t) · $(取格 '时值' $带Y $t)"
+}
+# 读一次（一份 UIA 文本快照只走一趟树）
+function 读数([object[]]$t) {
+  $带Y = 读数条Y $t
+  if ($带Y -lt 0) { throw '读数条定位不到：连提示行那句（「空格 播放…」/「…取消选中」）都不在 UIA 树里 —— 版式又变了（82 号）' }
+  $在 = @($t | Where-Object {
+      $读数标签 -contains $_.Current.Name -and
+      [Math]::Abs($_.Current.BoundingRectangle.Y - $带Y) -lt 14 })
+  if ($在.Count -eq 0) { return $没有读数 }
+  读数一行 $t $带Y
+}
+# 把鼠标挪出卷帘（理由见上）。停在**工具栏最左边那条内边距**上：那儿是 Border.toolbar
+# 自己的底色，底下没有按钮、没有悬浮效果、也没有 ToolTip —— 而它在卷帘之外。
+function 挪开鼠标 {
+  if (-not $script:停车点) {
+    $w = $root.Current.BoundingRectangle
+    $script:停车点 = @([int]($w.X + 6), [int]($w.Y + 14))
+  }
+  [V19]::Hover($script:停车点[0], $script:停车点[1])
+}
+# 不挪鼠标读一次 —— **只给诊断那一行用**（把「悬浮优先」这条规矩摆出来看）。
+function 此刻读数 { 读数 (文本) }
+# 🔴 判据要用的那一份：先挪开鼠标（让读数回落到**选中**），再读。
+function 选中读数 { 挪开鼠标; 读数 (文本) }
 function 按键([string]$k, [int]$歇 = 700) {
   [System.Windows.Forms.SendKeys]::SendWait($k); Start-Sleep -Milliseconds $歇
 }
 
+# 拽前台：**有界重试**。（82 号）
+#
+# 抬头那条「之前重新拽一次前台」是有来由的，但**只拽一次不够**：取音符起的那个子进程
+# 抢前台是**异步**的 —— 它可能正好落在 Take 自己那 400ms 里，于是这一次就报 false。
+# 这里最多试 4 次、每次隔 500ms；4 次都拽不回来，**照抛**。
+# 这是**对齐环境，不是放松判据**：判据一个字没动，只是把「一次必失就算输」改成有界重试。
+# 每次成功之后再用 Mine 复检一眼（Take 里那 400ms 里别人也可能插进来）。
+function 拽([int]$试 = 4) {
+  for ($i = 1; $i -le $试; $i++) {
+    if ([V19]::Take($h) -and [V19]::Mine($h)) { return $true }
+    "     ⚠ 第 $i 次没拽回前台（现在前台是 $([V19]::Fg())）—— 隔一下再拽"
+    Start-Sleep -Milliseconds 500
+  }
+  return $false
+}
+
 # 点一下 / 拖一道。**之前重新把窗口拽到前台**（理由见文件头）。
 function 点([int]$x, [int]$y) {
-  if (-not [V19]::Take($h)) { throw '拽不到前台 —— 台面上有别的窗口压着' }
+  if (-not (拽)) { throw "拽不到前台 —— 台面上有别的窗口压着（现在前台是 $([V19]::Fg())）" }
   return [V19]::Click($x, $y, $h)
 }
 function 拖([int]$x1, [int]$y1, [int]$x2, [int]$y2) {
-  if (-not [V19]::Take($h)) { throw '拽不到前台 —— 台面上有别的窗口压着' }
+  if (-not (拽)) { throw "拽不到前台 —— 台面上有别的窗口压着（现在前台是 $([V19]::Fg())）" }
   return [V19]::Drag($x1, $y1, $x2, $y2, $h)
+}
+
+# 框一道，**并确认这一下有生效**：框住了东西才算数。（82 号）
+#
+# 为什么需要这个：框选那几下和找音符只隔着一两个子进程，而那个子进程偶尔抢一下前台 ——
+# 抢走的那一瞬间，拖出去只落个「激活窗口」，框里当然什么都没有，看着却像「框选没生效」。
+# 判「拖成功了没」的办法是**看选中集空不空**（框选生效 ⇒ 读数不再是「没有读数」）；空了就**原样补拖一次**。
+# 单用 拖（不判生效）的地方是第 6 步 —— 那一步**就是要拖出一个空框**把选中清掉，
+# 空才是对的，不能拿「空」当「没生效」。补拖几次会打进日志；**判据一个字没松**。
+$补拖 = 0
+function 框([int]$x1, [int]$y1, [int]$x2, [int]$y2) {
+  if (-not (拖 $x1 $y1 $x2 $y2)) { return $false }
+  if ((选中读数) -ne $没有读数) { return $true }
+  $script:补拖++
+  "     ⚠ 这一下拖出去什么也没框住（读数还是「$没有读数」）—— 被吞了，原样补拖一次"
+  if (-not (拖 $x1 $y1 $x2 $y2)) { return $false }
+  return $true
+}
+
+# 起 find-note 子进程：**先试 -WindowStyle Hidden**（别让它冒出一个会抢前台的控制台窗），
+# 没拿到坐标就**退回普通起法** —— 这样「起法」这桩事就永远压不住「找音符」这个正题。
+# 为什么留这条退路：实测 pwsh 7.6.6 里 `-WindowStyle Hidden` 配 `-File` 是好的（6/6 一致），
+# 但配 `-Command` 会让子进程**直接死掉（退出码 -1、无输出）**—— 同一个开关两种行为，
+# 那就别赌它永远好使：拿不到坐标就退回去（真实失败照样是真实失败，退回去也一样红）。
+function 跑找音符([string[]]$argv) {
+  $出 = @(& pwsh -NoProfile -WindowStyle Hidden -File (Join-Path $脚本目录 'find-note.ps1') @argv 2>&1)
+  if (@($出 | Where-Object { $_ -match '^\d+,\d+$' }).Count) { return $出 }
+  "     ⚠ 隐藏起法这一趟没拿到坐标 —— 退回普通起法再来一次"
+  @(& pwsh -NoProfile -File (Join-Path $脚本目录 'find-note.ps1') @argv 2>&1)
 }
 
 # 按像素报出这一轨**最上面那条音符横杠**：中心点、以及它横跨的 x 区间。
 # 找不到（这一轨空了 / 滚在窗口外）返回 $null。
 function 取音符([int]$track) {
-  $out = @(& pwsh -NoProfile -File (Join-Path $脚本目录 'find-note.ps1') -Track $track 2>&1)
+  $out = @(跑找音符 @('-Track', $track))
   $行 = $out | Where-Object { $_ -match '^\d+,\d+$' } | Select-Object -Last 1
   if (-not $行) { return $null }
   $xy = $行 -split ','
@@ -172,7 +321,7 @@ function 同一处($甲, $乙, [int]$容差 = 6) {
 # 离 (x,y) 最近的**空白像素** —— 框选要按在空白上（按在音符身上就成了拖动，不是框选）。
 # 不要求整行都空，只要**按下去那一点**空就行，所以就近找。
 function 取空白点([int]$x, [int]$y) {
-  $out = @(& pwsh -NoProfile -File (Join-Path $脚本目录 'find-note.ps1') -Track 1 -Near "$x,$y" 2>&1)
+  $out = @(跑找音符 @('-Track', 1, '-Near', "$x,$y"))
   $行 = $out | Where-Object { $_ -match '^\d+,\d+$' } | Select-Object -Last 1
   if (-not $行) { return $null }
   $xy = $行 -split ','
@@ -184,10 +333,10 @@ function 取空白点([int]$x, [int]$y) {
 $heads = 轨号们
 if ($heads.Count -lt 1) { throw "一条轨都没找到 —— 先载入一首多轨曲子" }
 "轨头 $($heads.Count) 条，Y = $(($heads | ForEach-Object { [int]$_.Current.BoundingRectangle.Y }) -join ', ')"
-"「选中」那一格现在读作：$(选中读数)"
+"「轨」那一格现在读作：$(选中读数)（此刻还没点过音，多半是「没有读数」）"
 ""
 
-if (-not [V19]::Take($h)) { throw '拽不到前台 —— 台面上有别的窗口压着' }
+if (-not (拽)) { throw "拽不到前台 —— 台面上有别的窗口压着（现在前台是 $([V19]::Fg())）" }
 
 # ---------- 0. 把焦点顶到轨 01，顺带把它滚进视野 ----------
 # 顺序有讲究：换焦点会把它那条轨滚进视野，所以**先顶焦点再找音符**。
@@ -221,7 +370,7 @@ if (-not $空0) { throw "($框左,$($n0.Y)) 旁边找不到空白像素 —— �
 
 # ---------- 1. 正题：框选只选中，不删 ----------
 "1) 在空白处横拖一道框住那个音 —— 这个音**必须还在**"
-if (-not (拖 $框左 $空0.Y $框右 $空0.Y)) { throw '拖出去被别的窗口挡了 —— 把台面清干净再跑' }
+if (-not (框 $框左 $空0.Y $框右 $空0.Y)) { throw "拖出去被别的窗口挡了 —— ($框左,$($空0.Y)) 上压着 $([V19]::At($框左,$空0.Y))，把台面清干净再跑" }
 "     拖完读数：$(选中读数)"
 $n1 = 取音符 1
 if (-not $n1) {
@@ -229,7 +378,11 @@ if (-not $n1) {
 } else {
   断言真 '框选没有删掉音符' (同一处 $n1 $n0) "第一个音的横杠仍在 x $($n1.L)..$($n1.R)（框之前 $($n0.L)..$($n0.R)）"
 }
-断言真 '框选之后选中集不是空的' ((选中读数) -ne '—') "读数 = $(选中读数)"
+# 82 号：原来这里比的是 `-ne '—'` —— 那是读数条**空着那一格**的长破折号，可 21 号合并之后
+# 五格是**连标签一起藏**，屏幕上根本不出现 `—`。于是「找不到标签」的哨兵字符串
+# 顺手就满足了这个比较 —— 一条**假绿**。现在比的是明确的「没有读数」记号：
+# 挪开鼠标之后读数还空着，就是真没选中（那才有资格叫「选中集是空的」）。
+断言真 '框选之后选中集不是空的' ((选中读数) -ne $没有读数) "读数 = $(选中读数)"
 ""
 
 # ---------- 2. 框住的那批能接着删掉 ----------
@@ -258,7 +411,7 @@ if (-not $n3) {
 # ---------- 4. Backspace 和 Delete 一样 ----------
 "4) Backspace 也该能删（两个键都绑）"
 $n4 = 取音符 1
-if (-not (点 $n4.X $n4.Y)) { throw '点下去被别的窗口挡了' }
+if (-not (点 $n4.X $n4.Y)) { throw "点下去被别的窗口挡了 —— ($($n4.X),$($n4.Y)) 上压着 $([V19]::At($n4.X,$n4.Y))" }
 "     点完读数：$(选中读数)"
 按键 '{BS}'
 $n4b = 取音符 1
@@ -279,7 +432,10 @@ if (-not $n4c) {
 # ---------- 5. 删完落到邻居 ----------
 "5) 删一个音，选中该落到时间上最近的邻居（优先右边），不是清空"
 $n5 = 取音符 1
-if (-not (点 $n5.X $n5.Y)) { throw '点下去被别的窗口挡了' }
+if (-not (点 $n5.X $n5.Y)) { throw "点下去被别的窗口挡了 —— ($($n5.X),$($n5.Y)) 上压着 $([V19]::At($n5.X,$n5.Y))" }
+# 82 号：`$前` / `$后` 现在是**五格拼成的一行**（里面就有轨号、音高、小节、拍位、时值）——
+# 落到邻居上时那几个字段必然变；只比轨号的话邻居还在同一条轨，这条断言就成了空比。
+# （读之前先挪开鼠标：不然读到的是鼠标底下那个音，跟选中集没关系。）
 $前 = 选中读数
 "     删之前读数：$前"
 按键 '{DEL}'
@@ -296,11 +452,15 @@ $n5b = 取音符 1
 "6) 一个音都没选中时按 Delete —— 一个音都不该少"
 按键 '{ESC}' 300 | Out-Null
 # 点空白处：按下即清空选中（拖起来的框选什么也没框到，选中集是空的）
+# 82 号：这一下**故意走 拖 不走 框** —— 这一步要的就是「拖完什么都没选中」，
+# 拿「选中集是空的」当「被吞了」的记号会**每趟都误补一次**。前台拽不回来照样抛（拽 那层还在）。
 $n6 = 取音符 1
-if (-not (拖 $框左 $空0.Y ($框左 + 8) $空0.Y)) { throw '拖出去被别的窗口挡了' }
+if (-not (拖 $框左 $空0.Y ($框左 + 8) $空0.Y)) { throw "拖出去被别的窗口挡了 —— ($框左,$($空0.Y)) 上压着 $([V19]::At($框左,$空0.Y))" }
 "     点完读数：$(选中读数)"
 $n6b = 取音符 1
 断言真 '清空选中没有动谱面' ($n6b -and $n6b.L -eq $n6.L) "横杠仍在 x $($n6b.L)"
+# 82 号：`$前6` 这会儿该是「没有读数」那个记号（一个音都没选中 ⇒ 五格连标签一起藏）。
+# 比的是「读数和按 Delete 之前一模一样」，所以记号本身是什么不影响这条的严格程度。
 $前6 = 选中读数
 按键 '{DEL}'
 断言真 '没选中时 Delete 什么都没干' ((选中读数) -eq $前6) "读数还是「$前6」"
@@ -312,10 +472,11 @@ $n7 = 取音符 1
 $空7 = 取空白点 $框左 ($n7.Y + 60)
 if (-not $空7) { throw "($框左,$($n7.Y + 60)) 旁边找不到空白像素" }
 "     按在 ($($空7.X),$($空7.Y))（离那个音 $($空7.Y - $n7.Y)px，约 $([Math]::Round(($空7.Y - $n7.Y) / 7)) 个音高行）"
-if (-not (拖 $框左 $空7.Y $框右 $空7.Y)) { throw '拖出去被别的窗口挡了' }
+if (-not (框 $框左 $空7.Y $框右 $空7.Y)) { throw "拖出去被别的窗口挡了 —— ($框左,$($空7.Y)) 上压着 $([V19]::At($框左,$空7.Y))" }
 $读7 = 选中读数
 "     拖完读数：$读7"
-断言真 '纵向拖多远都框得住' (($读7 -ne '—') -and ($读7 -match '轨\s*01')) "$读7"
+# 82 号：原来前半句比的是 `-ne '—'`（见第 1 步那处注释 —— 那是假绿）。改成明确的「没有读数」记号。
+断言真 '纵向拖多远都框得住' (($读7 -ne $没有读数) -and ($读7 -match '轨\s*01')) "$读7"
 $n7b = 取音符 1
 断言真 '框完那个音还在' (同一处 $n7b $n7) "横杠仍在 x $($n7b.L)..$($n7b.R)"
 按键 '{DEL}'
@@ -337,7 +498,7 @@ $n7d = 取音符 1
 # 「整批删」实际是按音符逐个记的账（一个音一格撤销），和「一次调用 = 一格撤销」不符。
 "8) 框一大段（x $框左..2900）—— 框住的那一批该被**一次**删掉，一次 Ctrl+Z 全回来"
 $n8 = 取音符 1
-if (-not (拖 $框左 $空0.Y 2900 $空0.Y)) { throw '拖出去被别的窗口挡了' }
+if (-not (框 $框左 $空0.Y 2900 $空0.Y)) { throw "拖出去被别的窗口挡了 —— ($框左,$($空0.Y)) 上压着 $([V19]::At($框左,$空0.Y))" }
 $读8 = 选中读数
 "     拖完读数：$读8   框选范围 x $框左..2900"
 $n8a = 取音符 1
@@ -354,6 +515,11 @@ $n8c = 取音符 1
 断言真 '一次 Ctrl+Z 把整批还回来' (同一处 $n8c $n8) "横杠回到 x $($n8c.L)..$($n8c.R)"
 ""
 
+if ($补拖 -gt 0) {
+  # 这一行是**证据**，不是判据：补过拖说明这一趟环境抖了一下（见 框 那一段）。
+  # 补拖之后那几条断言仍然照原样判 —— 补拖也压不住的时候，它们就是红的。
+  "（这一趟有 $补拖 次框选被吞掉、原样补拖过 —— 脚手架侧的抖动，判据没放宽）"
+}
 if ($fail -eq 0) { "全过" } else { "$fail 条没过" }
 # 81 号票：裁决行 + 退出码。裁决行是给 run-all.ps1 复核用的记号（它拿这行跟退出码对，
 # 对不上就把这一条降级成红）—— 少了它，这条脚本在总表里会被当成「没有裁决」而**降级成红**。
