@@ -70,7 +70,7 @@ public partial class PerformerWindow : Window
     /// <summary>当前在发的音。派发线程写、界面线程读（见 <see cref="OnNoteSent"/>）。</summary>
     private string _currentNote = "";
 
-    /// <summary>F6 装不上时缀在状态行后面的一句，写一次就一直在。</summary>
+    /// <summary>急停热键装不上时缀在状态行后面的一句，写一次就一直在。</summary>
     private string _hotkeyNote = "";
 
     /// <summary>悬浮层拓展样式没设上时缀在状态行后面的一句。</summary>
@@ -92,6 +92,10 @@ public partial class PerformerWindow : Window
         TrackCombo.SelectionChanged += (_, _) => ShowReady();
         _hotkeys.Panic += OnPanicHotkey;
 
+        // 判定要的那一段（倒计时 / 演奏中）由这里现问现答：钩子那边不缓存阶段，
+        // 不然倒计时一结束还得多等一次 tick 才认键。
+        _hotkeys.StageSource = CurrentStage;
+
         // sink 外面套一层 NotifyingSink，好让状态行显示当前在发哪个音；用例层不必知道
         _performance = new StartPerformance(clock, new NotifyingSink(sender, OnNoteSent));
         _performance.Finished += OnPerformanceFinished;
@@ -112,8 +116,8 @@ public partial class PerformerWindow : Window
         _hotkeys.Install();
         if (!_hotkeys.Installed)
         {
-            // 装不上多半是被安全软件拦了；急停按钮和看门狗还在，但用户必须知道 F6 不灵
-            _hotkeyNote = " · F6 热键没装上，急停只能用这个窗口上的按钮";
+            // 装不上多半是被安全软件拦了；急停按钮和看门狗还在，但用户必须知道这个键不灵
+            _hotkeyNote = " · 急停热键没装上，只能用这个窗口上的按钮";
             SetStatus(StatusText.Text ?? "", _status);
         }
     }
@@ -272,7 +276,21 @@ public partial class PerformerWindow : Window
         StopButton.IsEnabled = false;
     }
 
-    /// <summary>F6 的回调。<see cref="GlobalHotkeys"/> 已经投递到界面线程了，这里再兜一层断言。</summary>
+    /// <summary>
+    /// 现在走到哪一段了 —— 给 <see cref="GlobalHotkeys"/> 阶段门用，按下那一刻由它现问。
+    /// 倒计时期间按任意键都不停（那几秒正是用户切窗口的时间），取消只有这颗「急停」按钮；
+    /// 进入演奏后才认键。
+    /// </summary>
+    private PerformanceStage CurrentStage()
+    {
+        if (!_running) return PerformanceStage.Idle;
+
+        // 倒计时读的是用例层那个剩余秒数，和悬浮层画的是同一个数 —— 不另存一份阶段记号，
+        // 两份记号就有对不上的时候（对不上的那一下正好落在「按了没反应」上）。
+        return _performance.CountdownSecondsLeft > 0 ? PerformanceStage.Countdown : PerformanceStage.Playing;
+    }
+
+    /// <summary>急停的回调。弹键能走到这儿，说明判定已经放行（演奏中、非修饰键、非注入键）。</summary>
     private void OnPanicHotkey()
     {
         if (Dispatcher.UIThread.CheckAccess()) StopPerformance();

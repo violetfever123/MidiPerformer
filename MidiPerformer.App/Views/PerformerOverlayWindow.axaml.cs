@@ -54,7 +54,7 @@ public partial class PerformerOverlayWindow : Window
         ShowCountdown(3);
     }
 
-    /// <summary>倒计时态：大数字 + 「准备演奏 · 切到游戏窗口」+ F6 提示。</summary>
+    /// <summary>倒计时态：大数字 + 「准备演奏 · 切到游戏窗口」+ 取消 / 急停提示。</summary>
     public void ShowCountdown(int seconds)
     {
         CancelHide();
@@ -64,7 +64,7 @@ public partial class PerformerOverlayWindow : Window
         Switch(CountdownState);
     }
 
-    /// <summary>演奏中态：当前在发的音 + 进度 + 已走时间 / 总时长 + F6 提示。</summary>
+    /// <summary>演奏中态：当前在发的音 + 进度 + 已走时间 / 总时长 + 急停提示。</summary>
     public void ShowPlaying(string note, double musicNow, double totalSeconds)
     {
         CancelHide();

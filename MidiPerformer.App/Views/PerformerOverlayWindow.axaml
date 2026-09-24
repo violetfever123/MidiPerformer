@@ -80,7 +80,7 @@
       <Setter Property="HorizontalAlignment" Value="Center" />
     </Style>
 
-    <!-- F6 提示：一条细线隔开（wireframe 的 .panic-hint） -->
+    <!-- 急停提示：一条细线隔开（wireframe 的 .panic-hint） -->
     <Style Selector="Border.panic">
       <Setter Property="BorderBrush" Value="{DynamicResource TokenLineSoft}" />
       <Setter Property="BorderThickness" Value="0,1,0,0" />
@@ -113,7 +113,12 @@
         <TextBlock x:Name="CountdownNumber" Classes="big-num" Text="3" />
         <TextBlock Classes="cap" Text="准备演奏 · 切到游戏窗口" Margin="0,5,0,0" />
         <Border Classes="panic">
-          <TextBlock Text="按 F6 取消 / 急停" />
+          <!--
+            倒计时这一段**不认键**（那几秒正是用户切窗口的时间，见 GlobalHotkeys.ShouldStop 的阶段门），
+            所以这句不能写成「按任意键取消」—— 那时候按下去什么都不会发生。
+            取消在这几秒里只有窗口上那颗「急停」（悬浮层现在就在游戏画面上，要切回去按）。
+          -->
+          <TextBlock Text="按「急停」取消 · 演奏中任意键停" />
         </Border>
       </StackPanel>
 
@@ -123,7 +128,7 @@
         <ProgressBar x:Name="Progress" Minimum="0" Maximum="1" Value="0" />
         <TextBlock x:Name="TimeNow" Classes="tsec" Text="0:00 / 0:00" Margin="0,5,0,0" />
         <Border Classes="panic">
-          <TextBlock Text="按 F6 急停" />
+          <TextBlock Text="按任意键急停" />
         </Border>
       </StackPanel>
 

@@ -211,7 +211,7 @@
       <ComboBox Grid.Column="1" x:Name="CountdownCombo" HorizontalAlignment="Stretch" SelectedIndex="1" />
     </Grid>
     <TextBlock Classes="hint" x:Name="CountdownHint"
-               Text="按下开始之后用它切到游戏窗口。倒计时结束才发第一个音，期间按 F6 取消。" />
+               Text="按下开始之后用它切到游戏窗口。倒计时结束才发第一个音，之后按任意键停；倒计时期间要取消只能按「急停」。" />
 
     <Border Classes="rule" />
 
@@ -220,7 +220,7 @@
       <StackPanel Orientation="Horizontal" Spacing="8">
         <TextBlock Text="▶ 开始演奏" VerticalAlignment="Center" />
         <!-- 急停键写在按钮上：演奏前就该知道出事了按哪个键 -->
-        <TextBlock Text="F6 急停" FontSize="11" FontWeight="Normal" Opacity="0.8"
+        <TextBlock Text="任意键急停" FontSize="11" FontWeight="Normal" Opacity="0.8"
                    VerticalAlignment="Center" />
       </StackPanel>
     </Button>
