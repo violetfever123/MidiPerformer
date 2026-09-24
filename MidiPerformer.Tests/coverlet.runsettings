@@ -4,7 +4,23 @@
 
   报告落在 MidiPerformer.Tests\TestResults\<guid>\coverage.cobertura.xml，
   <guid> 那层由 VSTest 平台生成（coverlet 的 VSTest 集成没有关掉它的开关）——
-  所以要读它就得按 TestResults\*\coverage.cobertura.xml 找，多次跑过就取最新的一份。
+  所以要读它就得按 TestResults\*\coverage.cobertura.xml 找。
+
+  ⚠️ 只看「最新的一份」是不够的：**任何带 collect 参数的跑批都会往这里落报告，
+  包括被 filter 筛过的子集跑批**（只跑一个测试类也会生成一份，line-rate 低得吓人）。
+  子集跑批如果比全量跑批晚，它就是「最新」的那份。这个仓库多个 agent 共用一个工作树，
+  所以「最新 = 全量」这个前提不成立。
+
+  一份报告是不是全量跑批，看三个记号：
+    1. line-rate 在 0.8 以上（子集跑批通常只有 0.1 到 0.2）；
+    2. <method> 节点约 271 个（数字会随 Core 的改动漂移，量级对就行）；
+    3. <sources> 里是仓库根目录。
+
+  还有一条：**覆盖率的数只对它生成时的那次构建有效**。Core 每被改一次，
+  旧报告里的行号和方法就都对不上了 —— 跨时间比对两份报告的百分比没有意义。
+
+  真正要吃这份报告的工具（CRAP 闸门），别自己来这儿按 mtime 挑，
+  让它从外面**明确指一份路径**进来，比任何自动挑选都可靠。
 -->
 <RunSettings>
   <DataCollectionRunSettings>
