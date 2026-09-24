@@ -76,6 +76,13 @@ public partial class PerformerWindow : Window
     private Song? _song;
     private bool _running;
 
+    /// <summary>
+    /// 演奏中递进来、还没上的那一首（见 <see cref="LoadSong"/>）。
+    /// 同一时刻最多一份：后递的顶掉先递的 —— 用户最后点的那次「演奏」说了算。
+    /// 挑好的轨一起记着，收尾时不用再挑一遍。
+    /// </summary>
+    private (Song Song, IReadOnlyList<PlayableTrack> Playable)? _pending;
+
     /// <summary>当前在发的音。派发线程写、界面线程读（见 <see cref="OnNoteSent"/>）。</summary>
     private string _currentNote = "";
 
@@ -167,12 +174,38 @@ public partial class PerformerWindow : Window
     /// <remarks>
     /// 挑轨（有音 + 单声部 + 非打击乐）与排序都在 Core 的 <c>PlayableTracks</c> 里，
     /// 这里只把结果摆到界面上：界面不判、不算、也不排。
+    ///
+    /// **演奏进行中递进来的先记着，画面一个字都不动**（73 号票）。正在响的还是上一首
+    /// （<see cref="StartPerformance"/> 手上那份是它自己拿着的，跟这里换不换无关），
+    /// 这时候把下拉、状态行、空状态换成新那首，屏幕上说的曲子就跟耳朵里听的不是同一首了 ——
+    /// 那 38 根条子还会按新那首的轨重画，正在响的那个音跟着跑到别人的音域里。
+    /// 这一场收尾时再上（见 <see cref="OnPerformanceFinished"/>）：递进来的曲子不丢，只是晚一步。
     /// </remarks>
     public async Task LoadSong(Song song)
     {
         // 挑轨要把每条轨的音符全走一遍判单声部，长曲子几十到几百毫秒，留在界面线程上会卡，
         // 所以丢线程池；await 回来还在原来的线程上（界面线程调的就还是界面线程）。
         var playable = await Task.Run(() => PlayableTracks.Of(song));
+
+        if (_running)
+        {
+            _pending = (song, playable);
+            return;
+        }
+
+        ApplySong(song, playable);
+    }
+
+    /// <summary>
+    /// 把手上的曲子换成这一份并画出来：下拉框、提示行、空状态、选中第一条、状态行。
+    ///
+    /// **只在空闲那条路上调**（演奏中递进来的走 <see cref="LoadSong"/> 里那个 <c>_pending</c>）——
+    /// 这里写的全是「空闲那副样子」，演奏期间写上去就等于把正在响的那一首从画面上抹掉。
+    /// </summary>
+    private void ApplySong(Song song, IReadOnlyList<PlayableTrack> playable)
+    {
+        // 这一份上了，之前记着的那份作废（后递的那一次说了算）
+        _pending = null;
 
         _song = song;
 
@@ -186,8 +219,6 @@ public partial class PerformerWindow : Window
         // 空状态那块说明顶掉提示行，两行说的是同一件事
         EmptyBox.IsVisible = !any;
         TrackHint.IsVisible = any;
-        TrackCombo.IsEnabled = any;
-        StartButton.IsEnabled = any;
 
         // 先设列表再设选中项：SelectionChanged 会读 _playable
         TrackCombo.ItemsSource = any ? _playable.Select(Describe).ToList() : null;
@@ -203,6 +234,11 @@ public partial class PerformerWindow : Window
             TrackCombo.SelectedIndex = -1;
             SetStatus($"就绪 · {song.Tracks.Count} 条轨里一条都弹不了，去编辑器里处理一下", Status.Idle);
         }
+
+        // 「开始 / 轨下拉」开不开，判据只有 SetRunning 一处（73 号票：从前这里自己另写了一份，
+        // 漏了「没在演奏」，于是演奏中递一手曲子就把这两颗按钮重新点亮了）。
+        // 空闲时它给出的正是「有得弹就开」。
+        SetRunning(_running);
 
         // 两条路都要走一遍：换上新曲子（或换上一首一条可弹的都没有的）之后，
         // 条子上不该还留着上一首的亮片
@@ -368,6 +404,12 @@ public partial class PerformerWindow : Window
 
             // 悬浮层停在「已停止」上几秒再自己收起来，留时间让用户看到那句话
             _overlay?.ShowStopped();
+
+            // 演奏期间递进来的那一首：**这一场收干净了才上**（见 LoadSong）——
+            // 半路换画面会让屏幕上的曲子和正在响的那首对不上。
+            // 放在最后：它会把状态行写成新那首的「就绪 · …」，而那才是用户接下来要按的那一份
+            // （「已停止」那句话悬浮层还在接着显示）。
+            if (_pending is { } pending) ApplySong(pending.Song, pending.Playable);
         });
     }
 
@@ -414,12 +456,20 @@ public partial class PerformerWindow : Window
     }
 
     /// <summary>演奏中 / 空闲，界面控件的两副样子。演奏期间全部锁死，除了急停。</summary>
+    /// <remarks>
+    /// <b>「能不能按」的判据只有这一处</b>（73 号票）。从前装曲子那条路（<c>LoadSong</c>）自己
+    /// 另写了一份 <c>IsEnabled = any</c>，漏了「没在演奏」—— 于是演奏中递一手曲子，
+    /// 开始按钮和轨下拉会被重新点亮，而演奏还在响。装完曲子要开关这两颗控件，**调这个方法**。
+    /// </remarks>
     private void SetRunning(bool running)
     {
-        // 「有没有能弹的轨」只有一个判据：_playable 空不空
-        StartButton.IsEnabled = !running && _playable.Count > 0;
+        // 「有没有能弹的轨」只有一个判据：_playable 空不空；再叠一个「这会儿没在演奏」。
+        // 两颗控件共用它 —— 抄第二份就是 73 号那个病。
+        bool canPick = !running && _playable.Count > 0;
+
+        StartButton.IsEnabled = canPick;
         StopButton.IsEnabled = running;
-        TrackCombo.IsEnabled = !running && _playable.Count > 0;
+        TrackCombo.IsEnabled = canPick;
         TimingCombo.IsEnabled = !running;
         CountdownCombo.IsEnabled = !running;
     }

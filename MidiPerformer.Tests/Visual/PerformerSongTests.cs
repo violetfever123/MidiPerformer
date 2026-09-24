@@ -6,22 +6,26 @@ using NUnit.Framework;
 namespace MidiPerformer.Tests.Visual;
 
 /// <summary>
-/// 点「演奏」时递给演奏器窗口的是**哪一份**曲子（71 号工单）。
+/// 点「演奏」时递给演奏器窗口的是**哪一份**曲子（71 号工单），
+/// 以及递进去之后**这一场演奏还在不在**（73 号工单）。
 ///
 /// 47 号票按界面改版删掉了演奏器窗口里唯一的载曲入口（「曲目」行 + 那颗文件选择器），
 /// 接替它的那条路本来是「主窗口把手上这首递进去」—— 而两个文件都指着「外面」，
 /// 外面没有人：<c>PerformerWindow.LoadSong</c> 零调用，窗口里 <c>TrackCombo</c> 一直是灰的。
-/// 这张票把那条路接上。
+/// 71 号票把那条路接上，于是「演奏进行中有人递新曲子」**第一次成了可达状态** ——
+/// 而 <c>LoadSong</c> 从没为这个状态准备过：它自己另写了一份开关判据、漏了「没在演奏」，
+/// 还会把状态行改成「就绪」。73 号票修的就是它。
 ///
 /// 判据分两层，都**不起 Avalonia**：
 /// - 「该递哪一份」是一段纯函数（<see cref="MainWindow.SongForPerformer"/>）—— 直接喂真值；
-/// - 「主窗口真按这条规矩接了线」读源文件文本（和 <c>UnsavedPromptTests</c> / <c>ToolbarLayoutTests</c>
-///   是同一套办法，读进来的文本先去注释）。
+/// - 「主窗口真按这条规矩接了线」「演奏器真按那条规矩收曲子」读源文件文本
+///   （和 <c>UnsavedPromptTests</c> / <c>ToolbarLayoutTests</c> 是同一套办法，读进来的文本先去注释）。
 ///
-/// <b>这些断言证明了什么、没证明什么：</b>证明「表是这么写的、主窗口按这张表接线」。
-/// 「真机上窗口里那行下拉真的换成了新那首」「<c>TrackCombo</c> 真的不再是能点=False」是上机的事。
-/// 但这条规矩**坏掉不报错**：直接递 <c>_song</c> 过去，窗口照样开、照样能弹，
-/// 只是弹的是草稿，而弹窗上刚写着「用已存的」—— 没有一条会红。所以至少拦住「哪天被人改回去」。
+/// <b>这些断言证明了什么、没证明什么：</b>证明「表是这么写的、两个窗口按这张表接线」。
+/// 「真机上窗口里那行下拉真的换成了新那首」「演奏中那颗开始按钮真的没被点亮」是上机的事。
+/// 但这两条规矩**坏掉都不报错**：直接把草稿递过去，窗口照样开、照样能弹；
+/// 演奏中把画面换成新那首，也照样不报错 —— 只是屏幕上说的曲子和耳朵里听的不是同一首。
+/// 所以至少拦住「哪天被人改回去」。
 /// </summary>
 public class PerformerSongTests
 {
@@ -33,6 +37,8 @@ public class PerformerSongTests
     private static string 主窗口代码() => File.ReadAllText(Path.Combine(AppDir, "Views", "MainWindow.axaml.cs"));
 
     private static string 组装点代码() => File.ReadAllText(Path.Combine(AppDir, "App.axaml.cs"));
+
+    private static string 演奏器代码() => File.ReadAllText(Path.Combine(AppDir, "Views", "PerformerWindow.axaml.cs"));
 
     // ---- 手搭的两份曲子。只是两个不相同的 Song 引用，内容是什么不打紧 ----
 
@@ -260,6 +266,149 @@ public class PerformerSongTests
         Assert.That(删, Does.Contain("_storedSong = null;"));
     }
 
+    // ==================== 演奏中递进来的曲子（73 号票） ====================
+
+    /// <summary>
+    /// **73 号的病根不是「谁忘了加 `!running`」，是「同一件事在两个地方各写了一份判据」** ——
+    /// <c>SetRunning</c> 里那份有「没在演奏」，<c>LoadSong</c> 里那份没有。
+    ///
+    /// 所以这条同时钉两件事：整份文件里这两颗控件的 `IsEnabled` **各只写一次**，
+    /// 而且那一次就在 <c>SetRunning</c> 里、判据也只写一次（两颗共用同一个局部变量）。
+    /// 少了任何一半，「下一个人往 <c>SetRunning</c> 里加控件时照样会漏」这件事就还成立。
+    /// </summary>
+    [Test]
+    public void 演奏器窗口的开关判据只有一处()
+    {
+        var 原文 = 演奏器代码();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(数一数(只读代码(原文), "StartButton.IsEnabled ="), Is.EqualTo(1),
+                "「开始」开不开只许在 SetRunning 里判一次 —— 73 号就是这儿另写了一份、漏了「没在演奏」");
+            Assert.That(数一数(只读代码(原文), "TrackCombo.IsEnabled ="), Is.EqualTo(1),
+                "轨下拉同理");
+
+            var 闸 = 花括号段(原文, "private void SetRunning", "找不到 SetRunning");
+            Assert.That(闸, Does.Contain("StartButton.IsEnabled ="), "那一处就在 SetRunning 里");
+            Assert.That(闸, Does.Contain("TrackCombo.IsEnabled ="));
+            Assert.That(数一数(闸, "!running && _playable.Count > 0"), Is.EqualTo(1),
+                "「没在演奏、而且是真有得弹」这条判据只写一次，两颗控件共用它");
+        });
+    }
+
+    /// <summary>
+    /// 装完曲子**走那道闸**，不再自己判一遍 —— <c>SetRunning(_running)</c> 传的是**当前阶段**：
+    /// 空闲时它给出的正是从前那句「有得弹就开」，演奏中（万一走到这儿）它就是「锁死」。
+    /// </summary>
+    [Test]
+    public void 装完曲子按当前阶段重画一遍开关()
+    {
+        var 装 = 花括号段(演奏器代码(), "private void ApplySong", "找不到 ApplySong");
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(装, Does.Contain("SetRunning(_running);"), "画完按当前阶段重画一遍开关");
+            Assert.That(装, Does.Not.Contain("StartButton.IsEnabled"), "别再自己写一份判据");
+            Assert.That(装, Does.Not.Contain("TrackCombo.IsEnabled"), "同上");
+            Assert.That(装, Does.Contain("_pending = null;"),
+                "这一份上了，之前记着的那份就作废（后递的那一次说了算）");
+        });
+    }
+
+    /// <summary>
+    /// **73 号票的正题**：演奏进行中递进来的曲子**先记着，画面一个字都不动**。
+    ///
+    /// 正在响的是上一首（<c>StartPerformance</c> 手上那份是它自己拿着的，跟这儿换不换无关），
+    /// 这时候把下拉、状态行、空状态换成新那首，屏幕上说的曲子就跟耳朵里听的不是同一首了 ——
+    /// 而且那 38 根条子会按**新歌**的轨重画，正在响的那个音也跟着跑到别人的音域里。
+    /// </summary>
+    [Test]
+    public void 演奏中递进来的曲子先记着不换画面()
+    {
+        var 载 = 花括号段(演奏器代码(), "public async Task LoadSong", "找不到 LoadSong");
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(载, Does.Contain("if (_running)"), "先判阶段");
+            Assert.That(载, Does.Contain("_pending = (song, playable);"),
+                "记着这一份 —— 挑好的轨一起存，收尾时不用再挑一遍");
+            Assert.That(载, Does.Contain("ApplySong(song, playable);"), "空闲时照旧立刻上");
+
+            int 挑 = 载.IndexOf("Task.Run", StringComparison.Ordinal);
+            int 判 = 载.IndexOf("if (_running)", StringComparison.Ordinal);
+            Assert.That(挑, Is.GreaterThanOrEqualTo(0), "挑轨那一步还在");
+            Assert.That(判, Is.GreaterThan(挑), "先挑完（那一步是耗时的）再判阶段，挑出来的东西一起记着");
+
+            // 演奏中不许由 LoadSong 直接动这七样 —— 它们全归 ApplySong（只在空闲那条路上走）
+            foreach (string 样 in new[]
+                     {
+                         "_song = song;", "TrackCombo.ItemsSource", "EmptyBox.IsVisible", "TrackHint.Text",
+                         "ShowReady()", "SetStatus(", "RefreshRange()"
+                     })
+            {
+                Assert.That(载, Does.Not.Contain(样), $"演奏中不换画面：{样} 归 ApplySong 管");
+            }
+        });
+    }
+
+    /// <summary>
+    /// 这一场收尾时，把记着的那一首**上上去**（不是丢掉）。
+    ///
+    /// 顺序是要害：必须**先**把这一场收干净（<c>_running = false</c>）、**再**上 ——
+    /// 反过来的话，<c>ApplySong</c> 里那句 <c>SetRunning(_running)</c> 拿到的还是「在演奏」，
+    /// 新曲子画出来就是锁着的样子（按钮按不动、下拉点不开），而屏幕上没有任何东西说得出为什么。
+    /// </summary>
+    [Test]
+    public void 这一场收尾才把记着的那一首上上去()
+    {
+        var 收尾 = 花括号段(演奏器代码(), "private void OnPerformanceFinished", "找不到 OnPerformanceFinished");
+
+        int 停 = 收尾.IndexOf("_running = false;", StringComparison.Ordinal);
+        int 上 = 收尾.IndexOf("ApplySong(", StringComparison.Ordinal);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(收尾, Does.Contain("_pending is { }"), "收尾时看有没有等着上的那一首");
+            Assert.That(上, Is.GreaterThanOrEqualTo(0), "有就上 —— 演奏中递进来的曲子不丢，只是晚一步");
+            Assert.That(停, Is.GreaterThanOrEqualTo(0));
+            Assert.That(上, Is.GreaterThan(停), "先把这一场收干净，再上新曲子");
+        });
+    }
+
+    /// <summary>
+    /// **这一票的主要保护网**：空闲时递曲子，行为**跟从前一模一样**。
+    /// 四样一样都不能少、顺序也不能乱（先摆列表再设选中项 —— <c>SelectionChanged</c> 会读 <c>_playable</c>；
+    /// 「就绪 · 轨名 · 共 N 个音」要等选中项落定之后才写得对）。
+    /// </summary>
+    [Test]
+    public void 空闲时递曲子还是老样子()
+    {
+        var 装 = 花括号段(演奏器代码(), "private void ApplySong", "找不到 ApplySong");
+
+        int 提示 = 装.IndexOf("TrackHint.Text = $\"只列出单声部轨 · {song.Tracks.Count} 条轨里 {_playable.Count} 条可演奏\";", StringComparison.Ordinal);
+        int 列 = 装.IndexOf("TrackCombo.ItemsSource = any ? _playable.Select(Describe).ToList() : null;", StringComparison.Ordinal);
+        int 选 = 装.IndexOf("TrackCombo.SelectedIndex = 0;", StringComparison.Ordinal);
+        int 就绪 = 装.IndexOf("ShowReady();", StringComparison.Ordinal);
+        int 重画 = 装.IndexOf("RefreshRange();", StringComparison.Ordinal);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(提示, Is.GreaterThanOrEqualTo(0), "提示行还是那句话（轨数 / 可弹数两个数）");
+            Assert.That(列, Is.GreaterThan(提示), "先摆列表");
+            Assert.That(选, Is.GreaterThan(列), "再选第一条（SelectionChanged 会读 _playable）");
+            Assert.That(就绪, Is.GreaterThan(选), "选中之后才写「就绪 · 轨名 · 共 N 个音」");
+            Assert.That(重画, Is.GreaterThan(就绪), "两条路最后都要重画那 38 根条子");
+
+            Assert.That(装, Does.Contain("TrackCombo.PlaceholderText = \"选一条轨\";"));
+            Assert.That(装, Does.Contain("TrackCombo.PlaceholderText = \"— 无可演奏的轨 —\";"));
+            Assert.That(装, Does.Contain("TrackCombo.SelectedIndex = -1;"), "一条可弹的都没有：不选，走空状态那一路");
+            Assert.That(装, Does.Contain("SetStatus($\"就绪 · {song.Tracks.Count} 条轨里一条都弹不了，去编辑器里处理一下\""),
+                "空状态那句状态行照旧");
+            Assert.That(装, Does.Contain("EmptyBox.IsVisible = !any;"));
+            Assert.That(装, Does.Contain("TrackHint.IsVisible = any;"));
+        });
+    }
+
     // ==================== 两个取材函数 ====================
 
     /// <summary>
@@ -300,6 +449,21 @@ public class PerformerSongTests
         }
 
         return kept.ToString();
+    }
+
+    /// <summary>
+    /// 数一段代码里某串字出现了几次。**先去过注释**再用（注释里写一句 `StartButton.IsEnabled = …`
+    /// 也能把「只剩一处」这条断言喂饱，而它要看的自始至终是代码本身）。
+    /// </summary>
+    private static int 数一数(string source, string 找)
+    {
+        int 数 = 0;
+        for (int i = source.IndexOf(找, StringComparison.Ordinal); i >= 0;
+             i = source.IndexOf(找, i + 找.Length, StringComparison.Ordinal))
+        {
+            数++;
+        }
+        return 数;
     }
 
     /// <summary>
