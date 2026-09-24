@@ -88,6 +88,12 @@
     <PackageReference Include="Avalonia" Version="11.3.20" />
     <PackageReference Include="Avalonia.Desktop" Version="11.3.20" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.20" />
+    <!--
+      日志的抽象 + 工厂（61 号）。**只有这一个包，没有 Serilog / NLog** ——
+      用户明确要求「不引第三方日志库」，LoggingTests 里有一条专门盯着这件事。
+      落盘那一层是自己写的（Logging\FileLoggerProvider.cs），本包只出 ILogger / ILoggerFactory 这些抽象。
+    -->
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="8.0.1" />
   </ItemGroup>
 
   <ItemGroup>

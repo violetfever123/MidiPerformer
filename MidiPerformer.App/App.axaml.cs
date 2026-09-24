@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using MidiPerformer.Adapters.Gateways;
+using MidiPerformer.App.Logging;
 using MidiPerformer.App.Startup;
 using MidiPerformer.App.Theme;
 using MidiPerformer.App.Views;
@@ -53,12 +54,18 @@ public partial class App : Application
                 var sink = new WinmmPreview();
                 var sender = new InputSender();
 
+                // 日志：清旧的、挂上那个自写的文件 provider、写启动那一行。**只有这一处建它** ——
+                // 下面每个窗口拿到的都是这同一个工厂开出来的 logger（62 号要的那个耗时也从这儿走）。
+                // 整块不抛：日志起不来只是没日志，不该挡住程序启动。
+                var logFactory = LoggingSetup.Start(DateTimeOffset.Now);
+
                 // 曲库就住在 exe 旁边。「在哪儿」只写在这一行 —— SongLibrary 自己不猜自己在哪
                 // （它收一个目录），所以测试塞得进临时目录。
                 var library = new SongLibrary(Path.Combine(AppContext.BaseDirectory, "songs"));
 
                 var window = new MainWindow(
-                    Tokens, clock, sink, PerformerFactory(clock, sender), library);
+                    Tokens, clock, sink, PerformerFactory(clock, sender), library,
+                    logFactory.CreateLogger("MidiPerformer.App.Views.MainWindow"));
                 desktop.MainWindow = window;
 
                 // 启动时问一次提权：没提权就弹一颗「以管理员身份重启」，用户可以先不按。
@@ -71,6 +78,9 @@ public partial class App : Application
                 {
                     sender.ReleaseAll();
                     sink.Dispose();
+                    // 日志最后收一次。每行都是「开→追加→关」，这儿没有要冲的缓冲区；
+                    // 收它是为了给以后真加了缓冲的时候留个明确的收尾点。
+                    logFactory.Dispose();
                 };
             }
         }

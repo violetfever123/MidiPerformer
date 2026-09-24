@@ -290,6 +290,17 @@
               <MenuItem x:Name="RedoMenuItem" Header="重做" IsEnabled="False"
                         InputGesture="Ctrl+Y"
                         Click="OnRedoClick" />
+
+              <!--
+                分隔：下面那一项跟撤销/重做**不同族**。上面两项动的是手上这份谱面（所以跟着
+                「有没有曲子」灰），这一项动的是这台机器上的一个文件夹 —— 它跟谱面没有关系。
+                所以中间得有一道分隔，不然它看起来像第三个编辑动作。
+              -->
+              <Separator />
+
+              <!-- 打开日志文件夹：61 号。出事之后要能翻到痕迹，入口就在这儿。见 OnOpenLogFolderClick。 -->
+              <MenuItem x:Name="OpenLogFolderMenuItem" Header="打开日志文件夹"
+                        Click="OnOpenLogFolderClick" />
             </MenuItem>
           </Menu>
 

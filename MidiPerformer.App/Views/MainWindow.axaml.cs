@@ -3,10 +3,13 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using MidiPerformer.Adapters;
 using MidiPerformer.Adapters.Controllers;
 using MidiPerformer.Adapters.Gateways;
 using MidiPerformer.Adapters.Presenters;
+using MidiPerformer.App.Logging;
 using MidiPerformer.App.Theme;
 using MidiPerformer.Core.Model;
 using MidiPerformer.Core.Ports.Outbound;
@@ -54,6 +57,16 @@ public partial class MainWindow : Window
     private readonly Func<PerformerWindow>? _performerFactory;
     private readonly SongLibrary? _library;
     private readonly List<TrackLaneView> _lanes = new();
+
+    /// <summary>
+    /// 落盘的日志（组装点递下来的，见构造器最后那个参数）。**这个窗口里凡是「报给用户看」的那几句
+    /// 都同时往这儿写一份** —— 界面上的那行字用户截个图就没了，日志是事后唯一能查的痕迹。
+    /// 给的是 <see cref="NullLogger"/> 时这些调用全是空转，别的什么都不变。
+    ///
+    /// 🔴 往这儿写的东西受 61 号票的红线管：**不写按键、不写游戏窗口标题、不写进程名**。
+    /// 见 <see cref="LoggingSetup"/> 与 <c>FileLoggerProvider</c> 的类注释。
+    /// </summary>
+    private readonly ILogger _log;
 
     /// <summary>编辑脊柱。撤销是装饰器加的能力，界面拿到的就是装饰器，命令本身（<see cref="SongEditor"/>）不知道有撤销这回事。</summary>
     private readonly UndoableSongEditor _editor = new(new SongEditor());
@@ -137,10 +150,20 @@ public partial class MainWindow : Window
     /// 曲库，目录由组装点拼好（默认是 exe 旁边的 .\songs\）。给 null 就整条曲库都不出现
     /// （保存 / 另存为也不亮）。
     /// </param>
+    /// <param name="logger">
+    /// 日志，组装点建好递下来（<see cref="LoggingSetup"/>）。给 null 就退回 <see cref="NullLogger"/> ——
+    /// 可视化设计器那个空构造走的就是这一支，日志**不许**成为「窗口起得来起不来」的条件。
+    /// 收 logger 而不是自己建：盘上那份日志只有一个（谁写都往同一个文件），
+    /// 而且 62 号票要把「打开一首曲子花了多少毫秒」写进来，那也需要从这儿拿同一个。
+    /// </param>
     public MainWindow(
         TokenSource tokens, IClock clock, IAudioSink sink,
-        Func<PerformerWindow>? performerFactory, SongLibrary? library)
+        Func<PerformerWindow>? performerFactory, SongLibrary? library,
+        ILogger? logger = null)
     {
+        // 头一件事：下面任何一步都可能报错，报错要能落盘
+        _log = logger ?? NullLogger.Instance;
+
         InitializeComponent();
 
         _tokens = tokens;
@@ -982,6 +1005,32 @@ public partial class MainWindow : Window
 
     private void OnRedoClick(object? sender, RoutedEventArgs e) => Redo();
 
+    /// <summary>
+    /// 「操作 ▾」里那一项「打开日志文件夹」（61 号）。跟撤销/重做**不同族**：它不动谱面，
+    /// 只把日志那个文件夹摆到用户面前 —— 所以它在菜单里前面有一道分隔。
+    ///
+    /// <b>日志还没写出来时点它也得开得出来</b>：目录不在就（建出来再）打开，**不是弹一句错**。
+    /// 会走到 <see cref="ShowError"/> 的只有「连建都建不出来」那一档（盘满了、权限被拒），
+    /// 那时确实有一句要说给用户听。
+    /// </summary>
+    private void OnOpenLogFolderClick(object? sender, RoutedEventArgs e)
+    {
+        string directory = LogFolder.DefaultDirectory;
+
+        try
+        {
+            LogFolder.Open(directory);
+            _log.LogInformation("打开了日志文件夹 {目录}", directory);
+        }
+        catch (Exception ex)
+        {
+            // 什么都接：ShellExecute 那一下抛的是 Win32Exception，而「开不了资源管理器」
+            // 永远不该把整个窗口带走。
+            _log.LogError(ex, "打不开日志文件夹 {目录}", directory);
+            ShowError($"打不开日志文件夹：{directory}");
+        }
+    }
+
     /// <summary>撤上一步。没得撤就什么都不做（按钮本来就是灰的，快捷键那条路要自己挡住）。</summary>
     private void Undo()
     {
@@ -1268,6 +1317,11 @@ public partial class MainWindow : Window
     /// </summary>
     private void ShowError(string message)
     {
+        // 报给用户的同时落一份盘：这一句在屏幕上留不住（用户截个图就没了），
+        // 而「哪一步失败了」正是日志要答的问题。**记的是这一句本身**，
+        // 不额外去取任何环境事实（红线：不写进程名/窗口标题/按键）。
+        _log.LogError("出事了：{Message}", message);
+
         if (_libraryDialog is { } dialog)
         {
             dialog.ShowMessage(message);
@@ -1285,6 +1339,10 @@ public partial class MainWindow : Window
     /// </summary>
     private void ShowNotice(string message)
     {
+        // 和报错同一条约定：屏幕上那一句同时也是一行日志 —— 事后翻的时候，
+        // 「存进去了没有」跟「哪一步失败了」一样要看得见。
+        _log.LogInformation("做成了：{Message}", message);
+
         if (_libraryDialog is { } dialog)
         {
             dialog.ShowMessage(message);
