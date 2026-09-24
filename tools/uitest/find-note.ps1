@@ -63,19 +63,46 @@ New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Out) | Out-Null
 $bmp.Save($Out, [System.Drawing.Imaging.ImageFormat]::Png)
 
 # ---------- 轨头的 Y ----------
+# ⚠️ 76 号：这里以前是「Text 名匹配 ^\d{2}$ 且 **x 落在 440..490**」—— 那是**旧版式**里轨号那格的位置。
+# 40 号把侧栏撤掉之后轨号是**第 1 列**（MidiPerformer.App/Views/TrackLaneView.axaml:193 是列序的权威），
+# x≈30，旧判据于是**一条轨都找不到、而且不响** —— 返回 0 条，调用方继续往下跑出「像结论的垃圾」。
+# 现在照 tools/uitest/verify-36.ps1:255 的 轨号文字()：
+#   先拿**折叠按钮**当锚定行（每条轨的轨头上都有一颗，按 Y 排就是轨序），
+#   再在那一行的 Y 附近按**名字全等**（'02'）认轨号 —— 完全不依赖 x 区间，版式再挪也不瞎。
+# 为什么不横扫 `^\d{2}$`：读数条上「轨」那一格**也是 '02' 这种两位数**，会撞名 —— verify-36.ps1:246 记着这笔账。
 $tc = New-Object System.Windows.Automation.PropertyCondition($AE::ControlTypeProperty, $CT::Text)
-$heads = @($root.FindAll($TS::Descendants, $tc)) | Where-Object { $r2 = $_.Current.BoundingRectangle
-    $_.Current.Name -match '^\d{2}$' -and $r2.X -gt 440 -and $r2.X -lt 490 } |
-  Sort-Object { $_.Current.BoundingRectangle.Y }
-if ($Track -gt $heads.Count) { throw "只有 $($heads.Count) 条轨" }
-$top = [int]$heads[$Track - 1].Current.BoundingRectangle.Y
-$bot = if ($Track -lt $heads.Count) { [int]$heads[$Track].Current.BoundingRectangle.Y } else { $hh }
+$bc = New-Object System.Windows.Automation.PropertyCondition($AE::ControlTypeProperty, $CT::Button)
+$锚 = @($root.FindAll($TS::Descendants, $bc) | Where-Object { $_.Current.Name -eq '折叠' } |
+  Sort-Object { $_.Current.BoundingRectangle.Y })
+if ($锚.Count -eq 0) {
+  throw '一条轨都定位不到：UIA 树里连一颗「折叠」按钮都没有 —— 曲子没载进来，或者版式又变了。' +
+        '（锚是「折叠」按钮、不是轨号文字，见 TrackLaneView.axaml:193；这里以前返回 0 条了事，于是坏了好几天没人知道 —— 76 号）'
+}
+function 轨号文字([int]$序) {
+  if ($序 -lt 1 -or $序 -gt $锚.Count) { throw "第 $序 条轨不在场（共 $($锚.Count) 条轨）" }
+  $y = $锚[$序 - 1].Current.BoundingRectangle.Y
+  $c = @($root.FindAll($TS::Descendants, $tc) | Where-Object {
+      $_.Current.Name -ceq ('{0:D2}' -f $序) -and
+      [Math]::Abs($_.Current.BoundingRectangle.Y - $y) -lt 40 })
+  if ($c.Count -ne 1) { throw "第 $序 条轨的轨号文字不唯一（$($c.Count) 个）—— 定位不到就是定位不到，不返回 0（76 号）" }
+  $c[0]
+}
+$当前轨号 = 轨号文字 $Track
+$top = [int]$当前轨号.Current.BoundingRectangle.Y
+$bot = if ($Track -lt $锚.Count) { [int](轨号文字 ($Track + 1)).Current.BoundingRectangle.Y } else { $hh }
 
 # 轨头那一行自己占 ~90px（轨名、音色、移调那些控件），跳过去再找。
 #
 # **要夹到窗口里**：轨多的时候列表会滚动，滚出去的轨头 Y 是负的，
 # 拿负数去 GetPixel 会一路抛越界，脚本卡死在那儿看不出所以然。
-$X0 = 460; $X1 = [Math]::Min(2500, $w - 20)
+#
+# ⚠️ 76 号：左界以前写死 `$X0 = 460` —— 那是「从轨头往右开始扫」的意思，
+# 460 在旧版式里正落在轨号那格（440..490）上。新版式轨号在 x≈30，
+# 写死 460 会把**卷帘最左边 424px 整个跳过**：早段的音扫不到，
+# `-Near` / `-Blank` 更会报出「根本不是空白」的点（verify-19 取空白点那一步就吃这个）。
+# 现在左界从**上面定位到的轨号文字**的 X 推出来（同 verify-36.ps1:305 的 $left），版式怎么挪都对。
+$X0 = [Math]::Max([int]($当前轨号.Current.BoundingRectangle.X - $r.L) + 4, 0)
+$X1 = [Math]::Min(2500, $w - 20)
 $Y0 = [Math]::Max($top + 60 + $Drop, 0)
 $Y1 = [Math]::Min($bot - 20, $hh - 10)
 if ($Y1 -le $Y0) { "轨 $Track 整条都在窗口外（轨头 Y=$top，窗口高 $hh）—— 先把它滚进视野"; exit 1 }

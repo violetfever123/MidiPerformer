@@ -87,6 +87,32 @@ function 断言([string]$名字, [string]$实际, [string]$期望) {
 }
 function 文本 { @($root.FindAll($TS::Descendants, (& $C $CT::Text))) }
 
+# ---------- 轨号文字：定位轨头用（76 号）----------
+# ⚠️ 以前这里（下面两处）写的是「Text 名匹配 ^\d{2}$ 且 **x 落在 440..490**」——
+# 440..490 是**旧版式**里轨号那格的位置。40 号把侧栏撤掉之后轨号是**第 1 列**
+# （MidiPerformer.App/Views/TrackLaneView.axaml:193 是列序的权威），x≈30，
+# 旧判据于是**一条轨都找不到**。
+# 现在照 tools/uitest/verify-36.ps1:255 的 轨号文字()：先拿**折叠按钮**当锚定行
+# （每条轨的轨头上都有一颗，按 Y 排就是轨序），再在那一行的 Y 附近按**名字全等**认轨号 ——
+# 不依赖任何 x 区间，版式再挪也不瞎。
+# 为什么不横扫 `^\d{2}$`：读数条上「轨」那一格**也是 '02' 这种两位数**，会撞名 —— verify-36.ps1:246 记着这笔账。
+# **定位不到就 throw，绝不返回 0 条**：以前返回 0 之后脚本继续往下跑，
+# 产出的是「看起来像结论的垃圾」—— 76 号就是这条教训。
+function 轨锚 { @($root.FindAll($TS::Descendants, (& $C $CT::Button)) |
+    Where-Object { $_.Current.Name -eq '折叠' } | Sort-Object { $_.Current.BoundingRectangle.Y }) }
+function 轨号文字([int]$序) {
+  $锚 = 轨锚
+  if ($锚.Count -eq 0) { throw '一条轨都定位不到：UIA 树里连一颗「折叠」按钮都没有 —— 曲子没载进来，或者版式又变了（76 号）' }
+  if ($序 -lt 1 -or $序 -gt $锚.Count) { throw "第 $序 条轨不在场（共 $($锚.Count) 条轨）" }
+  $y = $锚[$序 - 1].Current.BoundingRectangle.Y
+  $c = @(文本 | Where-Object {
+      $_.Current.Name -ceq ('{0:D2}' -f $序) -and
+      [Math]::Abs($_.Current.BoundingRectangle.Y - $y) -lt 40 })
+  if ($c.Count -ne 1) { throw "第 $序 条轨的轨号文字不唯一（$($c.Count) 个）—— 定位不到就是定位不到，不返回 0（76 号）" }
+  $c[0]
+}
+function 轨号们 { @(1..@(轨锚).Count | ForEach-Object { 轨号文字 $_ }) }
+
 # 「选中」那一格的值：先找到「选中」标签，再取它右边紧挨着的那格值 —— 不写死 Y
 function 选中读数 {
   $lbl = 文本 | Where-Object { $_.Current.Name -eq '选中' } | Select-Object -First 1
@@ -130,9 +156,8 @@ function 找音符([int]$track, [switch]$Blank) {
 }
 
 # ---------- 轨头在哪 ----------
-$heads = @(文本 | Where-Object { $r = $_.Current.BoundingRectangle
-    $_.Current.Name -match '^\d{2}$' -and $r.X -gt 440 -and $r.X -lt 490 } |
-  Sort-Object { $_.Current.BoundingRectangle.Y })
+# 76 号：判据换成 轨号们（按「折叠」按钮锚定行），不再写死 x 440..490 —— 理由见上面的函数注释。
+$heads = 轨号们
 if ($heads.Count -lt 3) { throw "只找到 $($heads.Count) 条轨 —— 这首曲子不够验" }
 "轨头 $($heads.Count) 条，Y = $(($heads | ForEach-Object { [int]$_.Current.BoundingRectangle.Y }) -join ', ')"
 "「选中」那一格现在读作：$(选中读数)"
@@ -146,9 +171,8 @@ if (-not [V18]::Take($h)) { throw '拽不到前台 —— 台面上有别的窗�
 "0) Ctrl+↑ 六下（把焦点顶到轨 01，顺带把它滚进视野）"
 按键 '^{UP}' 500 | Out-Null
 1..5 | ForEach-Object { 按键 '^{UP}' 250 | Out-Null }
-$heads2 = @(文本 | Where-Object { $r = $_.Current.BoundingRectangle
-    $_.Current.Name -match '^\d{2}$' -and $r.X -gt 440 -and $r.X -lt 490 } |
-  Sort-Object { $_.Current.BoundingRectangle.Y })
+# 76 号：判据同上面（轨号们）；换焦点之后轨列表会滚动，所以这里**重新取一次**。
+$heads2 = 轨号们
 $h1 = [int]$heads2[0].Current.BoundingRectangle.Y
 "     轨 01 的轨头现在在 Y=$h1"
 if ($h1 -lt 0) { throw '轨 01 还在窗口外 —— 换焦点没把它滚进来' }
