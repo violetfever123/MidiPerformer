@@ -310,7 +310,7 @@ public class FormatTests
             Assert.That(Format.PreflightRefusal(PerformanceStartOutcome.NotElevated),
                 Is.EqualTo("没开始：要以管理员身份运行。不然发的按键会被系统挡在游戏窗口外面 —— 一个音都收不到，还不报错。"));
             Assert.That(Format.PreflightRefusal(PerformanceStartOutcome.ImeActive),
-                Is.EqualTo("没开始：输入法现在是中文。中文态下按键会被输入法截走，弹出来就是整段整段地漏音。切成英文再按一次。"));
+                Is.EqualTo("当前输入法为中文，请切成英文输入法。"));
             Assert.That(Format.PreflightRefusal(PerformanceStartOutcome.NoPlayableTrack),
                 Is.EqualTo("没开始：这条轨弹不了。口琴一次只响一个音，所以只能弹单声部、不带打击乐的轨。换一条试试。"));
         });
