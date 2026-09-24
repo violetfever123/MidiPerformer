@@ -559,6 +559,135 @@ public class PianoRollPresenterTests
         });
     }
 
+    // ==================== 划段（红带子）的几何 ====================
+    //
+    // 这一段是 `verify-38.ps1` 那 11 条像素断言里**算术那一半**搬进来的家。
+    //
+    // 那 11 条的读数来自 `PrintWindow` + `LockBits` + 扫「一列里连着几百个 Stop 色」——
+    // 像素读回受 DPI / 主题 / 字体渲染影响，当回归门会**随机红**，而随机红的门比没有门更坏
+    // （人开始习惯它的红）。所以按 `docs/spec-测试工具链.md` 的硬规矩第 3 条拆成两半：
+    //
+    //   · **红带子的横区间该是多少** —— 和 `PianoRollGeometry` 同一类，纯函数进纯函数出，落在这儿；
+    //   · **它有没有真被画出来 / 是几条线 / 什么颜色** —— 只能靠眼睛，留在
+    //     `.scratch/probe-38-cut-band.ps1`（**整份不搬进仓库**）。
+    //
+    // 判据这一头故意从**屏幕像素**起手，走控制器那一边同一个换算
+    // （`PianoRollGeometry.TickAtX` = 像素 → tick），产出再走 Presenter 那一边
+    // （`XAtTick` = tick → 像素）—— 这条链上任何一环错开都会红，而不是只测「同一个函数除以它自己」。
+
+    /// <summary>
+    /// 按下 / 松手两点的**屏幕 x** → 划段区间（tick）。
+    /// 控制器就是这么喂 <c>cut:</c> 的：按下点换 tick 当锚点，指针换 tick 当另一端。
+    /// 取整不引入噪声 —— 这个视口下一个 tick 恰好 800/7680 px，喂进来的 x 都是它的整数倍（见各用例）。
+    /// </summary>
+    private static PianoRollPresenter.MarqueeRange Span(
+        in PianoRollGeometry.Viewport view, double pressX, double releaseX)
+        => new((long)Math.Round(PianoRollGeometry.TickAtX(view, pressX)),
+               (long)Math.Round(PianoRollGeometry.TickAtX(view, releaseX)));
+
+    /// <summary>
+    /// 装备上「抽掉一段…」之后，卷帘上**有且只有一条**带子。
+    /// 对应像素断言 `verify-38.ps1:525`（「装备上之后多出来的是红带子的右沿（就多这一条）」）——
+    /// 「只有一条」那一半在这儿；「只多出**一列**新红像素」那一半是画法与遮挡（左沿被焦点轨那条 6px 色条盖住了），
+    /// 纯函数里没有遮挡这回事，留在探针里。
+    /// </summary>
+    [Test]
+    public void 装备上之后红带子有且只有一条()
+    {
+        var view = View();
+        var track = Lane(new Note(60, 0, 240, 100));
+
+        var 没装备 = Build(track, view);
+        var 装备了 = BuildDragging(track, view, cut: Span(view, 200, 500));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(没装备.CutBand, Is.Null, "还没按「抽掉一段…」时卷帘上没有红带子");
+            Assert.That(装备了.CutBand, Is.Not.Null, "装备上之后有一条");
+            Assert.That(装备了.Marquee, Is.Null,
+                "而且**只有**这一条 —— 框选那根蓝的没跟着一起冒出来（装备那一问不该顺手打开框选）");
+        });
+    }
+
+    /// <summary>
+    /// 左沿落在**按下**那一点上。对应像素断言 `verify-38.ps1:578` ——
+    /// 像素那边只能量到「差不超过 60px」（一个十六分格在这个窗宽下约 40px），这一条把它钉到没有误差。
+    /// </summary>
+    [Test]
+    public void 红带子的左沿落在按下那一点上()
+    {
+        var view = View();
+        const double 按下 = 300;          // 300 / (800/7680) = 2880 tick，整数，回程没有取整噪声
+        var 按下tick = PianoRollGeometry.TickAtX(view, 按下);
+
+        var band = BuildDragging(Lane(new Note(60, 0, 240, 100)), view,
+            cut: Span(view, 按下, 900)).CutBand!.Value;
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(band.X, Is.EqualTo(PianoRollGeometry.XAtTick(view, 按下tick)).Within(1e-9),
+                "左沿画在「按下那个 tick」该在的 x 上");
+            Assert.That(band.X, Is.EqualTo(按下).Within(0.1),
+                "而那个 x 就是按下那一点 —— 不是别处的边（比如整条轨的左端、或预填那一段）");
+        });
+    }
+
+    /// <summary>
+    /// 右沿落在**松手**那一点上。对应像素断言 `verify-38.ps1:580`。
+    /// 这一条挡的是「带子画成整条轨」和「带子跟着预填走、不跟着手走」两种坏法。
+    /// </summary>
+    [Test]
+    public void 红带子的右沿落在松手那一点上()
+    {
+        var view = View();
+        const double 松手 = 700;          // 700 / (800/7680) = 6720 tick，整数
+        var 松手tick = PianoRollGeometry.TickAtX(view, 松手);
+
+        var band = BuildDragging(Lane(new Note(60, 0, 240, 100)), view,
+            cut: Span(view, 200, 松手)).CutBand!.Value;
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(band.X + band.Width, Is.EqualTo(PianoRollGeometry.XAtTick(view, 松手tick)).Within(1e-9),
+                "右沿画在「松手那个 tick」该在的 x 上");
+            Assert.That(band.X + band.Width, Is.EqualTo(松手).Within(0.1),
+                "而那个 x 就是松手那一点 —— 带子到这儿为止，不是铺满整条轨");
+        });
+    }
+
+    /// <summary>
+    /// 宽度跟着拖动距离**线性**变化，而且没宽成整条轨、也没窄成一条线。
+    /// 对应像素断言 `verify-38.ps1:582`（那一版只能判「在 0.5~1.5 倍之间」）。
+    /// **喂三个不同的距离**：两个点连不成比例 —— 只能说明「有个斜率」，说明不了它是直的、也说明不了没被夹住。
+    /// </summary>
+    [Test]
+    public void 红带子的宽度跟着拖动距离成比例()
+    {
+        var view = View();
+        var track = Lane(new Note(60, 0, 240, 100));
+        const double 按下 = 100;
+
+        // 三档都是同一个按下点，松手点各走 200 / 400 / 600px（相邻两档正好差 200px）。
+        // 都是 100 的倍数 ⇒ 换成 tick 是整数，回程没有取整噪声。
+        double[] 拖动距离 = { 200, 400, 600 };
+        var 宽 = 拖动距离
+            .Select(距离 => BuildDragging(track, view, cut: Span(view, 按下, 按下 + 距离)).CutBand!.Value.Width)
+            .ToArray();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(宽[0], Is.EqualTo(200).Within(0.1), "拖 200px 就宽 200px");
+            Assert.That(宽[1], Is.EqualTo(400).Within(0.1));
+            Assert.That(宽[2], Is.EqualTo(600).Within(0.1));
+
+            // 没宽成整条轨（视口 800px 宽）：整条轨的话三档会一模一样
+            Assert.That(宽[2], Is.LessThan(view.Width), "带子没有铺满整条轨");
+            // 也没窄成一条线：三档之间差得出来
+            Assert.That(宽[1] - 宽[0], Is.EqualTo(宽[2] - 宽[1]).Within(1e-9),
+                "再拖 200px 就再宽 200px —— 等差的，不是被夹在某个上下限上");
+        });
+    }
+
     [Test]
     public void 多选时主选中是最后加进去的那个()
     {
