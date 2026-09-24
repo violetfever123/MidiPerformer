@@ -35,6 +35,21 @@
 #>
 param([string]$标签 = '深色')
 
+# ⚠️ 必须在点源 uitest-lib **之前**声明 DPI 感知，否则它的分辨率前提会误判。
+#
+# 这台机器 15:12 前后显示缩放从 100% 变成了 200%（面板物理一直是 3072x1920）：
+# 一个 DPI 不感知的进程（pwsh 默认）读 Screen.Bounds 拿到的是**虚拟化后的一半** 1536x960，
+# 于是 uitest-lib 那句「主屏只有 1536x960 —— 这套脚本要 2360x1520 才摆得下」把两轮全都挡在门外，
+# 而我这边量到的实际屏幕明明是 3072x1920。
+#
+# 只影响本进程怎么读「屏幕有多大」：UIA 矩形、GetWindowRect、PrintWindow 本来就是物理像素，
+# 所以脚本里所有的量法一个都不用改（$缩放 也是从窗口宽度反推的，不写死）。
+Add-Type -Namespace Dpi -Name Ctx -MemberDefinition @'
+[System.Runtime.InteropServices.DllImport("user32.dll")]
+public static extern bool SetProcessDpiAwarenessContext(System.IntPtr c);
+'@
+[void][Dpi.Ctx]::SetProcessDpiAwarenessContext([IntPtr](-4))
+
 . (Join-Path $PSScriptRoot 'uitest-lib.ps1')
 
 $深色 = ($标签 -ne '浅色')
@@ -93,7 +108,25 @@ function 曲库窗 {
   if ($别.Count -eq 0) { return $null }
   return $别[0]
 }
-function 曲库根 { $w = 曲库窗; if ($w) { $AE::FromHandle($w) } else { $null } }
+# UIA 的 FromHandle 偶尔会回一句「无法识别的错误」（E_FAIL）：窗口刚被重建（比如刚装完一首曲子，
+# 主窗控件整套换过）、或者 provider 正忙，都会这样。**一次就抛会把整轮验废掉** ——
+# 46 号第四轮就是这么断在 `$root = $AE::FromHandle($h)` 的（前面十一条全 OK，后面的全没验）。
+# 所以重试几次；要是进程本身已经没了，那是另一回事，直接把退出码报出来（好认是不是崩了）。
+function 取根($句柄) {
+  $最后 = $null
+  for ($i = 0; $i -lt 6; $i++) {
+    try { return $AE::FromHandle($句柄) }
+    catch {
+      $最后 = $_
+      if ($script:proc -and $script:proc.HasExited) {
+        throw "主窗所在的进程已经退出（退出码 $($script:proc.ExitCode)）—— 这不是 UIA 的锅"
+      }
+      Start-Sleep -Milliseconds 400
+    }
+  }
+  throw "FromHandle 连试 6 次都没成：$最后"
+}
+function 曲库根 { $w = 曲库窗; if ($w) { 取根 $w } else { $null } }
 
 # 曲库窗里某一首那一行。**只认已经摆好的行**：刷新之后旧容器会赖在树里，矩形全是 NaN。
 function 某行($根, [string]$曲名) {
@@ -168,7 +201,7 @@ function 关提权框 {
   for ($i = 0; $i -lt 30; $i++) {
     $提示 = @(别窗 | Where-Object { [P40]::Title($_) -eq '要以管理员身份重启吗？' })
     if ($提示.Count -eq 0) { break }
-    $根 = $AE::FromHandle($提示[0])
+    $根 = 取根 $提示[0]
     $取消 = @(按名字 $根 '取消')
     if ($取消.Count -eq 0) { Start-Sleep -Milliseconds 400; continue }
     if ($i -eq 0) { Write-Host '  启动那颗提权框在 —— 按「取消」（= 先不提权，照常往里走）' }
@@ -285,7 +318,7 @@ Write-Host "  曲库 $曲库（$($曲库开头.Count) 份，跑完逐文件比�
 
 try {
   $h = 起窗口带清障
-  $root = $AE::FromHandle($h)
+  $root = 取根 $h
   $win = $root.Current.BoundingRectangle
   Write-Host "  主窗 $([int]$win.Width)x$([int]$win.Height) @ $([int]$win.X),$([int]$win.Y)"
 
@@ -305,7 +338,7 @@ try {
   }
   Start-Sleep -Seconds 2
   # 装曲子会把主窗控件整套重建 —— 开场抓的那个根从这一刻起作废
-  $root = $AE::FromHandle($h)
+  $root = 取根 $h
   $win = $root.Current.BoundingRectangle
 
   # ---------- 1. 再开曲库窗：这就是要截的那一扇 ----------
@@ -313,7 +346,7 @@ try {
   点后等 { (按种类 '歌曲库')[0] } $h '歌曲库' { $null -ne (曲库窗) } | Out-Null
   $dw = 曲库窗
   if (-not $dw) { throw '曲库窗没开出来' }
-  $droot = $AE::FromHandle($dw)
+  $droot = 取根 $dw
   [void][P40]::Take($dw)
   Start-Sleep -Milliseconds 800
   $dr = New-Object P40+RECT
@@ -400,12 +433,21 @@ try {
   $峰值 = $峰.亮
   Write-Host ("  最亮的一行在偏移 {0}（亮度 {1:N1}；往上 3px {2:N1}，往下 3px {3:N1}）" -f $峰.偏移, $峰值, $上3, $下3)
   if ($深色) {
-    断言真 '顶边有一道只占 1px 的高光（比上下各 3px 都亮）' `
+    断言真 '顶边有一道高光（比上边 3px 都亮）' `
       ($峰.偏移 -ge -8 -and $峰.偏移 -le 10 -and ($峰值 - $上3) -ge 6 -and ($峰值 - $下3) -ge 4) `
       "峰 $峰值，上 $上3，下 $下3"
-    断言真 '那道高光只有 1px（再往下 1px 就掉回来了）' `
-      (((行亮 $b $bw $带左 $带右 ($面板上 + $峰.偏移 + 1)) - $下3) -lt 4) `
-      "第 2 px $((行亮 $b $bw $带左 $带右 ($面板上 + $峰.偏移 + 1)))"
+
+    # 高光在**代码里是 1 DIP**（原型那句 `inset 0 1px 0` 就是 1 CSS px），落到屏幕上占 $缩放 个物理像素。
+    # ⚠️ 别按「1 px」判：这台机器今天的显示缩放是 200%，1 DIP = 2 px —— 按 1px 判会假红
+    #    （46 号第一次跑就是这么红的：第 2 px 亮度和峰值只差 0.3，因为它本来就在高光带里）。
+    $带内 = 0.0
+    for ($i = 0; $i -lt $缩放; $i++) {
+      $带内 = [Math]::Max($带内, (行亮 $b $bw $带左 $带右 ($面板上 + $峰.偏移 + $i)))
+    }
+    $带外 = 行亮 $b $bw $带左 $带右 ($面板上 + $峰.偏移 + $缩放)
+    断言真 "那道高光只有 1 DIP（$缩放 个物理像素，过了就掉回背景）" `
+      ((($带内 - $带外) -ge 20) -and ([Math]::Abs($带外 - $下3) -lt 8)) `
+      "带内 $带内，带外 $带外（再往下 3px 的背景是 $下3）"
   } else {
     Write-Host '  （浅色下这道高光是白线压在近白的底上，差得小是物理性质，不作断言）'
   }
@@ -463,7 +505,7 @@ try {
 
   # ---------- 7. 收尾前把提权框/曲库窗收干净 ----------
   点后等 { 按id (曲库根) 'CloseButton' } $dw '关闭' { @(别窗).Count -eq 0 } | Out-Null
-  断言 '点「关闭」把曲库窗收了' @(别窗).Count 0
+  断言真 '点「关闭」把曲库窗收了' (@(别窗).Count -eq 0) "$(@(别窗).Count) 个别窗"
 
   $跑完了 = $true
 }
