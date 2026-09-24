@@ -377,7 +377,17 @@ public class SongCacheTests
     {
         var 打开 = 花括号段(主窗口代码(), "private string? TryOpenLibrarySong", "找不到 TryOpenLibrarySong");
 
-        int 装 = 打开.IndexOf("LoadSong(song, name)", StringComparison.Ordinal);
+        // ⚠️ 锚点只到参数表的一半，**刻意不带右括号**。
+        //    原来这里是 `"LoadSong(song, name)"` —— 那个右括号等于顺手把「这次调用长什么形状」
+        //    也钉进了这条测试。62 号做 ②（开曲耗时进日志）时一度要给 `LoadSong` 加个可选尾参，
+        //    那会写成 `LoadSong(song, name, plan)`，`IndexOf` 就回 -1，于是这条测试红在一个
+        //    **跟它要测的顺序毫无关系**的地方（装曲子这件事一点没坏）。
+        //    ⇒ 这条测试要钉的是「补 `_edited`/`_importedFrom` 排在装曲子**之后**」，
+        //      与这次调用带几个参数无关，锚点收到参数表一半为止。
+        //    （62 号最后**没有**改这个调用的形状 —— 秒表走的是 `MainWindow` 的私有字段
+        //      `_loadingPlan`，调用点至今仍是 `LoadSong(song, name)`，所以原来那个紧锚点今天也过。
+        //      放松的锚点留着：它是紧锚点的超集，而且更贴这条测试真正要钉的东西。（62 号改，见 62 号票。））
+        int 装 = 打开.IndexOf("LoadSong(song, name", StringComparison.Ordinal);
         int 改过 = 打开.IndexOf("_edited = loaded.Header?.Edited ?? false;", StringComparison.Ordinal);
         int 来路 = 打开.IndexOf("_importedFrom = loaded.Header?.ImportedFrom;", StringComparison.Ordinal);
 
