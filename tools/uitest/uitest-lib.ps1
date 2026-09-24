@@ -31,6 +31,50 @@
     调用方要是用了宽松写法（`$可能为空的量.Count` 之类），在严格模式下会抛。
     这是「共用库统一到 run-selftest 那个头」的已知代价，写在这里免得下次当谜案查。
 
+    ⚠️ **本库只被 5 份脚本点源**（`verify-27 / 40 / 41 / 46 / 48`，实测
+    `grep -c 'uitest-lib' tools/uitest/verify-*.ps1`），**不是「全目录都吃它」**。
+    自己 `Start-Process` 起实例的那几份（`verify-23 / 25 / 26 / 27 / 32 / 33 / 34 / 35 / 36 /
+    39 / 41`、`verify-icon`）**不经过本库的 `起窗口`** —— 要让它们也吃到下面那套提权框处理，
+    得在它们自己那句 `Start-Process` 之后**显式加一行**（用法见 `关提权框` 的参数说明）。
+    同理，`verify-18 / 19` 是**挂到别人起好的实例上**（`Get-Process … MainWindowTitle -eq
+    'MIDI 演奏器'`，取不到就 throw），它们**没有「起窗口」那一步可插**。
+
+    ── 下面三条是「文档级」的坑，撞一次要查很久，写在这儿省下一个人的半天 ──
+
+    ⚠️ **④ 扩展方法在 PowerShell 里调不到**：`MidiFile.GetTrackChunks()` / `.GetNotes()` 这类
+    是 **C# 扩展方法**，PowerShell 的成员解析看不见它们（`MethodNotFound` / 「找不到方法」）。
+    正路是**属性**：`MidiFile.Chunks`，再自己过滤（`Chunks.OfType<TrackChunk>()` 之类）。
+    54 号在这上面撞过一次。
+
+    ⚠️ **⑤ PowerShell 的数组解包** —— 本批**三个 agent 各自独立踩过**，伪装成三种样子：
+    断言恒等于「命中 1 条」（**假绿**）/ 例外信息里读不出真相（假线索）/ `IntPtr` 参数转不过去。
+    同一个性质，两种写法**互斥**，谁都别想一次改到两全：
+      · 函数里 `return ,$arr` ⇒ 调用方 `@(f).Count` **恒等于 1**（外层 `@()` 把整个数组当成
+        **一个**元素）。73 号实测：`while (@(f).Count -ne 0)` 永不退出，差点当产品缺陷开票。
+        ⇒ 这一族**要么** `foreach ($w in (别窗)) { … }`，**要么**先赋值再取数（`$x = 别窗; $x.Count`）。
+      · 反过来，把逗号删掉、只留 `@()` ⇒ 返回**标量**（单元素时），`f | Where-Object` 那类
+        调用点**静默变成 0 命中** —— 看着像「全过」，比假绿更坏。
+      ⇒ 所以命名要有记号：**本库不产出「一列东西」的函数**；将来要加，名字里带「列」，
+        并在注释里写明调用方该用哪套写法。`别窗 / 找类型 / 曲库行` 那一族现在都长在调用方，
+        三份 `@()` 版被 46 / 48 里 6 处 `别窗 | Where-Object` 依赖着 ⇒ **不许**把它们改成
+        `,$arr`（本票实测过：改返回形状会打断管道那一路）。
+
+    ⚠️ **⑦ 「按名字在源码里找东西」的断言要钉语法形态，别钉裸名字**：注释、文档注释和提示
+    文案里也会出现那个名字，裸名字必假红。本批两张互不相干的票独立撞上：
+    55 的 `Does.Not.Contain("OnImportClick")` 被**新方法的文档注释**命中；
+    `run-all.ps1` 的 `.scratch` 判据必须卡「字面量以 `.scratch` 开头」（它自己那两句提示文案
+    当场把脚本自己判红过）。⇒ 要断「那个东西没了」，钉 `void OnImportClick` /
+    `= '…\.scratch'` 这种**语法形态**。
+
+    🔴 **加注释的时候别把库自己写崩**（84 号亲手踩的，两条点源的脚本一秒全红）：
+    本库那段 C# 是 `Add-Type @"…"@` —— **双引号** here-string，里面的 `$` 会被 PowerShell
+    **当变量展开**。所以写在 C# 注释里的 `$变量`（举例、配方、粘贴片段）会当场抛
+    「无法检索变量 '$xx'，因为尚未设置该变量」，而**报错行号指的是那段注释**、不是代码 ——
+    看着像「库被谁改坏了」。⇒ 要举例就**把 `$` 省掉**（`PostClick 钮`），或者用 `` `$ `` 转义；
+    **别**在这段里写裸 `$`。（另一个选择是把 here-string 改成单引号 `@'…'@`，但那段里有
+    需要展开的东西，本票不动它。）
+    ⚠️ 这条静态查不出来：`run-all -只查引用` 那一刻是绿的，**只有真的点源一次才会炸**。
+
 .EXAMPLE
     . (Join-Path $PSScriptRoot 'uitest-lib.ps1')
     $h = 起窗口
@@ -352,16 +396,78 @@ public class P40 {
   // EntryPoint 必须写死：带 CharSet.Unicode 又不给 EntryPoint 时，.NET 会拿**方法名**去拼 W
   // （找 `SendMessageStrW`），而不是拿真函数名 —— 当场 EntryPointNotFoundException。
   [DllImport("user32.dll", CharSet=CharSet.Unicode, EntryPoint="SendMessageW")] public static extern IntPtr SendMessageStr(IntPtr h, uint m, IntPtr w, string l);
-  [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr h, uint m, IntPtr w, IntPtr l);
+  // 🔴 EntryPoint 同样必须写死 **SendMessageW**（84 号票 ①）。不给 CharSet/EntryPoint 时
+  //    CLR 绑的是 **SendMessageA**，而 user32 的 A 版会把 `WM_CHAR` 的 wParam **按单个
+  //    ANSI 字节下转** —— 「探针」进去变成「¢ˆ」（U+63A2→U+00A2、U+9488→U+02C6），
+  //    **文件真的存下去了，只是名字是乱码那个**，而调用方在**原名字**上 Test-Path ⇒ False
+  //    ⇒ 看上去像「另存为不写文件」这个产品缺陷。实测（84-typeinto.ps1，同一份 P40、
+  //    真的 EDIT 控件）：「探针」→「¢ˆ」、「另存为.mid」→「æX:.mid」、
+  //    「（三角洲适配）勾指起誓.mid」→「Ò2Mþw“.mid」；纯 ASCII 逐字不变。
+  //    wParam 是 IntPtr，marshaler 不会替你补，只能靠这一句换到 W 版。
+  // 🔴 84 号把全套 `tools/uitest` + `.scratch` 的调用点都 grep 了一遍（见报告）：**仓库里
+  //    没有任何脚本调它**；唯一的调用点在外面 —— `.scratch\52-实机.ps1:478`
+  //    （`[P40]::SendMessage(开窗句柄, [P40]::BM_CLICK, …)`，**正是 54 号卡 6 分钟那个形状**）。
+  //    本库**保留**它不改成带超时：名字叫 SendMessage 就该是 SendMessage 的语义，
+  //    偷偷给它加超时只会让下一个读代码的人量错。要按按钮请用 `ClickWithTimeout` / `PostClick`。
+  [DllImport("user32.dll", CharSet=CharSet.Unicode, EntryPoint="SendMessageW")] public static extern IntPtr SendMessage(IntPtr h, uint m, IntPtr w, IntPtr l);
+  // 带超时的同步发送（②）：对方**不抽消息**时它到点返回 0（**不永久挂**），返回非 0 = 送到了。
+  // —— 跨进程按原生按钮，要么用它、要么用 `PostClick`，**别用裸 `SendMessage` 发 BM_CLICK**：
+  //    54 号为此卡了 6 分钟，最后按 PID 杀掉自己起的实例才解锁。
+  //
+  // ② 的**改前/改后实测**（84 号，二个进程，靶子窗口可见但不抢前台，发的是任何窗口过程都必须
+  // 处理的 WM_NULL，所以「点不着」这种干扰不参与）：
+  //   靶子消息循环在转：裸 SendMessage 0.0 秒回来｜SendMessageTimeout(2000) 9 毫秒回 True｜PostMessage 3 毫秒
+  //   靶子线程**纯空转不抽消息**：裸 SendMessage **等 10 秒还不回来**（发送方进程还活着，只能杀掉）
+  //                              ｜SendMessageTimeout(2000) **2014 毫秒回来、回 False（没送到）**｜PostMessage 0 毫秒
+  // ⇒ 挂的机制是「发送方等对方窗口过程返回」这**一条**，不是 BM_CLICK 特有，也不是「A/W 版」的问题；
+  //    换掉发送函数就没了「无上界」这一档（代价：异步那条不能马上读结果）。
+  // ⚠️ 踩过的实验室坑（别再踩）：窗口没 Show() 过、或按钮没 WS_VISIBLE，`BM_CLICK` 在窗口过程里
+  //    **直接空操作**（返回 0、不触发 Click）—— 那时候量到的「秒回」是**没人理**，不是「跨进程等待」。
+  [DllImport("user32.dll", EntryPoint="SendMessageTimeoutW")] public static extern IntPtr SendMessageTimeout(IntPtr h, uint m, IntPtr w, IntPtr l, uint flags, uint ms, out IntPtr res);
+  public const uint SMTO_NORMAL = 0x0000, SMTO_ABORTIFHUNG = 0x0002;
+  /// 跨进程按一下原生按钮（BM_CLICK），**异步**：不等对方处理，自己立刻回来。
+  /// 这就是 ② 的正解：`SendMessage` 的语义是「等对方窗口过程返回」，对方线程正忙/不抽消息
+  /// 时**发的人一直挂着**（84 号自建靶子实测，见下）。
+  ///
+  /// 🔴 **首选不是它，是 `ClickWithTimeout`。** 只有「一点都不能阻塞」时才用它。
+  /// ⚠️ 用它就**必须自己等** —— 它把「**无上界等待**」换成了「**投出去就返回、对方还没处理**」，
+  ///    紧接着断言就是一条**新的假红**（点了、还没生效就查 ⇒ 偶发红）。本库不给轮询，
+  ///    调用方自己写一个**有上界**的循环（形状抄各脚本里 `点后等` 那个 while，
+  ///    把里面那句点击去掉 —— 注意 `点后等` **自己会点**，别拿它当「点完再等」用，会点两下）：
+  ///      `PostClick 钮`
+  ///      `期限 = (Get-Date).AddSeconds(8)`
+  ///      `while (-not (& 期望)) { if ((Get-Date) -ge 期限) { break }; Start-Sleep -Milliseconds 400 }`
+  ///      `断言 (& 期望) '…' '…'`
+  ///    （上面几行**把变量名的 `$` 省掉了**：这是 C# 注释、住在**双引号** here-string 里，
+  ///      在里面写 `$` 会被 PowerShell 当变量展开 —— 84 号自己踩过，整个库当场抛
+  ///      「无法检索变量」，两条点源的脚本一秒就退出码 3/1。抄的时候自己把 `$` 补回去。）
+  ///    **没有这个有上界的等，就不要用 PostClick。**
+  public static void PostClick(IntPtr h) { PostMessage(h, BM_CLICK, IntPtr.Zero, IntPtr.Zero); }
+  /// 同步版但**带超时**：到点回来并告诉调用方「没送到」（回 false），不会永久挂。
+  /// 想「按下去了马上知道」用它（**同步语义 + 有上界** ⇒ 不需要调用方自己轮询）；
+  /// 想「绝不阻塞」才用 `PostClick`，并照它那条注释自己加有上界重试。
+  public static bool ClickWithTimeout(IntPtr h, uint ms) { IntPtr r; return SendMessageTimeout(h, BM_CLICK, IntPtr.Zero, IntPtr.Zero, SMTO_NORMAL, ms, out r) != IntPtr.Zero; }
   public const uint WM_SETTEXT = 0x000C, WM_CHAR = 0x0102, BM_CLICK = 0x00F5;
+  /// TypeInto 每个字的发送上限（毫秒）。到点没送到就抛 —— **宁可抛也不要挂死**
+  /// （挂死那种红，跑的人先怀疑产品，再怀疑自己，最后才发现是脚手架）。
+  public const uint 敲字超时毫秒 = 5000;
   /// 把一串字**当成用户敲的**送进那个文件名格：先 WM_SETTEXT 清空，再一个字符一个 WM_CHAR。
   ///
   /// 为什么不直接 SetWindowText 了事：那个框靠 EN_CHANGE 决定「打开」亮不亮，
   /// 而 WM_CHAR 走的是编辑控件的正常处理路径，通知一定会发出去。实测两条路都灵，
   /// 但这个更贴「用户真的敲了一遍」，不容易在上位机换成别的 shell 时失灵。
+  ///
+  /// **一个字符一个 WM_CHAR、每个都是 UTF-16 码元**（`foreach (char c …)` 就是逐码元，
+  /// 不用改）；① 的病根不在这个循环，在上面那句 EntryPoint —— 绑错成 A 版，逐码元也白搭。
+  /// 发送用带超时的那一支：送不到就抛一条看得懂的错，而不是把整个脚本挂在那儿。
   public static void TypeInto(IntPtr edit, string s) {
     SendMessageStr(edit, WM_SETTEXT, IntPtr.Zero, "");
-    foreach (char c in s) SendMessage(edit, WM_CHAR, (IntPtr)c, (IntPtr)1);
+    foreach (char c in s) {
+      IntPtr r;
+      if (SendMessageTimeout(edit, WM_CHAR, (IntPtr)c, (IntPtr)1, SMTO_NORMAL, 敲字超时毫秒, out r) == IntPtr.Zero) {
+        throw new System.TimeoutException("TypeInto 敲「" + c + "」(U+" + ((int)c).ToString("X4") + ") 超时 —— 那个编辑框所在线程没在抽消息");
+      }
+    }
   }
   /// 把原生框里所有子窗口按类名捞一遍（EnumChildWindows 是平铺的，父子关系得自己按类名接）。
   public static List<IntPtr> KidsOfClass(IntPtr p, string cls) {
@@ -391,6 +497,119 @@ function 存图([byte[]]$b, [int]$w, [int]$ht, [string]$路径) {
   $img.Dispose()
 }
 
+# =====================================================================
+# 启动那颗模态提权框（60 号票的**正牌功能**，不是 bug）：非提权 shell 里起 app 会弹
+# 「要以管理员身份重启吗？」，**它开着的时候主窗是禁用的**（IsWindowEnabled = False）。
+# =====================================================================
+# 为什么共用库非得管这件事：**一个被禁用的窗会把点击整个丢掉** —— 于是「点『歌曲库』
+# 开不出窗」被读成产品坏了，其实是环境把输入吃了。83 号实测（probe-83b.log，铁证）：
+#   标题'要以管理员身份重启吗？' 可见=True 可用=True      ← 提权框开着
+#   标题'MIDI 演奏器'           可见=True 可用=False     ← 🔴 主窗被它禁用了
+#   点「歌曲库」@ 195,206（点上 PidAt=13856 期望 13856）→ 曲库窗：0（点了 16 轮）
+# 那一趟 verify-40 因此退出码 2、verify-25 退出码 1，**两个都死在第一步**，
+# 跟它们各自要验的产品改动一点关系都没有。改动前本库里 `grep -c '管理员\|提权\|Elevation'`
+# **= 0** —— 一点处理都没有，所以每一颗走 `起窗口` 的脚本都暴露在这个**假红**下。
+#
+# ⚠️ 本票只做「把框按掉 / 让开」，**不许在这里改提权逻辑本身**（那是 60 号的地盘）。
+# ⚠️ **判据：宁可抛一个看得懂的错，也别把它变成一个看不懂的红** —— 所以清不掉就 throw。
+#    三份既有实现（verify-46 的 `关提权框`、verify-48 里逐字一样的第二份、74 号探针的第三份）
+#    走的都是**UIA 找「取消」再点**这条路；本票把 46 那份提升到这里，46 改成调库里的。
+#
+# 判定法（「提权框在不在」，三件事一起看才算数）：
+#   ① 标题**逐字**等于 $提权框标题（别用 -like，别用别的引号 —— 它在别处的提示文案里也会出现）
+#   ② [P40]::Enabled(主窗) = False（光看标题会碰上「刚点掉、正要销毁」那一帧）
+#   ③ [P40]::Foreground() ≠ 主窗（提权框抢前台 ⇒ keybd_event / SendKeys 那条路在这里必不灵）
+# 只想要个句柄就用 `提权框句柄`；想连「按掉」一起做就用 `关提权框`。
+$提权框标题 = '要以管理员身份重启吗？'
+
+# 提权框的句柄；不在就是 $null。**回的是标量或 $null，不是列表** —— 调用方一律
+# `if ($null -ne (提权框句柄 …))`，别写 .Count（见抬头 ⑤）。
+#
+# ⚠️ 候选里**得把 `$主窗` 自己也放进去**：`Process.MainWindowHandle` 是「本进程第一个顶层窗」，
+#    提权框先建出来的时候它**指的就是那颗框**。这时候如果只在 `Others`（= 除主窗外的顶层窗）
+#    里找，就会「框明明开着却找不到」，一直等到最后抛一句看不懂的「提权框没点掉」。
+function 提权框句柄 {
+  param([IntPtr]$主窗 = [IntPtr]::Zero, [uint32]$进程号 = 0)
+  if ($主窗 -eq [IntPtr]::Zero) { $主窗 = $script:h }
+  if ($进程号 -eq 0) { $进程号 = $script:pid脚本 }
+  foreach ($w in @($主窗) + @([P40]::Others($进程号, $主窗))) {
+    if ($w -eq [IntPtr]::Zero) { continue }
+    if ([P40]::Title($w) -eq $提权框标题) { return $w }
+  }
+  return $null
+}
+
+# 把启动那颗提权框按掉（= 按「取消」，先不提权，照常往里走）。**清不掉就抛。**
+#
+# 参数三个，全都可以省：省了就用 `起窗口` 设的那三个脚本作用域变量
+# （`$script:h` / `$script:pid脚本` / `$script:proc`）。
+# **自己 `Start-Process` 起实例的那几份**（它们用的是局部 `$h` / `$脚本PID` / `$proc`，
+# 不点源本库或者点了也不走 `起窗口`）要显式给：
+#     关提权框 -主窗 $h -进程号 $脚本PID -进程 $proc
+# （`-进程` 可以不给，那样只是不去刷新主窗句柄，清框本身照做。）
+# ⚠️ 调用方**必须把返回值吞掉**（`$null = 关提权框 …`）：它回主窗句柄，
+#    不吞就会跟着调用方的返回值一起进管道 —— 正是 `起窗口` 末尾那句
+#    「用 Write-Host 不用裸字符串」记的同一个坑。
+function 关提权框 {
+  param(
+    [IntPtr]$主窗 = [IntPtr]::Zero,
+    [uint32]$进程号 = 0,
+    [System.Diagnostics.Process]$进程 = $null
+  )
+  $用库的 = ($主窗 -eq [IntPtr]::Zero)
+  if ($用库的) { $主窗 = $script:h }
+  if ($进程号 -eq 0) { $进程号 = $script:pid脚本 }
+  if ($null -eq $进程 -and $null -ne $script:proc) { $进程 = $script:proc }
+
+  $按掉了 = 0
+  for ($i = 0; $i -lt 30; $i++) {
+    # 候选里连 `$主窗` 一起算（理由见 `提权框句柄`：MainWindowHandle 可能就是那颗框）。
+    $提示 = @(@($主窗) + @([P40]::Others($进程号, $主窗)) | Where-Object { $_ -ne [IntPtr]::Zero -and [P40]::Title($_) -eq $提权框标题 })
+    if ($提示.Count -eq 0) { break }
+    # UIA 的 FromHandle 会偶发「无法识别的错误」（E_FAIL，窗口刚建好/provider 正忙）：
+    # 一次就抛会把整轮验废掉，重试几次（跟调用方自己那份 `取根` 一个道理）。
+    $根 = $null
+    for ($k = 0; $k -lt 6 -and $null -eq $根; $k++) {
+      try { $根 = $AE::FromHandle($提示[0]) } catch { Start-Sleep -Milliseconds 400 }
+    }
+    if ($null -eq $根) { throw "提权框在（句柄 $($提示[0])）可 UIA 摸不到它 —— 这台机器上没辙，请人工点掉再跑" }
+    $取消 = @()
+    foreach ($t in @($CT::Button, $CT::Text, $CT::MenuItem)) {
+      $取消 = @($根.FindAll($TS::Descendants, (& $条件 $t)) | Where-Object { $_.Current.Name -eq '取消' })
+      if ($取消.Count) { break }
+    }
+    if ($取消.Count -eq 0) { Start-Sleep -Milliseconds 400; continue }
+    if ($i -eq 0) {
+      Write-Host '  启动那颗提权框在（主窗被它禁用了）—— 按「取消」（= 先不提权，照常往里走）'
+    }
+    $r = $取消[0].Current.BoundingRectangle
+    if ([double]::IsNaN($r.X) -or $r.Width -le 0) { throw "提权框的「取消」在屏幕上没有位置（矩形 $r）" }
+    [void][P40]::Take($提示[0])
+    Start-Sleep -Milliseconds 250
+    $cx = [int]($r.X + $r.Width / 2); $cy = [int]($r.Y + $r.Height / 2)
+    $点上是 = [P40]::PidAt($cx, $cy)
+    if ($点上是 -ne $进程号) { throw "点提权框的「取消」之前 $cx,$cy 上压着的不是本进程（是 PID $点上是）" }
+    [P40]::ClickAt($cx, $cy)
+    $按掉了++
+    Start-Sleep -Milliseconds 500
+  }
+
+  # 复核：模态框关掉之后 Avalonia 可能重建主窗，所以以进程现在报的为准；
+  # 只在「用的是库那套变量」时才回写 `$script:h`，显式传参的调用方不动它的东西。
+  if ($null -ne $进程) {
+    $进程.Refresh()
+    if ($进程.HasExited) { throw "提权框还没按掉，实例就退了（退出码 $($进程.ExitCode)）" }
+    if ($用库的 -and $进程.MainWindowHandle -ne 0) {
+      $script:h = $进程.MainWindowHandle
+      $主窗 = $script:h
+    }
+  }
+  if ([P40]::Title($主窗) -eq $提权框标题) { throw '提权框没点掉（主窗句柄上还挂着那颗框的标题）' }
+  if (-not [P40]::Enabled($主窗)) { throw '主窗口还是禁用的 —— 提权框没真收掉' }
+  if ($按掉了) { Write-Host "  提权框按掉了（点了 $按掉了 下「取消」），主窗已启用" }
+  return $主窗
+}
+
 # 起一个干净实例，摆满工作区，返回主窗口句柄。设 $script:pid脚本。
 function 起窗口 {
   $exe = Join-Path $PSScriptRoot '..\..\MidiPerformer.App\bin\Debug\net8.0\MidiPerformer.exe'
@@ -418,12 +637,54 @@ function 起窗口 {
   $script:proc = $proc
   $script:pid脚本 = [uint32]$proc.Id
   $script:h = $proc.MainWindowHandle
+  # ★ 60 号那颗模态提权框**必须在 Take 之前按掉**：它开着的时候主窗是禁用的，
+  #   Take 拽不到前台（当场抛「拽不到前台」），就算这一下侥幸抢到了，后面每一次点击
+  #   也都会被那个禁用的主窗丢掉 —— 变成一串看不懂的红（83 号那趟 verify-40/25 就是这样）。
+  #   返回值要吞掉：不吞的话它会跟下面 `return $script:h` 一起进管道，调用方拿到数组。
+  $null = 关提权框
   if (-not [P40]::Take($script:h)) { throw '拽不到前台' }
   $wa = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
   [void][P40]::SetWindowPos($script:h, [IntPtr]::Zero, $wa.X, $wa.Y, $wa.Width, $wa.Height, 0x0004 -bor 0x0010)
   Start-Sleep -Milliseconds 800
   # 用 Write-Host 不用裸字符串：裸字符串会跟着 return 的值一起进管道，
   # 调用方 `$h = 起窗口` 就拿到一个数组（`FromHandle` 会报「无法转换 Object[]」）。
+  Write-Host "起了一个干净实例：PID $($proc.Id)，窗口 $([P40]::Rect($script:h))"
+  return $script:h
+}
+
+# 跟 `起窗口` **只差一处**：桌面上已经有实例时怎么办。
+#   起窗口        —— 把在跑的都收掉（它一贯的做法，见它开头那一段）
+#   起窗口带清障  —— **报出来、停手**（不替调用方关别人的实例，跟前提检查第 2 条一个口径）
+# 两条都会先把启动那颗提权框按掉（那是 84 号票加的，两条都受益）。
+# 名字里的「清障」指的就是那颗提权框；从前 `起窗口` 不管它，所以 46 号自己长了一份。
+function 起窗口带清障 {
+  $exe = Join-Path $PSScriptRoot '..\..\MidiPerformer.App\bin\Debug\net8.0\MidiPerformer.exe'
+  if (-not (Test-Path $exe)) { throw "没找到 $exe —— 先编译" }
+  $在跑的 = @(Get-Process -Name MidiPerformer -EA SilentlyContinue)
+  if ($在跑的.Count) {
+    throw "已经有 MidiPerformer 在跑（PID $(($在跑的 | ForEach-Object { $_.Id }) -join ', ')）—— 先关掉再跑（这个脚本不替你关）"
+  }
+  # 这两句跟 `起窗口` 里那句同样的道理：`$script:proc` 必须在 Start-Process **之前**绑好，
+  # 不然下面那两处 throw 会让调用方的收尾读到「未绑定变量」，在严格模式下再抛一条、被吞掉，
+  # app 就留在桌面上锁死下一个人的构建。
+  $script:proc = $null
+  $proc = Start-Process -FilePath $exe -PassThru
+  $期限 = (Get-Date).AddSeconds(30)
+  do {
+    Start-Sleep -Milliseconds 500
+    if ($proc.HasExited) { throw "窗口没起来，退出码 $($proc.ExitCode)" }
+    $proc.Refresh()
+  } while ($proc.MainWindowHandle -eq 0 -and (Get-Date) -lt $期限)
+  if ($proc.MainWindowHandle -eq 0) { throw '等不到窗口句柄' }
+  Start-Sleep -Seconds 3
+  $script:proc = $proc
+  $script:pid脚本 = [uint32]$proc.Id
+  $script:h = $proc.MainWindowHandle
+  $null = 关提权框
+  if (-not [P40]::Take($script:h)) { throw '拽不到前台' }
+  $wa = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
+  [void][P40]::SetWindowPos($script:h, [IntPtr]::Zero, $wa.X, $wa.Y, $wa.Width, $wa.Height, 0x0004 -bor 0x0010)
+  Start-Sleep -Milliseconds 800
   Write-Host "起了一个干净实例：PID $($proc.Id)，窗口 $([P40]::Rect($script:h))"
   return $script:h
 }

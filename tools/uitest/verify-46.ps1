@@ -14,7 +14,8 @@
     ① 保证「看到的是该看的那块」——结构断言：曲库窗开着、面板找得到、图存下来了；
     ② 把几个不靠眼睛的数打出来，给看图的人一个参照。
 
-  图存到 `.scratch/shots/46-<标签>/`：
+  图存到 `tools/uitest/shots/46-<标签>/`（84 号票从被 gitignore 的 `.scratch/` 挪了出来，
+    这是全目录里唯一一条「不许写进 .scratch」的关门判据 —— run-all 会为它恒红一条）：
     曲库窗.png      —— 曲库窗自己（毛玻璃在这儿）
     主窗.png        —— 主窗自己（PrintWindow 不含上面那扇模态窗，所以这是「糊之前」）
     对照-糊前.png   —— 主窗那张里、**面板占的那块屏幕矩形**，裁下来
@@ -30,8 +31,10 @@
   ⚠️ 截图之前先把 Carulli 装上：空卷帘是一片均匀的底，糊不糊**看不出来**。
      装曲子是只读的（不碰工程文件），跑完还要逐文件比对 md5。
 
-  ⚠️ 不用 uitest-lib 的 `起窗口`：60 号票刚给启动加了一颗**模态**的提权框，
-     它开着的时候主窗是禁用的，`Take` 抢不到前台就抛。这里的 `起窗口带清障` 先把那颗框按掉。
+  ⚠️ 用库里的 `起窗口带清障`（84 号票之前是本脚本自己长的一份 `关提权框` + `起窗口带清障`）：
+     60 号票给启动加了一颗**模态**的提权框，它开着的时候主窗是禁用的（`IsWindowEnabled=False`），
+     点击会被那个禁用窗整个丢掉 —— 所以库里的 `起窗口` 会在 `Take` 之前先把那颗框按掉。
+     本脚本要的是「桌面上已经有实例就停手」（**不替用户关**），所以走的是库里那颗带清障的。
 #>
 param([string]$标签 = '深色')
 
@@ -58,7 +61,7 @@ function 断言真([string]$名字, [bool]$条件, [string]$原文) {
   if ($条件) { "  OK   $名字（$原文）" } else { "  FAIL $名字（$原文）"; $script:fail++ }
 }
 
-$图 = Join-Path (Join-Path $PSScriptRoot '..\..\.scratch') "shots\46-$标签"
+$图 = Join-Path (Join-Path $PSScriptRoot 'shots') "46-$标签"
 New-Item -ItemType Directory -Force -Path $图 | Out-Null
 
 # 这几个名字 `别窗` / `曲库窗` 之流要在**脚本作用域**里存在（StrictMode 下没定义就抛）
@@ -195,49 +198,17 @@ function 双击后等([scriptblock]$找, [IntPtr]$谁的窗, [string]$谁, [scri
 }
 
 # =====================================================================
-# 起窗口：清掉启动那颗提权框（60 号票新加的，模态，不点掉主窗就是死的）
+# 起窗口：清掉启动那颗提权框（60 号票的模态框，不点掉主窗就是死的）
 # =====================================================================
-function 关提权框 {
-  for ($i = 0; $i -lt 30; $i++) {
-    $提示 = @(别窗 | Where-Object { [P40]::Title($_) -eq '要以管理员身份重启吗？' })
-    if ($提示.Count -eq 0) { break }
-    $根 = 取根 $提示[0]
-    $取消 = @(按名字 $根 '取消')
-    if ($取消.Count -eq 0) { Start-Sleep -Milliseconds 400; continue }
-    if ($i -eq 0) { Write-Host '  启动那颗提权框在 —— 按「取消」（= 先不提权，照常往里走）' }
-    点元素 $取消[0] $提示[0] '取消'
-    Start-Sleep -Milliseconds 500
-  }
-  $script:proc.Refresh()
-  $script:h = $script:proc.MainWindowHandle
-  if ([P40]::Title($script:h) -eq '要以管理员身份重启吗？') { throw '提权框没点掉' }
-  if (-not [P40]::Enabled($script:h)) { throw '主窗口还是禁用的 —— 提权框没真收掉' }
-}
-function 起窗口带清障 {
-  $exe = Join-Path $PSScriptRoot '..\..\MidiPerformer.App\bin\Debug\net8.0\MidiPerformer.exe'
-  if (-not (Test-Path $exe)) { throw "没找到 $exe —— 先编译" }
-  $在跑的 = @(Get-Process -Name MidiPerformer -EA SilentlyContinue)
-  if ($在跑的.Count) { throw "已经有 MidiPerformer 在跑（PID $(($在跑的 | ForEach-Object { $_.Id }) -join ', ')）—— 先关掉再跑" }
-  $proc = Start-Process -FilePath $exe -PassThru
-  $期限 = (Get-Date).AddSeconds(30)
-  do {
-    Start-Sleep -Milliseconds 500
-    if ($proc.HasExited) { throw "窗口没起来，退出码 $($proc.ExitCode)" }
-    $proc.Refresh()
-  } while ($proc.MainWindowHandle -eq 0 -and (Get-Date) -lt $期限)
-  if ($proc.MainWindowHandle -eq 0) { throw '等不到窗口句柄' }
-  Start-Sleep -Seconds 3
-  $script:proc = $proc
-  $script:pid脚本 = [uint32]$proc.Id
-  $script:h = $proc.MainWindowHandle
-  关提权框
-  if (-not [P40]::Take($script:h)) { throw '拽不到前台' }
-  $wa = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
-  [void][P40]::SetWindowPos($script:h, [IntPtr]::Zero, $wa.X, $wa.Y, $wa.Width, $wa.Height, 0x0004 -bor 0x0010)
-  Start-Sleep -Milliseconds 800
-  Write-Host "  起了一个干净实例：PID $($proc.Id)，窗口 $([P40]::Rect($script:h))"
-  return $script:h
-}
+# 84 号票：`关提权框` 与 `起窗口带清障` **都提升进 uitest-lib.ps1 了**，这里不再自己抄一份。
+# 提升前这两份是本脚本里长出来的，verify-48 里还有一份**逐字一样**的 `关提权框`（第三份在
+# 74 号探针里）—— 三份各修各的，正是「共用库该收的东西没收」的样子。
+# 库里那两件的语义与本脚本原来那份**逐条一致**：UIA 找「取消」→ 点击 → 复核
+# （标题还在 / 主窗仍是禁用 就 throw）；差别只在实现细节：
+#   · `关提权框` 改成不依赖调用方的 `别窗` / `取根` / `按名字` / `点元素`（那四件各脚本有自己的版本），
+#     它自带的 UIA 取值在里面就地做完 —— 这样**任何**脚本（包括不点源本库那几份，
+#     只要显式传 `-主窗 / -进程号 / -进程`）都能调；
+#   · 复查主窗句柄时判一下进程是否已经退出（库的 `起窗口` 有这个顾虑）。
 
 # =====================================================================
 # 像素取数的小工具
