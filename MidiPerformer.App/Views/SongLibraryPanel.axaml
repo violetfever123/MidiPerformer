@@ -1,6 +1,5 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:views="clr-namespace:MidiPerformer.App.Views"
              x:Class="MidiPerformer.App.Views.SongLibraryPanel">
   <!--
     歌曲库：一份列表，住在 SongLibraryWindow 里。
@@ -12,12 +11,12 @@
     曲库里一共有几首，搜索只筛列表、不动这个读数。搜索框那种「边打边筛」的即时行为在 .axaml.cs 里
     （纯函数 Filter 管筛，Refresh 管摆行）。
     底色 / 边框 / 每一行的 hover 与选中态全部取令牌。列表用 ListBox —— 选中态、
-    键盘上下键、滚动都不用自己再实现一遍；它自己的底色和边框在这儿被按掉（面板底下已经
-    是毛玻璃，再套一个同色的框只会多出一圈线）。
+    键盘上下键、滚动都不用自己再实现一遍；它自己的底色和边框在这儿被按掉（面板已经是
+    surface-2，再套一个同色的框只会多出一圈线）。
 
-    底子是一层毛玻璃（F5）：糊掉的背景 + 45% 底色 + 颗粒 + 顶边高光，见 FrostedGlassLayer。
-    这一层在**内容后面**，所以上面这些字、行、按钮一个都不用改 —— 它们只是从「一块实色板」
-    变成了「一块玻璃板」。
+    底子是**一块实色**（TokenSurface2，比窗口底深一层，列表浮在上面）。46 号那层毛玻璃
+    （糊背景 + 45% 底色 + 颗粒 + 顶边高光）已经撤了：它当初一并接走了面板的底色，所以
+    撤它的同时得把这块实色还回来 —— 不还，面板底下露出来的就是窗口自己那层底色。
   -->
   <UserControl.Styles>
     <!--
@@ -84,16 +83,8 @@
     </Style>
   </UserControl.Styles>
 
-  <Panel>
-    <!--
-      底子：毛玻璃（F5）。它摆得跟面板一样大、垫在最下面，位图比面板大 90px 一圈（多出来的被它自己剪掉）。
-
-      原来那个 surface-2 的 Border 撤了：底色现在由这一层出（45% 的 TokenSurface）——
-      留着那块实色就会把玻璃整个盖住，那这一票就白做了。右边那道 1px 竖线更早以前就撤了
-      （搬进窗口之后右边没有邻居）。
-    -->
-    <views:FrostedGlassLayer x:Name="Glass" />
-
+  <!-- 底色是 surface-2（比窗口底深一层，列表浮在上面）。右边那道 1px 竖线撤了 —— 搬进窗口之后右边没有邻居。 -->
+  <Panel Background="{DynamicResource TokenSurface2}">
     <Grid RowDefinitions="Auto,Auto,*">
 
       <!-- ==================== 标题：「歌曲库」+「N 首」+「导入 MIDI…」 ==================== -->

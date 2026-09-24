@@ -66,17 +66,8 @@ public sealed partial class SongLibraryPanel : UserControl
         InitializeComponent();
         _library = library;
         Tokens = tokens;
-        Glass.Tokens = tokens;
         Refresh();
     }
-
-    /// <summary>
-    /// 面板底下那一层是什么（毛玻璃要糊的就是它）。<c>null</c> = 底下没东西。
-    ///
-    /// 今天把它设成主窗口内容的是 <c>SongLibraryWindow</c>：这个面板住在独立窗口里，
-    /// 自己底下只有一层窗口底色，而规格要的是「透出底下的卷帘」。
-    /// </summary>
-    public void ShowBackdrop(Visual? backdrop) => Glass.ShowBackdrop(backdrop);
 
     /// <summary>用户点开了一首歌（双击，或选中之后回车）。参数是曲名。</summary>
     public event EventHandler<string>? OpenRequested;

@@ -452,7 +452,7 @@
 
     <!-- ==================== 走带条 ==================== -->
     <Border Grid.Row="4" Classes="transportbar">
-      <Grid ColumnDefinitions="Auto,Auto,Auto,*">
+      <Grid ColumnDefinitions="Auto,Auto,Auto">
         <!--
           这两颗不进 Tab 序（IsTabStop="False"）：空格整块被窗口级快捷键收了
           （见 MainWindow.OnWindowKeyDown），而按钮的标准激活键正是空格，留着 Tab 位就是摆一个
@@ -460,6 +460,11 @@
 
           走带条是两颗：左边一颗切换（▶ 播放 / ⏸ 暂停 / ▶ 继续，字在 RefreshTransport 里换），
           右边一颗 ↻ 重头播放。
+
+          右边的尾巴上原来还有第四格：一句「放完自动停止并松开所有按键」。它说的是不循环，
+          用户 2026-09-24 说不要了，那一格连它下面那个 `*` 一起撤了。
+          ⚠️ **不循环这件事本身没变** —— 放完照样自己停、照样松开所有键（见
+          PreviewPlayback.Stop），撤的只是界面上那句话。
         -->
         <Button Grid.Column="0" x:Name="PlayButton" Classes="primary transport"
                 Content="▶ 播放" IsEnabled="False" IsTabStop="False"
@@ -483,11 +488,6 @@
                    ToolTip.Tip="回车改整曲速度（拍/分）。音符本身一个字节都不动" />
           <TextBlock Classes="faint" Text="拍/分" />
         </StackPanel>
-
-        <TextBlock Grid.Column="3" Classes="faint" TextAlignment="Right"
-                   HorizontalAlignment="Right" VerticalAlignment="Center">
-          <Run Text="放完自动停止并松开所有按键" />
-        </TextBlock>
       </Grid>
     </Border>
   </Grid>
