@@ -44,7 +44,7 @@ public partial class MainWindow : Window
 
     private readonly TokenSource _tokens;
     private readonly PreviewPlayback _playback;
-    private readonly Func<Window>? _performerFactory;
+    private readonly Func<PerformerWindow>? _performerFactory;
     private readonly SongLibrary? _library;
     private readonly List<TrackLaneView> _lanes = new();
 
@@ -55,6 +55,22 @@ public partial class MainWindow : Window
 
     /// <summary>当前这一份谱面。每次编辑换一份新的（不可变），换完走 <see cref="ApplySong"/>。</summary>
     private Song? _song;
+
+    /// <summary>
+    /// 曲库里存着的那一份 —— 手上这份最后一次**和盘上对得上**的样子。
+    ///
+    /// 只在「和曲库打交道」的那两处换：从曲库读出来装上（<see cref="TryOpenLibrarySong"/>）、
+    /// 写进曲库（<see cref="SaveTo"/>）；换曲子那一处（<see cref="LoadSong"/>）把它清掉 ——
+    /// 新装上来的这一份是不是曲库里那份，装上来的这一刻还不知道，知道的那两处自己补。
+    ///
+    /// <see cref="ApplySong"/> 那条编辑的路**一个字节都不碰它**，这正是它存在的理由：
+    /// 点「演奏」弹的是曲库里存的那份、草稿还留在编辑器里（见 <see cref="UnsavedPrompt.Of"/> 里
+    /// 「点演奏」那一格），而 <see cref="_song"/> 是跟着编辑走的 —— 直接把它递过去就是递了草稿。
+    ///
+    /// 还没进过曲库的（导入时取消了命名、或者刚从曲库删掉）是 <c>null</c>：
+    /// 那时没有「已存的」这一份，手上这份就是唯一的一份。
+    /// </summary>
+    private Song? _storedSong;
 
     /// <summary>手上这份在曲库里叫什么（= 文件名）。<c>null</c> = 还没进曲库，那时「保存」会先问一个名字。</summary>
     private string? _currentName;
@@ -98,6 +114,9 @@ public partial class MainWindow : Window
     /// <param name="performerFactory">
     /// 工具栏上「演奏」按下时去要那个独立窗口。给工厂不给现成的窗口：演奏器一建出来就装
     /// 低层键盘钩子，必须到用户真要用的那一刻才存在。复用与单例在组装点里管。
+    /// 收的是 <see cref="PerformerWindow"/> 而不是 <see cref="Window"/>：窗口是复用的，
+    /// 每按一次「演奏」都要把此刻该弹的那份曲子经 <see cref="PerformerWindow.LoadSong"/> 重递一次
+    /// （见 <see cref="OnPerformerClick"/>）。
     /// </param>
     /// <param name="library">
     /// 曲库，目录由组装点拼好（默认是 exe 旁边的 .\songs\）。给 null 就整条曲库都不出现
@@ -105,7 +124,7 @@ public partial class MainWindow : Window
     /// </param>
     public MainWindow(
         TokenSource tokens, IClock clock, IAudioSink sink,
-        Func<Window>? performerFactory, SongLibrary? library)
+        Func<PerformerWindow>? performerFactory, SongLibrary? library)
     {
         InitializeComponent();
 
@@ -259,6 +278,10 @@ public partial class MainWindow : Window
         _editor.Reset();
 
         _song = song;
+        // 这一份是不是曲库里那份，装上来的这一刻还不知道 —— 导入那条路要等命名之后才写进曲库。
+        // 所以先清掉，知道的调用方在那两处自己补回来（TryOpenLibrarySong 读出来的、SaveTo 写下去的）。
+        // 不清的话「导入了另一首」会留着上一首的曲子当「已存的」，点了演奏弹出来的是别人。
+        _storedSong = null;
         // 「这份是哪来的、叫什么、动过没有」三件都随曲子一起换掉，调用方在这之后按自己的来路覆盖
         _currentName = null;
         _importedFrom = null;
@@ -458,6 +481,8 @@ public partial class MainWindow : Window
         if (_currentName == name)
         {
             _currentName = null;
+            // 曲库里那一份没了，手上这份成了唯一的一份 —— 再点演奏没有「已存的」可递
+            _storedSong = null;
             dialog.ShowMessage($"「{name}」已从曲库删掉。手上这份还在，按「保存」可以再存回去。");
         }
         else
@@ -483,11 +508,13 @@ public partial class MainWindow : Window
             var (header, song) = SongProjectFile.LoadProject(library.PathOf(name));
 
             LoadSong(song, name);
-            // LoadSong 把这三个都清空了（它不知道新来的是哪一份），所以在这儿补上
+            // LoadSong 把这四个都清空了（它不知道新来的是哪一份），所以在这儿补上
             _currentName = name;
             _title = name;
             _importedFrom = header.ImportedFrom;
             _edited = header.Edited;
+            // 刚才是从曲库里读出来的这一份 —— 它**就是**「曲库里存的那份」
+            _storedSong = song;
 
             // 不用去挪列表的高亮：这一支成功就走到底，调用方紧接着把窗口关了
             return null;
@@ -586,6 +613,8 @@ public partial class MainWindow : Window
         _currentName = name;
         _title = name;
         SongNameBox.Text = name;
+        // 刚写下去的这一份从此就是「曲库里存的那份」—— 手上这份和它一致到下一次编辑之前
+        _storedSong = song;
         // 手上这份和盘上那份又对上了：工具栏上「保存」那一格褪回素的
         _dirty = false;
         RefreshEditState();
@@ -1073,22 +1102,59 @@ public partial class MainWindow : Window
 
     /// <summary>
     /// 工具栏上「演奏」—— 另开一个独立窗口，把选中的轨弹到别的程序里去。
-    /// 本窗口不 new 它、也不知道它要什么：要一个过来、挂到自己名下、Show ——
-    /// 挂了 owner 之后主窗口一关它就跟着关。
+    /// 本窗口不 new 它、也不知道它要什么：要一个过来、把**此刻该弹的那一份**递进去
+    /// （<see cref="SongForPerformer"/>，走 <see cref="PerformerWindow.LoadSong"/>）、
+    /// 挂到自己名下、Show —— 挂了 owner 之后主窗口一关它就跟着关。
     ///
     /// 改过还没存就先问一句：这一处弹的是**曲库里存的那份**，草稿还在编辑器里 ——
     /// 所以那颗弹窗的第二颗叫「用已存的」而不叫「丢掉」，也不穿警示色（见 <see cref="UnsavedPrompt.Of"/>）。
+    ///
+    /// 取舍必须在**问完之后**做：上面那句「是」（先存再继续）存完之后，
+    /// 「曲库里存的那份」正好变成了手上这一份。
     /// </summary>
     private async void OnPerformerClick(object? sender, RoutedEventArgs e)
     {
         if (!await ConfirmUnsavedAsync(UnsavedScene.Perform, this)) return;
 
+        if (SongForPerformer(_song, _storedSong, _dirty) is not { } song) return;
+
         if (_performerFactory?.Invoke() is not { } window) return;
+
+        // 窗口是复用的（同一时刻只允许一个，F6 急停靠的是低层键盘钩子，见组装点那个工厂），
+        // 所以每按一次都得重递一次：换了曲子再按，窗口里必须换成新那首。
+        // 递完（挑轨要走一遍全曲音符，长曲子几十到几百毫秒）再显 / 唤 —— 窗口出来就是装好的样子，
+        // 不用先露一下上一首、或者空状态，再改。
+        await window.LoadSong(song);
 
         // 组装点复用的那个窗口可能已经显示着了，再 Show 一次会抛
         if (!window.IsVisible) window.Show(this);
         else window.Activate();
     }
+
+    /// <summary>
+    /// 「点演奏」按下去之后该拿哪一份曲子去递 —— 这个判断本身就是一张三行的表。
+    ///
+    /// 提成一个纯函数是为了能拿真值喂它：这一处最容易做错的一格是「改过还没存」那条路
+    /// （<see cref="_song"/> 会跟着编辑走，顺手把它递过去就是把草稿递进去了），
+    /// 而它坏掉**不报错** —— 只是弹出来的东西和弹窗上那句「用已存的」对不上。
+    ///
+    /// <list type="number">
+    /// <item>手上没有曲子 → <c>null</c>：什么都不该发生，不开那个空窗。
+    /// 工具栏那颗按钮本来就是灰的（判据是同一个 <c>_song is not null</c>，见 <see cref="RefreshEditState"/>），
+    /// 这一条是兜底。</item>
+    /// <item>手上这份和盘上那份对得上（<paramref name="dirty"/> 为假）→ 手上这份：
+    /// 它**就是**曲库里存的那份，编辑器里没有任何没落盘的东西。</item>
+    /// <item>改过还没存 → <paramref name="stored"/>（曲库里存的那份，草稿留着）。
+    /// 还没进过曲库的没有这一份，那是 <c>null</c> —— 手上这份是唯一的一份，只能递它。</item>
+    /// </list>
+    /// </summary>
+    /// <param name="current">手上这份（<see cref="_song"/>）。</param>
+    /// <param name="stored">曲库里存的那份（<see cref="_storedSong"/>）。</param>
+    /// <param name="dirty">手上这份有没有没落盘的改动（<see cref="_dirty"/>）。</param>
+    public static Song? SongForPerformer(Song? current, Song? stored, bool dirty)
+        => current is null ? null
+            : dirty ? stored ?? current
+            : current;
 
     // ==================== 提示行 ====================
 

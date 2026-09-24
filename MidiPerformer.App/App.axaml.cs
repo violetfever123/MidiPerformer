@@ -81,10 +81,15 @@ public partial class App : Application
     /// <summary>
     /// 「演奏器…」的入口工厂：同一时刻只允许存在一个演奏器窗口 —— F6 急停靠的是低层键盘钩子，
     /// 两个窗口就是两个钩子，按一下两边同时响应。窗口被关掉之后才允许再开一个。
+    ///
+    /// 返回 <see cref="PerformerWindow"/> 而不是 <see cref="Window"/>：拿到的窗口是**复用**的，
+    /// 主窗口每按一次「演奏」都要把此刻该弹的那份曲子经
+    /// <see cref="PerformerWindow.LoadSong"/> 重新递一次（换了曲子再按，窗口里得换成新那首），
+    /// 所以它得看得见那个方法在哪个类型上。
     /// </summary>
-    private static Func<Window> PerformerFactory(IClock clock, InputSender sender)
+    private static Func<PerformerWindow> PerformerFactory(IClock clock, InputSender sender)
     {
-        Window? live = null;
+        PerformerWindow? live = null;
 
         return () =>
         {
