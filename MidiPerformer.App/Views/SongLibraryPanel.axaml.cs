@@ -10,8 +10,11 @@ using MidiPerformer.Core.UseCases.Project;
 namespace MidiPerformer.App.Views;
 
 /// <summary>
-/// 歌曲库那一条：曲名列表 + 删除。曲名不可编辑 —— 点它只是选中这一行，双击才打开；
+/// 歌曲库那一条：曲名列表 + 搜索框 + 删除。曲名不可编辑 —— 点它只是选中这一行，双击才打开；
 /// 改名只剩顶栏那格「歌曲名」框（见 <c>MainWindow.OnSongNameKeyDown</c>，改的是当前开着的那首）。
+///
+/// 搜索是**即时**的（边打边筛，<see cref="OnSearchTextChanged"/> 直接重摆列表），筛的规矩收在纯函数
+/// <see cref="Filter"/> 里；「搜不中」和「一首都没有」是**两句不同的空态文案**，见 <see cref="EmptyHintFor"/>。
 ///
 /// 它自己不改盘（写）：点一首、要删除，都只是喊一声（<see cref="OpenRequested"/> /
 /// <see cref="DeleteRequested"/>），真正读文件、删文件的是窗口。读是有的 ——
@@ -32,6 +35,13 @@ public sealed partial class SongLibraryPanel : UserControl
     /// </summary>
     private readonly Dictionary<string, ListBoxItem> _rows = new();
 
+    /// <summary>
+    /// 上一次从曲库读出来的曲名，顺序就是 <c>SongLibrary.Names()</c> 给的序（拼音序）。
+    /// 敲键盘筛的是这一份：每按一个字就去问一遍盘、还把每一行的文件头重读一遍，是白花的。
+    /// 盘上真变了（导入 / 删除）时由 <see cref="Refresh"/> 重新读一遍。
+    /// </summary>
+    private IReadOnlyList<string> _names = Array.Empty<string>();
+
     /// <summary>当前正开着的那首（高亮它）。<c>null</c> = 没有。</summary>
     private string? _current;
 
@@ -42,7 +52,7 @@ public sealed partial class SongLibraryPanel : UserControl
 
         // 设计器里没有曲库：摆一个空架子，免得预览是一片空白
         CountText.Text = Count(0);
-        EmptyHint.IsVisible = true;
+        ApplyEmptyState(0, 0);
     }
 
     /// <param name="library">曲库（目录已由组装点注入）。</param>
@@ -86,18 +96,90 @@ public sealed partial class SongLibraryPanel : UserControl
     {
         if (_library is null) return;
 
+        _names = _library.Names();
+        Rebuild();
+    }
+
+    /// <summary>
+    /// 按搜索框里此刻的词，把列表重摆一遍。
+    ///
+    /// 刷新走的就是这一条（<see cref="Refresh"/> 读完盘就调它），所以「导入 / 删掉一首之后
+    /// 筛选跟着更新」不用另起一套：盘一变，重摆这一遍自然会把现存的查询串重新筛一次。
+    /// </summary>
+    private void Rebuild()
+    {
+        var shown = Filter(_names, Query);
+
         SongList.Items.Clear();
         _rows.Clear();
+        foreach (var name in shown) AddRow(name);
 
-        var names = _library.Names();
-        foreach (var name in names) AddRow(name);
-
-        CountText.Text = Count(names.Count);
-        EmptyHint.IsVisible = names.Count == 0;
+        // 「N 首」报的是曲库一共几首，不是筛完剩几首：它说的是「曲库里有多少东西」。
+        // 筛掉了多少，看列表本身和空态那句话。
+        CountText.Text = Count(_names.Count);
+        ApplyEmptyState(_names.Count, shown.Count);
 
         // 高亮要重新打上：行是新摆的，上一次的高亮跟着旧行一起没了
         ApplyCurrent();
     }
+
+    /// <summary>搜索框里现在的词。没敲过就是空的（= 不筛）。</summary>
+    private string Query => SearchBox.Text ?? "";
+
+    /// <summary>
+    /// 按查询串筛一遍曲名 —— **纯函数**：给一张表、拿一张表，不碰控件也不碰盘，
+    /// 所以脱开 Avalonia 也测得了（跟 PianoRollGeometry 是同一类做法）。
+    ///
+    /// 规则：空查询（连全是空白都算空）原样返回**全部**（不是全不匹配）；否则**不区分大小写、按子串**匹配。
+    /// 匹配用 <see cref="StringComparison.CurrentCultureIgnoreCase"/>，跟 <c>SongLibrary.Names()</c>
+    /// 排序用的 <c>StringComparer.CurrentCulture</c> 是**同一个 culture** ——
+    /// 不然中文会出现「排序看着是拼音序、搜出来却不是」，用户会以为搜索框坏了。
+    ///
+    /// **顺序原样保留**：搜索是过滤，不是重排。
+    /// </summary>
+    /// <param name="names">曲名，已经按拼音序排好（<c>SongLibrary.Names()</c> 给的序）。</param>
+    /// <param name="query">搜索框里那一串；<c>null</c> / 空 / 全是空白 = 不筛。</param>
+    public static IReadOnlyList<string> Filter(IReadOnlyList<string> names, string? query)
+    {
+        ArgumentNullException.ThrowIfNull(names);
+
+        string trimmed = (query ?? "").Trim();
+        if (trimmed.Length == 0) return names;
+
+        return names.Where(n => n.Contains(trimmed, StringComparison.CurrentCultureIgnoreCase)).ToArray();
+    }
+
+    /// <summary>曲库里一首都没有时的空态文案。</summary>
+    public const string EmptyLibraryHint = "还没有曲子";
+
+    /// <summary>搜了、但一首都没匹配上时的空态文案。</summary>
+    public const string NoMatchHint = "没有匹配的曲子";
+
+    /// <summary>
+    /// 空态该说哪一句。返回 <c>null</c> = 不显示空态（列表里有东西）。
+    ///
+    /// ⚠️ **两种空态必须是两句不同的话**：曲库真的空了说「还没有曲子」，搜不中说「没有匹配的曲子」。
+    /// 都写「还没有曲子」的话，用户搜一个不存在的词会以为**曲子丢了**。
+    ///
+    /// 曲库本来就空的时候，哪怕手里还挂着一个查询串，也算「还没有曲子」—— 不是他搜没的。
+    /// </summary>
+    /// <param name="libraryCount">曲库里一共几首。</param>
+    /// <param name="matchCount">筛完剩几首。</param>
+    public static string? EmptyHintFor(int libraryCount, int matchCount) =>
+        libraryCount == 0 ? EmptyLibraryHint
+        : matchCount == 0 ? NoMatchHint
+        : null;
+
+    /// <summary>把空态那句话摆上（或者收掉）。三条路都走这儿：没配曲库 / 一首都没有 / 搜不到。</summary>
+    private void ApplyEmptyState(int libraryCount, int matchCount)
+    {
+        string? hint = EmptyHintFor(libraryCount, matchCount);
+        if (hint is not null) EmptyHint.Text = hint;
+        EmptyHint.IsVisible = hint is not null;
+    }
+
+    /// <summary>搜索框里改一个字就重筛一遍 —— 「即时」就是这个意思：不用回车、不用点确认。</summary>
+    private void OnSearchTextChanged(object? sender, TextChangedEventArgs e) => Rebuild();
 
     /// <summary>
     /// 把某一首标成「正开着」。<c>null</c> = 一首都不标。名字不在曲库里（比如刚被删掉）就当作没有。
