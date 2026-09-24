@@ -85,6 +85,31 @@ public sealed partial class SongLibraryPanel : UserControl
     public event EventHandler<string>? DeleteRequested;
 
     /// <summary>
+    /// 用户按了标题行右上角那颗「导入 MIDI…」（55 号从主窗口工具栏搬过来的那一颗）。
+    ///
+    /// **面板自己不导入** —— 读文件、装曲子、写曲库三件事全在主窗口手上（<c>MainWindow.ImportFile</c>），
+    /// 而这扇面板住的曲库窗口是**另一个窗口**，所以这一声要先经 <see cref="SongLibraryWindow"/>
+    /// 转出去（那边会把 sender 换成窗口，和打开 / 删除同一个做法）。
+    /// </summary>
+    public event EventHandler? ImportRequested;
+
+    /// <summary>
+    /// 标题行右上角那颗「导入 MIDI…」露不露面。**默认藏着**（XAML 里那个 <c>IsVisible="False"</c>）。
+    ///
+    /// 判据是「有没有人接得住 <see cref="ImportRequested"/>」，而这件事面板自己不知道 ——
+    /// 由窗口在接上命令的那一刻打开（见 <c>SongLibraryWindow.ImportRequested</c>，那里用的是
+    /// 自定义访问器，所以「有人接」和「按钮在」是同一个动作，没有第二条要记得调的方法）。
+    ///
+    /// ⚠️ 藏着而不是灰着：灰按钮说的是「现在不能用」，而这一颗是**这儿根本没有这条命令**
+    /// （比如设计器里那个空面板）。两种状态在屏幕上差一个词，在这儿差一整个能力。
+    /// </summary>
+    public bool ImportAvailable
+    {
+        get => ImportButton.IsVisible;
+        set => ImportButton.IsVisible = value;
+    }
+
+    /// <summary>
     /// 组装点给的取色桥。这个面板一处都不读它 —— 标题、行、按钮全由 .axaml 里那些令牌
     /// （<c>DynamicResource</c>）着色。留成属性，是为了将来按运行时状态现画的东西有地方取色。
     /// </summary>
@@ -182,6 +207,13 @@ public sealed partial class SongLibraryPanel : UserControl
 
     /// <summary>搜索框里改一个字就重筛一遍 —— 「即时」就是这个意思：不用回车、不用点确认。</summary>
     private void OnSearchTextChanged(object? sender, TextChangedEventArgs e) => Rebuild();
+
+    /// <summary>
+    /// 标题行右上角那颗「导入 MIDI…」：只把这一声喊出去。真正干活的是主窗口 ——
+    /// 这条命令跨窗口，见 <see cref="ImportRequested"/>。
+    /// </summary>
+    private void OnImportClick(object? sender, RoutedEventArgs e) =>
+        ImportRequested?.Invoke(this, EventArgs.Empty);
 
     /// <summary>
     /// 把某一首标成「正开着」。<c>null</c> = 一首都不标。名字不在曲库里（比如刚被删掉）就当作没有。

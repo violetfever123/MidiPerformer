@@ -6,18 +6,22 @@ using NUnit.Framework;
 namespace MidiPerformer.Tests.Visual;
 
 /// <summary>
-/// 工具栏的**排法与状态**（42 号工单：排法 B + 空状态）。
+/// 工具栏的**排法与状态**（42 号工单：排法 B + 空状态）。后来接上了 54 号（「导出」被吸收、
+/// 「另存为…」跟「保存」分岔）和 55 号（「导入 MIDI…」搬去曲库窗口）——
+/// **那两票的判据也在这儿**，因为「这颗按钮现在在哪儿、还接不接着命令」是一件事：
+/// 撤和建分在两个文件里，分开钉的话总有一头坏掉不报错。
 ///
 /// 判据和 <see cref="OverlaySurfaceTests"/> 一样：**读 XAML / 读源文件文本，不起 Avalonia**。
 /// 起一个真窗口在 NUnit 里要一台有桌面会话的机器，而这些结论本来就写在文件里。
 ///
 /// <b>这些断言证明了什么、没证明什么：</b>它们证明的是「文件里这么写着」——
-/// 组容器用的是哪个令牌、空状态关的是哪几样、穿主色的那一格只有一颗。
-/// 「屏幕上真的素着」「填色真的只有那一格」「描边真的比邻居淡」是**像素**上的事，
-/// 归上机截图（<c>.scratch/verify-42.ps1</c>），那儿才是逐格比的地方。
+/// 组容器用的是哪个令牌、空状态关的是哪几样、穿主色的那一格只有一颗、那颗按钮长在哪条
+/// Border 的最后一格。**「屏幕上真的素着」「那颗按钮真的在右上角」「文件框真的开在曲库窗口
+/// 头上」是像素 / 焦点上的事**，归上机截图（<c>tools/uitest/</c> 那套），那儿才是逐格比的地方。
 ///
 /// 那还守它做什么：这几条**坏掉都不报错**。多一格穿上主色、空状态漏关一样、
-/// 组容器换成 TokenLine —— 界面上都只是「看着不太对」，没有一条会红。所以至少拦住「哪天被人改回去」。
+/// 组容器换成 TokenLine、那颗按钮搬走之后处理函数还留着 —— 界面上都只是「看着不太对」，
+/// 没有一条会红。所以至少拦住「哪天被人改回去」。
 /// </summary>
 public class ToolbarLayoutTests
 {
@@ -31,6 +35,12 @@ public class ToolbarLayoutTests
     private static XDocument 主窗口() => XDocument.Load(Path.Combine(AppDir, "Views", "MainWindow.axaml"));
 
     private static string 主窗口代码() => File.ReadAllText(Path.Combine(AppDir, "Views", "MainWindow.axaml.cs"));
+
+    private static XDocument 曲库面板() => XDocument.Load(Path.Combine(AppDir, "Views", "SongLibraryPanel.axaml"));
+
+    private static string 曲库面板代码() => File.ReadAllText(Path.Combine(AppDir, "Views", "SongLibraryPanel.axaml.cs"));
+
+    private static string 曲库窗口代码() => File.ReadAllText(Path.Combine(AppDir, "Views", "SongLibraryWindow.axaml.cs"));
 
     private static IEnumerable<XElement> 全部元素() => 主窗口().Descendants();
 
@@ -46,6 +56,21 @@ public class ToolbarLayoutTests
         return found[0];
     }
 
+    /// <summary>
+    /// 曲库面板里那条标题行：含「歌曲库」三个字的那个 <c>Border</c>（有且只有一个）。
+    /// 「导入 MIDI…」就住在这条里 —— 「右上角」说的是这条的最后一格。
+    /// </summary>
+    private static XElement 曲库标题行()
+    {
+        var found = 曲库面板().Descendants()
+            .Where(e => e.Name.LocalName == "Border" && e.Descendants().Any(d => 属性(d, "Text") == "歌曲库"))
+            .ToList();
+
+        Assert.That(found, Has.Count.EqualTo(1),
+            "SongLibraryPanel.axaml 里该有且只有一条标题行（含「歌曲库」那个 Border）");
+        return found[0];
+    }
+
     /// <summary>工具栏左边那一排（从「歌曲库」那一头数起的那串）。</summary>
     private static XElement 左边一排() => 全部元素()
         .First(e => e.Name.LocalName == "StackPanel" && e.Elements().Any(c => 名字(c) == "LibraryButton"));
@@ -53,18 +78,19 @@ public class ToolbarLayoutTests
     // ==================== 排法 ====================
 
     /// <summary>
-    /// 排法 B（左起）：歌曲库 · [保存 │ 另存为…] · 导入 MIDI… · 操作 ▾ · 演奏。
+    /// 排法 B（左起）：歌曲库 · [保存 │ 另存为…] · 操作 ▾ · 演奏。
     ///
     /// 用「谁挨着谁」来钉，而不是数个数：顺序错了也伤不到功能，所以没有别的东西会红 ——
     /// 而排法就是这一票要交的东西。
     ///
-    /// <b>⚠️ 54 号票之后这张表少了一样：「导出」。</b>「另存为…」接管了它的活（写到任意路径的
-    /// 一个 `.mid`），于是它失去了存在理由 —— 42 号故意留着它，等的就是这一刻（见
-    /// <see cref="导出那颗按钮和处理函数都删干净了"/>）。
-    ///
-    /// 剩下的这一样还是常住户：<b>「导入 MIDI…」</b>要搬去曲库窗口的右上角，那是 **55 号票**的活。
-    /// 它在这张表里的**相对次序照旧**（原来那个「文件」下拉里就是「导入」排第一）——
-    /// 排法本身归 42 号，54 号只让「导出」那一格消失，不重排。
+    /// <b>⚠️ 这张表一行里短过两次，两次都不是重排：</b>
+    /// <list type="bullet">
+    /// <item>54 号：「导出」被「另存为…」吸收掉（42 号故意留着它，等的就是那一刻，
+    /// 见 <see cref="导出那颗按钮和处理函数都删干净了"/>）。</item>
+    /// <item>55 号：「导入 MIDI…」搬去曲库窗口右上角（见 <see cref="导入那颗从工具栏撤干净了"/>）。
+    /// 它在这张表里的**相对次序照旧**（原来那个「文件」下拉里它排第一，就在存盘组后面）——
+    /// 排法本身归 42 号，后两票只让该走的那一格消失，不重排。</item>
+    /// </list>
     /// </summary>
     [Test]
     public void 排法B的次序()
@@ -75,10 +101,10 @@ public class ToolbarLayoutTests
         {
             Assert.That(名字(左起[0]), Is.EqualTo("LibraryButton"), "第一位是「歌曲库」");
             Assert.That(属性(左起[1], "Classes"), Is.EqualTo("savegroup"), "第二位是存盘组（一个带描边的容器）");
-            Assert.That(名字(左起[2]), Is.EqualTo("ImportButton"), "存盘组后面跟着还没搬走的「导入 MIDI…」（下拉里它排第一）");
-            Assert.That(属性(左起[3], "Classes"), Is.EqualTo("toolbar"), "再往下是「操作 ▾」那个菜单");
-            Assert.That(名字(左起[4]), Is.EqualTo("PerformerButton"), "最后是「演奏」");
-            Assert.That(左起, Has.Count.EqualTo(5), "「导出」被吸收掉之后，左边这一排是五样（存盘组算一样）");
+            Assert.That(属性(左起[2], "Classes"), Is.EqualTo("toolbar"), "存盘组后面直接是「操作 ▾」那个菜单");
+            Assert.That(名字(左起[3]), Is.EqualTo("PerformerButton"), "最后是「演奏」");
+            Assert.That(左起, Has.Count.EqualTo(4),
+                "「导出」被吸收掉、「导入 MIDI…」搬走之后，左边这一排是四样（存盘组算一样）");
         });
     }
 
@@ -194,10 +220,11 @@ public class ToolbarLayoutTests
                 "「歌曲库」的判据只有曲库那一半 —— 空状态里只剩它亮着");
             Assert.That(刷新, Does.Not.Contain("LibraryButton.IsEnabled = _song"), "「歌曲库」不该跟着曲子灰");
 
-            // 「导入 MIDI…」也不灰：空状态里它正是该用的那一颗（整条入库的路），
-            // 而且它现在还没搬走，搬走之前必须一直能用
-            Assert.That(刷新, Does.Not.Contain("ImportButton.IsEnabled"), "「导入 MIDI…」不跟着曲子灰");
-            Assert.That(属性(元素("ImportButton"), "IsEnabled"), Is.Null, "「导入 MIDI…」XAML 里也不置灰");
+            // 「导入 MIDI…」**不在这一排上了**（55 号搬去曲库窗口右上角）：
+            // 主窗口里既没有那颗按钮，也没有它的判据 —— 判据留在这儿就是没删干净
+            Assert.That(全部元素().Any(e => 名字(e) == "ImportButton"), Is.False,
+                "「导入 MIDI…」搬去曲库窗口了，工具栏上不该还有它");
+            Assert.That(刷新, Does.Not.Contain("ImportButton"), "它的判据也别留在这儿");
         });
     }
 
@@ -328,27 +355,127 @@ public class ToolbarLayoutTests
         });
     }
 
-    // ==================== 还没搬走的那一颗 ====================
+    // ==================== 搬走的那一颗（55 号票）====================
 
     /// <summary>
-    /// 「导入 MIDI…」这一票**不许撤**，而且得接上命令 ——
-    /// 挂着不接命令的按钮按下去什么都不发生、也不报错。
+    /// 「导入 MIDI…」从工具栏上**撤干净了**：按钮和处理函数一起消失，而且处理函数是删掉、
+    /// 不是留着不用（留着的话下一个人会把它接回去，那时工具栏和曲库窗口各有一条导入的路）。
     ///
-    /// 撤「导入 MIDI…」最狠：撤掉它、而曲库窗口那颗还没建起来的那段时间里，
-    /// **没有任何路径能把一首曲子导进来**（整条入库的路断了）。
-    /// 搬它归 **55 号票**（曲库窗口右上角），在它落地之前这颗必须一直在、而且一直能用。
+    /// ⚠️ 为什么这条得和 <see cref="曲库窗口右上角那颗按钮和它的那条路"/> **一起看**：
+    /// 撤和建必须落在同一个提交里。中间那段「两边都没有」的时间里，**没有任何路径能把一首
+    /// 曲子导进来** —— 比「存不到别处」更狠，是整条入库的路断了。
+    /// 只钉一头的话，另一头坏掉不报错，而那一头坏掉正是这件事。
     /// </summary>
     [Test]
-    public void 导入那颗还在而且接上了命令()
+    public void 导入那颗从工具栏撤干净了()
     {
         string 代码 = 主窗口代码();
 
         Assert.Multiple(() =>
         {
-            Assert.That(属性(元素("ImportButton"), "Click"), Is.EqualTo("OnImportClick"),
-                "「导入 MIDI…」撤了整条入库的路就断在这一票里了");
-            Assert.That(代码, Does.Contain("private async void OnImportClick"), "接的命令得真在");
+            Assert.That(全部元素().Any(e => 名字(e) == "ImportButton"), Is.False,
+                "工具栏上「导入 MIDI…」该不见了（它搬去曲库窗口右上角）");
+            Assert.That(代码, Does.Not.Contain("void OnImportClick"),
+                "主窗口这边的处理函数要删掉 —— 留着不用也会被下一个人接回去");
         });
+    }
+
+    /// <summary>
+    /// 那颗按钮**建在曲库窗口的右上角**，而且**接的是同一条导入的路**：
+    /// 面板喊一声 → 窗口换掉 sender 转出去 → 主窗口接住 → 走原来那个选文件 + <c>ImportFile</c>。
+    ///
+    /// 「右上角」在这份判据里的意思是**它是标题行里最右边那样**（和「歌曲库」三个字同一条
+    /// Border，排在「N 首」后面）。真在屏幕上的位置归上机截图，这儿钉的是「文件里这么写着」。
+    ///
+    /// ⚠️ 那颗按钮**默认藏着**（<c>IsVisible="False"</c>）：面板自己不会导入，那件事在主窗口手上，
+    /// 而主窗口是另一个窗口。没人接得住这一声的时候，一颗按下去什么都不发生、也不报错的按钮
+    /// 比不摆更坏 —— 所以「有人接」和「按钮在」是同一个动作（窗口那个自定义访问器）。
+    /// </summary>
+    [Test]
+    public void 曲库窗口右上角那颗按钮和它的那条路()
+    {
+        var 按钮 = 曲库标题行().Descendants().SingleOrDefault(e => 名字(e) == "ImportButton");
+        Assert.That(按钮, Is.Not.Null, "曲库面板的标题行里该有那颗「导入 MIDI…」");
+        if (按钮 is null) return;
+
+        string 面板代码 = 曲库面板代码();
+        string 窗口代码 = 曲库窗口代码();
+        string 主窗代码 = 主窗口代码();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(属性(按钮, "Content"), Is.EqualTo("导入 MIDI…"), "文案就是用户说的那一个");
+            Assert.That(属性(按钮, "Click"), Is.EqualTo("OnImportClick"),
+                "挂着不接命令的按钮按下去什么都不发生、也不报错");
+            Assert.That(按钮.Parent!.Elements().Last(), Is.SameAs(按钮),
+                "它是标题行里最右边的那样 —— 「右上角」");
+            Assert.That(属性(按钮, "IsVisible"), Is.EqualTo("False"),
+                "默认藏着，由窗口接上命令时打开（没人接就不露面）");
+
+            // 面板这一层：接上点击、把这一声喊出去
+            Assert.That(面板代码, Does.Contain("public event EventHandler? ImportRequested"));
+            Assert.That(面板代码, Does.Contain("ImportRequested?.Invoke(this, EventArgs.Empty)"));
+            Assert.That(面板代码, Does.Contain("ImportAvailable"),
+                "「有没有人接得住这一声」是那颗按钮露不露面的判据");
+
+            // 窗口这一层：换掉 sender 往上报，并在接上命令时让按钮露面
+            Assert.That(窗口代码, Does.Contain("_panel.ImportRequested += (_, _) => _importRequested?.Invoke(this, EventArgs.Empty)"),
+                "跨窗口那一跳在曲库窗口上（和打开 / 删除同一个做法）");
+            Assert.That(窗口代码, Does.Contain("panel.ImportAvailable = true;"),
+                "接上命令才让那颗按钮露面");
+
+            // 主窗口这一层：接住，并走原来那条路 —— 别在这儿另写一套导入
+            Assert.That(主窗代码, Does.Contain("dialog.ImportRequested += OnLibraryImportRequested"));
+            Assert.That(主窗代码, Does.Contain("await ImportViaPickerAsync(dialog)"),
+                "真正干活的是主窗口那条现成的路");
+        });
+    }
+
+    /// <summary>
+    /// 🔴 **文件框（和这条路上那几句问话）挂在发起它的那扇窗口身上，不是主窗口自己。**
+    ///
+    /// 曲库窗口是**模态**、压在主窗口头上：文件框要是挂在主窗口上，它就会开在那个模态框
+    /// **后面** —— 用户看到的是「按了没反应」。
+    ///
+    /// 这条是这一票最容易做错的地方，而且**做错了不报错、单测也照过**（弹的是原生窗口，
+    /// NUnit 里根本起不来）。所以只能在源码这一层把它钉住：那个文件框那一行得写着 <c>owner</c>。
+    /// </summary>
+    [Test]
+    public void 导入的文件框挂在发起它的那扇窗口上()
+    {
+        string 代码 = 主窗口代码();
+        var 挑文件 = 花括号段(代码, "private async Task ImportViaPickerAsync", "找不到 ImportViaPickerAsync");
+        var 导入 = 花括号段(代码, "private async Task ImportFile", "找不到 ImportFile");
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(挑文件, Does.Contain("owner.StorageProvider.OpenFilePickerAsync"),
+                "文件框要挂在发起这次导入的那扇窗口上");
+            Assert.That(挑文件, Does.Not.Contain("await StorageProvider."),
+                "别在文件框那一行用主窗口自己的 StorageProvider —— 那就是开在模态框后面那一版");
+            Assert.That(挑文件, Does.Contain("FileTypeFilter = new[] { MidiFileType }"),
+                "过滤器沿用现成的 MidiFileType，别新写一个");
+
+            Assert.That(导入, Does.Contain("ConfirmUnsavedAsync(UnsavedScene.SwitchSong, owner)"),
+                "「手上这份还没存」那句问话也挂在发起它的窗口上（挂主窗口会开在模态框后面）");
+            Assert.That(导入, Does.Contain("Path.GetFileNameWithoutExtension(path), owner)"),
+                "起名那一句同理");
+            Assert.That(导入, Does.Contain("SaveTo(library, name)"),
+                "落盘那一步一个字都没变");
+        });
+    }
+
+    /// <summary>
+    /// 从曲库窗口导进来一首之后，**那个列表得当场重列** —— 加完看不见它等于没加成，
+    /// 而那颗按钮的用处就是往这个列表里加东西。
+    /// </summary>
+    [Test]
+    public void 从曲库导入完列表当场重列()
+    {
+        var 接导入 = 花括号段(主窗口代码(), "private async void OnLibraryImportRequested", "找不到 OnLibraryImportRequested");
+
+        Assert.That(接导入, Does.Contain("dialog.RefreshLibrary(_currentName)"),
+            "导完当场重列一遍曲库窗口那个列表");
     }
 
     /// <summary>

@@ -8,8 +8,8 @@
     这个文件只管「长什么样」，窗口只管「摆在哪、多大」。列表的行是代码建的
     （曲名 + 第二格标记 + 删除），见 SongLibraryPanel.axaml.cs。
 
-    三块：标题（「歌曲库」+「N 首」）、搜索框、列表。「N 首」说的是曲库里一共有几首，
-    搜索只筛列表、不动这个读数。搜索框那种「边打边筛」的即时行为在 .axaml.cs 里
+    三块：标题（「歌曲库」+「N 首」+ 右上角的「导入 MIDI…」）、搜索框、列表。「N 首」说的是
+    曲库里一共有几首，搜索只筛列表、不动这个读数。搜索框那种「边打边筛」的即时行为在 .axaml.cs 里
     （纯函数 Filter 管筛，Refresh 管摆行）。
     底色 / 边框 / 每一行的 hover 与选中态全部取令牌。列表用 ListBox —— 选中态、
     键盘上下键、滚动都不用自己再实现一遍；它自己的底色和边框在这儿被按掉（面板底下已经
@@ -96,12 +96,12 @@
 
     <Grid RowDefinitions="Auto,Auto,*">
 
-      <!-- ==================== 标题：「歌曲库」+「N 首」 ==================== -->
+      <!-- ==================== 标题：「歌曲库」+「N 首」+「导入 MIDI…」 ==================== -->
       <Border Grid.Row="0"
               BorderBrush="{DynamicResource TokenLineSoft}"
               BorderThickness="0,0,0,1"
               Padding="12,9,12,7">
-        <Grid ColumnDefinitions="*,Auto">
+        <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10">
           <TextBlock Grid.Column="0"
                      Text="歌曲库"
                      FontSize="11" FontWeight="Bold"
@@ -111,6 +111,21 @@
                      FontSize="11"
                      Foreground="{DynamicResource TokenInkFaint}"
                      VerticalAlignment="Center" />
+
+          <!--
+            右上角那颗「导入 MIDI…」是 55 号从主窗口工具栏搬过来的（原来那个「文件」下拉里排第一
+            的那一样）。用 primary：Controls.axaml 那条样式就是给「导入 / 保存这类真正干事的」用的，
+            而在这扇窗口里它正是那件事 —— 空曲库里唯一能做的就是先把第一首导进来。
+
+            ⚠️ 它**默认藏着**（IsVisible="False"），由代码在「有人接得住这一声」时打开 ——
+            面板自己不会导入，那件事在主窗口手上（ImportFile），而主窗口是**另一个窗口**。
+            没人接的时候摆一颗按下去什么都不发生、也不报错的按钮，比不摆更坏。
+            判据见 SongLibraryPanel.ImportAvailable。
+          -->
+          <Button Grid.Column="2" x:Name="ImportButton" Classes="primary"
+                  Content="导入 MIDI…" Click="OnImportClick"
+                  IsVisible="False" VerticalAlignment="Center"
+                  ToolTip.Tip="挑一个 .mid 加进曲库（加进来之后要给它起个名字）" />
         </Grid>
       </Border>
 

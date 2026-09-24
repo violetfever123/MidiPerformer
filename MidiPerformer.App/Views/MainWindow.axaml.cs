@@ -190,10 +190,21 @@ public partial class MainWindow : Window
 
     // ==================== 导入 ====================
 
-    /// <summary>「导入 MIDI…」—— 选文件，剩下的交给 <see cref="ImportFile"/>。</summary>
-    private async void OnImportClick(object? sender, RoutedEventArgs e)
+    /// <summary>
+    /// 「导入 MIDI…」—— 选文件，剩下的交给 <see cref="ImportFile"/>。
+    ///
+    /// 55 号之前这条路是工具栏上那颗按钮的 <c>OnImportClick</c>；那颗按钮搬进曲库窗口之后，
+    /// 这里是它唯一的起点（<see cref="OnLibraryImportRequested"/>）。**导入本身一个字都没变** ——
+    /// 搬的是按钮，不是这条路。
+    ///
+    /// ⚠️ 文件框挂在 <paramref name="owner"/> 身上，不是 <c>this</c>：发起这次导入的那扇窗口
+    /// 才是用户眼前那一扇。曲库窗口是**模态**、压在主窗口头上 —— 文件框要是挂在主窗口上，
+    /// 它就会开在那个模态框**后面**，用户看到的是「按了没反应」。
+    /// （同一个理由，这条路上的那几句问话也挂在它身上，见 <see cref="ImportFile"/>。）
+    /// </summary>
+    private async Task ImportViaPickerAsync(Window owner)
     {
-        var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        var files = await owner.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
         {
             Title = "导入 MIDI…",
             AllowMultiple = false,
@@ -209,7 +220,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        await ImportFile(path);
+        await ImportFile(path, owner);
     }
 
     /// <summary>把窗口变成一个能接收拖放的落点。拖进来的不一定是文件，所以 DragOver 要把「收不收」先说清楚：不说的话光标一直是个禁止符号，用户以为这窗口不吃拖放。</summary>
@@ -225,7 +236,8 @@ public partial class MainWindow : Window
         AddHandler(DragDrop.DropEvent, async (_, e) =>
         {
             if (FirstMidiPath(e.DataTransfer) is not { } path) return;
-            await ImportFile(path);
+            // 拖放没有别的窗口：发起的就是主窗口自己
+            await ImportFile(path, this);
         });
     }
 
@@ -247,12 +259,20 @@ public partial class MainWindow : Window
         return null;
     }
 
-    /// <summary>导入一个 .mid：读 → 命名 → 存进曲库 → 显示。菜单和拖放走的是同一个它。命名那一步取消不等于失败：曲子照样装上，只是没进曲库（<see cref="_currentName"/> 保持 null）。</summary>
-    private async Task ImportFile(string path)
+    /// <summary>
+    /// 导入一个 .mid：读 → 命名 → 存进曲库 → 显示。**曲库窗口右上角那颗按钮和拖放走的是同一个它。**
+    /// 命名那一步取消不等于失败：曲子照样装上，只是没进曲库（<see cref="_currentName"/> 保持 null）。
+    /// </summary>
+    /// <param name="owner">
+    /// 发起这次导入的那扇窗口 —— 这条路上那两句问话（「手上这份还没存」和「给它起个什么名字」）
+    /// 挂在它身上。曲库窗口发起时它就是曲库窗口（模态压在主窗口头上，问话挂主窗口会开在它后面）；
+    /// 拖放没有别的窗口，就是主窗口自己。
+    /// </param>
+    private async Task ImportFile(string path, Window owner)
     {
         // 拖进来也好、挑一个文件也好，都是「打开另一首」：手上这份改过还没存就先拦一下
         // （拦在这儿而不是挑文件那一步，拖放那条路才一并盖得住）
-        if (!await ConfirmUnsavedAsync(UnsavedScene.SwitchSong, this)) return;
+        if (!await ConfirmUnsavedAsync(UnsavedScene.SwitchSong, owner)) return;
 
         Song song;
         try
@@ -274,7 +294,7 @@ public partial class MainWindow : Window
         if (_library is not { } library) return;
 
         string? name = await AskNameForSaveAsync(
-            library, "导入 MIDI", Path.GetFileNameWithoutExtension(path));
+            library, "导入 MIDI", Path.GetFileNameWithoutExtension(path), owner);
 
         if (name is null) return;
 
@@ -450,6 +470,18 @@ public partial class MainWindow : Window
     // ==================== 曲库 ====================
 
     /// <summary>
+    /// 曲库窗口开着的那一会儿是哪一扇。<c>null</c> = 没开着。
+    ///
+    /// 它只有一个用处：**这段会话里报的话报在哪儿**（见 <see cref="ShowError"/>）。曲库窗口是模态、
+    /// 压在主窗口头上，主窗口那条提示行在它后面 —— 从曲库窗口起的流程（导入）要是把「读不出来」
+    /// 报在主窗口上，用户看到的就是「按了没反应」，而不是「这个文件坏了」。
+    ///
+    /// 只在 <see cref="OnLibraryClick"/> 那一段里非空：开窗之前设上、关窗之后立刻清掉
+    /// （<c>finally</c>，异常那条路也清），所以别的流程看不见它。
+    /// </summary>
+    private SongLibraryWindow? _libraryDialog;
+
+    /// <summary>
     /// 「歌曲库」那颗按钮：开曲库窗口（模态）。开窗那一刻现列一遍列表就够 ——
     /// 模态期间主窗口动不了，列表不会过期。两件会改盘的事（打开、删除）落在本窗口。
     /// 打开那一支要先关窗再装曲子：<see cref="LoadSong"/> 会重建全部控件、重算场景，
@@ -476,7 +508,41 @@ public partial class MainWindow : Window
 
         dialog.DeleteRequested += OnLibraryDeleteRequested;
 
-        await dialog.ShowDialog(this);
+        // 右上角那颗「导入 MIDI…」（55 号从主窗口工具栏搬进来的）。**接上这一声，那颗按钮才露面** ——
+        // 曲库窗口自己不会导入，没人接的时候摆一颗按下去什么都不发生的按钮比不摆更坏
+        dialog.ImportRequested += OnLibraryImportRequested;
+
+        _libraryDialog = dialog;
+        try
+        {
+            await dialog.ShowDialog(this);
+        }
+        finally
+        {
+            // 窗口没了，话就不该再往它身上报（它是模态，这段期间别的流程本来就动不了）
+            _libraryDialog = null;
+        }
+    }
+
+    /// <summary>
+    /// 曲库窗口右上角那颗「导入 MIDI…」被按了：走主窗口这条**现成的**导入的路
+    /// （<see cref="ImportViaPickerAsync"/> → <see cref="ImportFile"/>），一个字节的新导入逻辑都没有 ——
+    /// 这颗按钮是搬过来的，不是重建的。
+    ///
+    /// 文件框和后面那几句问话都挂在 <paramref name="sender"/>（曲库窗口）身上：它是用户眼前那一扇。
+    ///
+    /// 导完当场重列一遍列表：那颗按钮的用处就是往这个列表里加东西，加完看不见它等于没加成。
+    /// 成了 / 没成都由「报的话报在哪儿」那条岔路送进它的页脚（见 <see cref="_libraryDialog"/>）。
+    /// </summary>
+    private async void OnLibraryImportRequested(object? sender, EventArgs e)
+    {
+        if (sender is not SongLibraryWindow dialog) return;
+
+        await ImportViaPickerAsync(dialog);
+
+        // 命名那一步取消了也是「曲子已经在手上」，只是没进曲库 —— 列表照样重列一遍，
+        // 它按 _currentName 重标高亮，那一步自己会得出正确的结论
+        dialog.RefreshLibrary(_currentName);
     }
 
     /// <summary>
@@ -582,7 +648,7 @@ public partial class MainWindow : Window
 
         // 还没进曲库（导入时没命名、或者刚从曲库删掉）：先问一个名字，问到了再走同一条写库的路。
         // 取消不是失败 —— 曲子还在手上，就是没进曲库。
-        if (await AskNameForSaveAsync(library, "保存", _title) is not { } asked) return;
+        if (await AskNameForSaveAsync(library, "保存", _title, this) is not { } asked) return;
 
         SaveTo(library, asked);
     }
@@ -636,17 +702,18 @@ public partial class MainWindow : Window
     /// 放行的两种：名字就是当前这首，或者曲库里没这个名字；用户说不覆盖就带着刚打的名字再问一次。
     /// </summary>
     /// <returns>可以写的名字；用户取消 = <c>null</c>。</returns>
-    private async Task<string?> AskNameForSaveAsync(SongLibrary library, string title, string initial)
+    /// <param name="owner">那两句问话挂在谁身上（导入从曲库窗口发起时是曲库窗口）。</param>
+    private async Task<string?> AskNameForSaveAsync(SongLibrary library, string title, string initial, Window owner)
     {
         while (true)
         {
-            string? name = await Dialogs.AskNameAsync(this, title, initial);
+            string? name = await Dialogs.AskNameAsync(owner, title, initial);
             if (name is null) return null;
 
             if (name == _currentName || !library.Contains(name)) return name;
 
             bool overwrite = await Dialogs.ConfirmAsync(
-                this,
+                owner,
                 "覆盖这首曲子",
                 $"曲库里已经有一首「{name}」了。继续的话它会被手上这份替掉，撤不回来。",
                 "覆盖");
@@ -1193,15 +1260,37 @@ public partial class MainWindow : Window
 
     // ==================== 提示行 ====================
 
+    /// <summary>
+    /// 报一句「出事了」。**曲库窗口开着的时候报在它的页脚上** —— 那一扇是模态、压在主窗口头上，
+    /// 主窗口这条提示行在它后面，报在那儿等于没说（用户看到的是「按了没反应」）。
+    /// 曲库那条路上的三句（读不出来的 .mid、盘上写不下去、找不到本机路径）都走这一条岔路，
+    /// 包括它调用的 <c>LoadSong</c> / <c>SaveTo</c> 里报出来的那几句 —— 它们不用知道是谁发起的。
+    /// </summary>
     private void ShowError(string message)
     {
+        if (_libraryDialog is { } dialog)
+        {
+            dialog.ShowMessage(message);
+            return;
+        }
+
         NoticeBox.IsVisible = false;
         ErrorText.Text = message;
         ErrorBox.IsVisible = true;
     }
 
+    /// <summary>
+    /// 报一句「做成了」。和 <see cref="ShowError"/> 同一条岔路：曲库窗口开着时报在它的页脚上
+    /// （导入成功那句「已存进曲库：…」就是从这儿进页脚的）。
+    /// </summary>
     private void ShowNotice(string message)
     {
+        if (_libraryDialog is { } dialog)
+        {
+            dialog.ShowMessage(message);
+            return;
+        }
+
         ErrorBox.IsVisible = false;
         NoticeText.Text = message;
         NoticeBox.IsVisible = true;

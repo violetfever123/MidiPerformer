@@ -9,9 +9,9 @@ namespace MidiPerformer.App.Views;
 /// <summary>
 /// 歌曲库那个窗口：把 <see cref="SongLibraryPanel"/> 装进一个模态框，底下配一条页脚。
 ///
-/// 职责三件：把面板摆好、把页脚那句话写好、把事件转出去。它自己不改盘 —— 删除、打开都只是把
-/// 名字往上报（<see cref="DeleteRequested"/> / <see cref="OpenRequested"/>），落地在
-/// <c>MainWindow</c>，因为那些事会反过来影响主窗口手上的状态。
+/// 职责三件：把面板摆好、把页脚那句话写好、把事件转出去。它自己不改盘 —— 删除、打开、
+/// 导入都只是把这件事往上报（<see cref="DeleteRequested"/> / <see cref="OpenRequested"/> /
+/// <see cref="ImportRequested"/>），落地在 <c>MainWindow</c>，因为那些事会反过来影响主窗口手上的状态。
 ///
 /// 事件转发换掉了 sender 的所指：主窗口收到的是这个窗口，才拿得到
 /// <see cref="RefreshLibrary"/> 和 <see cref="ShowMessage"/> 去回话。
@@ -39,6 +39,8 @@ public sealed partial class SongLibraryWindow : Window
         _panel = new SongLibraryPanel(library, tokens);
         _panel.OpenRequested += (_, name) => OpenRequested?.Invoke(this, name);
         _panel.DeleteRequested += (_, name) => DeleteRequested?.Invoke(this, name);
+        // 换掉 sender：主窗口收到的是这扇窗口，才拿得到它去当文件框的父窗口、去页脚回话
+        _panel.ImportRequested += (_, _) => _importRequested?.Invoke(this, EventArgs.Empty);
 
         PanelHost.Content = _panel;
         RefreshLibrary(current);
@@ -64,6 +66,38 @@ public sealed partial class SongLibraryWindow : Window
 
     /// <summary>某一行的 × 已经问过「真要删？」并且用户说了「删」：请主窗口删掉它。</summary>
     public event EventHandler<string>? DeleteRequested;
+
+    private EventHandler? _importRequested;
+
+    /// <summary>
+    /// 标题行右上角那颗「导入 MIDI…」被按了（55 号从主窗口工具栏搬进来的那一颗）。
+    ///
+    /// **跨窗口**：面板喊一声，这一层换掉 sender 往上报（和打开 / 删除同一个做法），
+    /// 真正干活的是主窗口 —— 导入要读文件、装曲子、写曲库，三件事都在它手上。
+    /// 这一声也带上自己，主窗口那边**拿它当文件框的父窗口**：发起导入的是这一扇，
+    /// 而它是模态、压在主窗口头上，文件框要是挂在主窗口上就会开在它**后面**。
+    ///
+    /// **接上命令才让那颗按钮露面**：这扇窗口自己不会导入，没人接的时候摆一颗按下去
+    /// 什么都不发生、也不报错的按钮比不摆更坏（工单 55 的验收里专门有一条）。
+    /// 写成自定义访问器而不是另设一个「启用」方法，是为了让「有人接」和「按钮在」
+    /// 在同一个动作里发生 —— 不这么写就多出一处要记得调的地方，而漏调不报错。
+    /// </summary>
+    public event EventHandler? ImportRequested
+    {
+        add
+        {
+            _importRequested += value;
+
+            // 设计器那扇空窗（下面那个无参构造）里没有面板
+            if (_panel is { } panel) panel.ImportAvailable = true;
+        }
+
+        remove
+        {
+            _importRequested -= value;
+            if (_panel is { } panel) panel.ImportAvailable = false;
+        }
+    }
 
     /// <summary>
     /// 重新列一遍曲库，并把某首标成「正开着」。只有两处会喊：开窗那一下，和删掉一首之后。
