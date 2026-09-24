@@ -53,16 +53,18 @@ public class ToolbarLayoutTests
     // ==================== 排法 ====================
 
     /// <summary>
-    /// 排法 B（左起）：歌曲库 · [保存 │ 另存为…] · 导入 MIDI… · 导出 · 操作 ▾ · 演奏。
+    /// 排法 B（左起）：歌曲库 · [保存 │ 另存为…] · 导入 MIDI… · 操作 ▾ · 演奏。
     ///
     /// 用「谁挨着谁」来钉，而不是数个数：顺序错了也伤不到功能，所以没有别的东西会红 ——
     /// 而排法就是这一票要交的东西。
     ///
-    /// <b>「导入 MIDI…」和「导出」在这张表里不是常住户</b>：后者要被「另存为…」吸收掉，
-    /// 前者要搬去曲库窗口的右上角。两颗在台面上的**相对次序照旧**（原来那个「文件」下拉里
-    /// 就是「导入」排第一）—— 这一票只把它们提上来，不重排。在这一票里**一颗都不许撤**：
-    /// 撤了「导出」，在它被吸收之前就没有任何路径能把曲子存到任意位置；
-    /// 撤了「导入 MIDI…」，整条入库的路当场断掉。两颗各有各的工单去搬。
+    /// <b>⚠️ 54 号票之后这张表少了一样：「导出」。</b>「另存为…」接管了它的活（写到任意路径的
+    /// 一个 `.mid`），于是它失去了存在理由 —— 42 号故意留着它，等的就是这一刻（见
+    /// <see cref="导出那颗按钮和处理函数都删干净了"/>）。
+    ///
+    /// 剩下的这一样还是常住户：<b>「导入 MIDI…」</b>要搬去曲库窗口的右上角，那是 **55 号票**的活。
+    /// 它在这张表里的**相对次序照旧**（原来那个「文件」下拉里就是「导入」排第一）——
+    /// 排法本身归 42 号，54 号只让「导出」那一格消失，不重排。
     /// </summary>
     [Test]
     public void 排法B的次序()
@@ -74,10 +76,9 @@ public class ToolbarLayoutTests
             Assert.That(名字(左起[0]), Is.EqualTo("LibraryButton"), "第一位是「歌曲库」");
             Assert.That(属性(左起[1], "Classes"), Is.EqualTo("savegroup"), "第二位是存盘组（一个带描边的容器）");
             Assert.That(名字(左起[2]), Is.EqualTo("ImportButton"), "存盘组后面跟着还没搬走的「导入 MIDI…」（下拉里它排第一）");
-            Assert.That(名字(左起[3]), Is.EqualTo("ExportButton"), "再跟着还没搬走的「导出」");
-            Assert.That(属性(左起[4], "Classes"), Is.EqualTo("toolbar"), "第五位是「操作 ▾」那个菜单");
-            Assert.That(名字(左起[5]), Is.EqualTo("PerformerButton"), "最后是「演奏」");
-            Assert.That(左起, Has.Count.EqualTo(6), "左边这一排是六样（存盘组算一样）");
+            Assert.That(属性(左起[3], "Classes"), Is.EqualTo("toolbar"), "再往下是「操作 ▾」那个菜单");
+            Assert.That(名字(左起[4]), Is.EqualTo("PerformerButton"), "最后是「演奏」");
+            Assert.That(左起, Has.Count.EqualTo(5), "「导出」被吸收掉之后，左边这一排是五样（存盘组算一样）");
         });
     }
 
@@ -170,7 +171,7 @@ public class ToolbarLayoutTests
     /// 空状态（还没装曲子）里：`保存` / `另存为…` / `操作` / `演奏` 四样灰掉，
     /// **「歌曲库」亮着**（它是唯一亮着的那颗 —— 第一首得从那儿拿进来）。
     ///
-    /// 四条判据都必须在 <c>RefreshEditState</c> 一处算：散在载入 / 编辑 / 存盘各写一遍的话，
+    /// 几条判据都必须在 <c>RefreshEditState</c> 一处算：散在载入 / 编辑 / 存盘各写一遍的话，
     /// 迟早有一条路忘了写，而「该亮的没亮」不会报错。
     /// </summary>
     [Test]
@@ -184,7 +185,8 @@ public class ToolbarLayoutTests
             Assert.That(刷新, Does.Contain("PerformerButton.IsEnabled = _song is not null;"), "没曲子可弹时「演奏」要灰");
             Assert.That(刷新, Does.Contain("SaveButton.IsEnabled = _song is not null && _library is not null;"), "没曲子时「保存」要灰");
             Assert.That(刷新, Does.Contain("SaveAsButton.IsEnabled = SaveButton.IsEnabled;"), "「另存为…」跟「保存」同一条判据");
-            Assert.That(刷新, Does.Contain("ExportButton.IsEnabled = _song is not null;"), "没曲子可导出时「导出」要灰");
+            Assert.That(刷新, Does.Not.Contain("ExportButton"),
+                "「导出」那颗已经没了（54 号票）—— 判据还留在这儿就是没删干净");
 
             // 曲库这一条里**不许出现 _song**：它亮不亮跟手上有没曲子无关，只跟配没配曲库有关 ——
             // 空状态里它是唯一亮着的那颗
@@ -326,18 +328,18 @@ public class ToolbarLayoutTests
         });
     }
 
-    // ==================== 还没搬走的两颗 ====================
+    // ==================== 还没搬走的那一颗 ====================
 
     /// <summary>
-    /// 「导入 MIDI…」和「导出」这一票**都不许撤**，而且两颗都得接上命令 ——
+    /// 「导入 MIDI…」这一票**不许撤**，而且得接上命令 ——
     /// 挂着不接命令的按钮按下去什么都不发生、也不报错。
     ///
     /// 撤「导入 MIDI…」最狠：撤掉它、而曲库窗口那颗还没建起来的那段时间里，
     /// **没有任何路径能把一首曲子导进来**（整条入库的路断了）。
-    /// 撤「导出」是「存不到任意位置」。两颗各有各的工单去搬，这一票只排位置。
+    /// 搬它归 **55 号票**（曲库窗口右上角），在它落地之前这颗必须一直在、而且一直能用。
     /// </summary>
     [Test]
-    public void 还没搬走的两颗都在而且都接上了命令()
+    public void 导入那颗还在而且接上了命令()
     {
         string 代码 = 主窗口代码();
 
@@ -345,10 +347,122 @@ public class ToolbarLayoutTests
         {
             Assert.That(属性(元素("ImportButton"), "Click"), Is.EqualTo("OnImportClick"),
                 "「导入 MIDI…」撤了整条入库的路就断在这一票里了");
-            Assert.That(属性(元素("ExportButton"), "Click"), Is.EqualTo("OnExportClick"),
-                "「导出」撤了就没有路径能存到任意位置（等「另存为…」接管它的活再删）");
             Assert.That(代码, Does.Contain("private async void OnImportClick"), "接的命令得真在");
-            Assert.That(代码, Does.Contain("private async void OnExportClick"), "同上");
+        });
+    }
+
+    /// <summary>
+    /// 「导出」这一票**撤了**（54 号票）—— 它的活被「另存为…」接管，于是它失去了存在理由。
+    ///
+    /// <b>按钮和处理函数要一起消失，而且处理函数是删掉、不是留着不用。</b>
+    /// 留着的话下一个人会把它接回去（「台面上有个现成的」），那时「另存为…」和「导出」
+    /// 又变成两条各写一遍的路 —— 而两条路各自坏掉都不报错，正是这一票要收掉的东西。
+    /// </summary>
+    [Test]
+    public void 导出那颗按钮和处理函数都删干净了()
+    {
+        string 代码 = 主窗口代码();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(全部元素().Any(e => 名字(e) == "ExportButton"), Is.False,
+                "工具栏上「导出」那颗按钮该不见了");
+            Assert.That(代码, Does.Not.Contain("OnExportClick"),
+                "处理函数要删掉 —— 留着不用也会被下一个人接回去");
+        });
+    }
+
+    // ==================== 另存为 / 保存 分岔（54 号票）====================
+
+    /// <summary>
+    /// 🔴 **这一票最容易做错的地方：两个入口必须分岔。**
+    ///
+    /// 54 号之前 <c>SaveAsAsync</c> 被**两个**入口共用，而它干的事是「问一个名字存进曲库」：
+    /// 「保存」在一首还没名字的曲子上走它，「另存为…」也走它。
+    /// 顺手把整个方法换成文件选择器 —— 看着最省事 —— **「保存」在一首没名字的曲子上就会弹文件框**，
+    /// 而「保存」永远是「写进曲库」，跟文件框没有关系。
+    ///
+    /// 所以分岔成这样，而且**两边各只做一件事**：
+    /// <list type="bullet">
+    /// <item>「保存」（<c>SaveAsync</c>）：有曲名就写回那一首；没曲名就问一个名字，问到了走同一条写库的路
+    /// （<c>AskNameForSaveAsync</c> → <c>SaveTo</c>）。**一个文件框都不许出现。**</item>
+    /// <item>「另存为…」（<c>OnSaveAsClick</c>）：弹原生文件选择器，把你挑的那个路径写成标准 MIDI
+    /// （<c>MidiWriter.Write</c>，和导入同一个读写器）。**一个字节都不进曲库** ——
+    /// 不写成员、不写缓存，也不再问曲名。</item>
+    /// </list>
+    ///
+    /// <b>为什么「不入库」要单独钉：</b>「顺手也存一份进库」不报错、也没人看得出来 ——
+    /// 直到用户另存了一份到桌面，曲库列表里凭空多出一首。而那时它已经是个「功能」了。
+    /// </summary>
+    [Test]
+    public void 保存那条路写库另存为那条路写外面()
+    {
+        string 代码 = 主窗口代码();
+        var 保存 = 花括号段(代码, "private async Task SaveAsync", "找不到 SaveAsync");
+        var 另存为 = 花括号段(代码, "private async void OnSaveAsClick", "找不到 OnSaveAsClick");
+
+        Assert.Multiple(() =>
+        {
+            // ── 「保存」：只写库，一个文件框都不许有 ──
+            Assert.That(保存, Does.Contain("AskNameForSaveAsync"),
+                "「保存」在没名字的曲子上问的是曲名");
+            Assert.That(保存, Does.Contain("SaveTo(library,"), "问到了就写进曲库");
+            Assert.That(保存, Does.Not.Contain("SaveFilePickerAsync"),
+                "「保存」永远不弹文件框 —— 整个方法换成文件框正是这一票最容易犯的错");
+            Assert.That(保存, Does.Not.Contain("MidiWriter"), "落盘是 SaveTo → SongCache 的事");
+
+            // ── 「另存为…」：只写外面，一个字节都不进库 ──
+            Assert.That(另存为, Does.Contain("SaveFilePickerAsync"), "「另存为…」挑的是一个路径");
+            Assert.That(另存为, Does.Contain("MidiWriter.Write("),
+                "写出去的是标准 MIDI（和导入同一个读写器，别另拼字节）");
+            Assert.That(另存为, Does.Not.Contain("SaveTo"), "「另存为…」不入库");
+            Assert.That(另存为, Does.Not.Contain("SongCache.Save"), "也不写曲库那份缓存");
+            Assert.That(另存为, Does.Not.Contain("AskNameForSaveAsync"),
+                "「另存为…」不该再问曲名 —— 名字由文件框那一格决定");
+        });
+    }
+
+    /// <summary>
+    /// 🔴 **「另存为…」必须和「导出」用同一个过滤器**（<c>MidiFileType</c>，<c>*.mid;*.midi</c>），
+    /// 而不是在文件框那儿另写一份 —— 两份过滤器迟早会不一样，那时「导入认得、另存为写出来的却挑不着」
+    /// 之类的怪事就来了，而且不报错。
+    ///
+    /// 默认扩展名也得是 <c>mid</c>：用户敲一个不带后缀的名字，落下来得是个能让别的软件认出来的文件。
+    /// </summary>
+    [Test]
+    public void 另存为沿用同一个过滤器()
+    {
+        var 另存为 = 花括号段(主窗口代码(), "private async void OnSaveAsClick", "找不到 OnSaveAsClick");
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(另存为, Does.Contain("FileTypeChoices = new[] { MidiFileType }"),
+                "过滤器沿用现成的 MidiFileType，别新写一个");
+            Assert.That(另存为, Does.Contain("DefaultExtension = \"mid\""), "默认扩展名是 mid");
+        });
+    }
+
+    /// <summary>
+    /// ⚠️ **改名撞名那处的话在 54 号之后会变成假话。** 那句原来指的路是
+    /// 「要覆盖它请用『另存为…』，那里会问一句」—— 而「另存为…」从此**不往曲库里写了**，
+    /// 于是它指向一个**做不到的动作**。
+    ///
+    /// **注释和提示各一处，两处都得改**（只改字符串的话，下一个读代码的人照着注释走），
+    /// 所以两句原文各钉一条。真正能覆盖那一首的路只有一条：
+    /// **把那一首打开，再按「保存」**（保存是覆盖语义）。
+    /// </summary>
+    [Test]
+    public void 改名撞名那处不再指向另存为()
+    {
+        var 曲名框 = 花括号段(主窗口代码(), "private void OnSongNameKeyDown", "找不到 OnSongNameKeyDown");
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(曲名框, Does.Not.Contain("覆盖它请用「另存为…」"),
+                "提示里那句是假话：「另存为…」不往曲库里写，覆盖不了曲库里那一首");
+            Assert.That(曲名框, Does.Not.Contain("真要覆盖走「另存为…」"), "注释里那半句同样是假的");
+            Assert.That(曲名框, Does.Not.Contain("那里会问一句"), "「会问一句」说的也不再是存进曲库了");
+            Assert.That(曲名框, Does.Contain("「保存」"), "得指一条真走得通的路（保存是覆盖语义）");
         });
     }
 

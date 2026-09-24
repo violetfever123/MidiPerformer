@@ -43,7 +43,7 @@ public partial class MainWindow : Window
     /// </summary>
     private const double MinNavWidth = 20;
 
-    /// <summary>认得出的文件类型：midi 和 mid 都收，导入导出两侧共用同一份。</summary>
+    /// <summary>认得出的文件类型：midi 和 mid 都收，导入和另存为两侧共用同一份。</summary>
     private static readonly FilePickerFileType MidiFileType = new("MIDI 文件")
     {
         Patterns = new[] { "*.mid", "*.midi" }
@@ -327,7 +327,7 @@ public partial class MainWindow : Window
 
         // 换曲子了：悬停那个音说的是上一份谱面，清掉。清完读数自己回落到选中（多半也是空的）
         ShowHover(null);
-        // 工具栏那几样（含「导出」亮起来）的判据都在 RefreshEditState 一处算
+        // 工具栏那几样亮不亮的判据都在 RefreshEditState 一处算
         RefreshEditState();
 
         // 这一趟多半算不出场景（控件刚建出来、宽度还是 0），但位置读数、导航条这些要它；
@@ -564,33 +564,70 @@ public partial class MainWindow : Window
     /// <summary>
     /// 「保存」和 <c>Ctrl+S</c> 共用的入口。返回 <see cref="Task"/> 而不是 <c>async void</c>：
     /// 键盘那一路（<see cref="OnWindowKeyDown"/>）不是 async 的，只能把它丢掉（<c>_ =</c>）。
+    ///
+    /// ⚠️ <b>「保存」永远只管曲库</b>：两条路最后都落在 <see cref="SaveTo"/> 上，
+    /// **一个文件框都不弹**。要存到任意位置去的是「另存为…」（<see cref="OnSaveAsClick"/>），
+    /// 那是另一件事 —— 54 号票之前这两件事共用过一个方法，别再把它们合回去。
     /// </summary>
     private async Task SaveAsync()
     {
         if (_library is not { } library) return;
 
-        if (_currentName is not { } name)
+        // 有曲名：写回那一首（名字一样就是覆盖这一首）
+        if (_currentName is { } name)
         {
-            await SaveAsAsync(library);
+            SaveTo(library, name);
             return;
         }
 
-        SaveTo(library, name);
+        // 还没进曲库（导入时没命名、或者刚从曲库删掉）：先问一个名字，问到了再走同一条写库的路。
+        // 取消不是失败 —— 曲子还在手上，就是没进曲库。
+        if (await AskNameForSaveAsync(library, "保存", _title) is not { } asked) return;
+
+        SaveTo(library, asked);
     }
 
-    /// <summary>「另存为…」：问一个新名字存进去，不动原来那一首。</summary>
+    /// <summary>
+    /// 「另存为…」—— 把此刻手上的谱面写到你挑的**任意一个路径**上去，写成标准 MIDI。
+    ///
+    /// <b>和「保存」是两件不同的事</b>：那一个往**曲库**里存（覆盖那一首、带缓存），
+    /// 这一个往**外面**存 —— **不入库**：不写曲库成员、不写缓存、也不问曲名
+    /// （名字由文件框那一格决定）。所以存到曲库目录里去，那儿会多出一首，那是**对的**：
+    /// 它本来就住在 <c>songs\</c>，不是这条路径顺手入了库。
+    ///
+    /// 写出去的是模型，不是屏幕：<c>Track.Transpose</c>、卷帘视口、播放头都不进文件。
+    /// 写完报一句，用户才知道盘上落了文件。
+    /// </summary>
     private async void OnSaveAsClick(object? sender, RoutedEventArgs e)
     {
-        if (_library is not { } library) return;
-        await SaveAsAsync(library);
-    }
+        if (_song is not { } song) return;
 
-    private async Task SaveAsAsync(SongLibrary library)
-    {
-        string? name = await AskNameForSaveAsync(library, "另存为", _currentName ?? _title);
-        if (name is null) return;
+        var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+        {
+            Title = "另存为",
+            SuggestedFileName = SongNameBox.Text ?? "未命名",
+            DefaultExtension = "mid",
+            FileTypeChoices = new[] { MidiFileType }
+        });
 
-        SaveTo(library, name);
+        if (file?.TryGetLocalPath() is not { } path)
+        {
+            // 用户取消了，不是失败
+            return;
+        }
+
+        try
+        {
+            // 写出去的是此刻手上的那一份（含刚做完、还没撤销的编辑），不是屏幕
+            MidiWriter.Write(song, path);
+            ShowNotice($"已另存到 {path}");
+        }
+        catch (Exception ex) when (ex is IOException or InvalidDataException
+            or UnauthorizedAccessException or NotSupportedException or InvalidOperationException)
+        {
+            // 和导入同一条规矩：MidiWriter 抛的是中文消息，原样报出来
+            ShowError(ex.Message);
+        }
     }
 
     /// <summary>
@@ -711,10 +748,11 @@ public partial class MainWindow : Window
         if (_currentName is not { } oldName)
         {
             // 还没进曲库：起了名就等于存进去。名字已经是别人的就拦下 —— 往曲名框里打一个已有的名字，
-            // 本意多半是「这首叫这个」而不是「把那一首换掉」；真要覆盖走「另存为…」，那儿会问一句
+            // 本意多半是「这首叫这个」而不是「把那一首换掉」；真要覆盖那一首，把它打开再按「保存」
+            //（保存是覆盖语义）。「另存为…」不往曲库里写，指它没有用。
             if (library.Contains(name))
             {
-                ShowError($"曲库里已经有一首「{name}」了，换个名字。要覆盖它请用「另存为…」，那里会问一句。");
+                ShowError($"曲库里已经有一首「{name}」了，换个名字。要覆盖那一首，把它打开再按「保存」。");
                 SongNameBox.Text = _title;
                 return;
             }
@@ -839,7 +877,7 @@ public partial class MainWindow : Window
 
     /// <summary>
     /// 工具栏那几样跟着「手上有没有曲子、动过没有、存过没有」变的东西，一处算清：
-    /// 撤销 / 重做、操作、演奏、速度框、歌曲名格、存盘组、导出、歌曲库。
+    /// 撤销 / 重做、操作、演奏、速度框、歌曲名格、存盘组、歌曲库。
     /// 换曲子、每次编辑、存盘之后都调它。
     /// </summary>
     private void RefreshEditState()
@@ -854,9 +892,6 @@ public partial class MainWindow : Window
         PerformerButton.IsEnabled = _song is not null;
 
         BpmBox.IsEnabled = _song is not null;
-
-        // 判据是「装上了曲子」而不是「有轨」：速度表和分辨率也值得写出去，哪怕一个音都没有
-        ExportButton.IsEnabled = _song is not null;
 
         // 「歌曲名」那一格整个藏掉，不是置灰：没装曲子时它不是「按不动」，是「这儿现在没有东西」。
         // 载入曲子之后同一个判断当场把它放回来，不用重启
@@ -1098,43 +1133,7 @@ public partial class MainWindow : Window
     /// <summary>把焦点从输入框里放开，交给卷帘那一块（它可聚焦，见 MainWindow.axaml）。</summary>
     private void ReleaseEditFocus() => LanesHost.Focus();
 
-    // ==================== 导出 / 演奏器 ====================
-
-    /// <summary>
-    /// 「导出」—— 把此刻手上的谱面写回一个标准 MIDI 文件。写出去的是模型，不是屏幕：
-    /// <c>Track.Transpose</c>、卷帘视口、播放头都不进文件。写完报一句，用户才知道盘上落了文件。
-    /// </summary>
-    private async void OnExportClick(object? sender, RoutedEventArgs e)
-    {
-        if (_song is not { } song) return;
-
-        var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
-        {
-            Title = "导出 MIDI",
-            SuggestedFileName = SongNameBox.Text ?? "未命名",
-            DefaultExtension = "mid",
-            FileTypeChoices = new[] { MidiFileType }
-        });
-
-        if (file?.TryGetLocalPath() is not { } path)
-        {
-            // 用户取消了，不是失败
-            return;
-        }
-
-        try
-        {
-            // 写出去的是此刻手上的那一份（含刚做完、还没撤销的编辑），不是屏幕
-            MidiWriter.Write(song, path);
-            ShowNotice($"已导出到 {path}");
-        }
-        catch (Exception ex) when (ex is IOException or InvalidDataException
-            or UnauthorizedAccessException or NotSupportedException or InvalidOperationException)
-        {
-            // 和导入同一条规矩：MidiWriter 抛的是中文消息，原样报出来
-            ShowError(ex.Message);
-        }
-    }
+    // ==================== 演奏器 ====================
 
     /// <summary>
     /// 工具栏上「演奏」—— 另开一个独立窗口，把选中的轨弹到别的程序里去。

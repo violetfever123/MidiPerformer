@@ -275,7 +275,7 @@
               <Border Classes="savegroup-sep" />
               <Button x:Name="SaveAsButton" Classes="menubar" Content="另存为…"
                       IsEnabled="False" Click="OnSaveAsClick"
-                      ToolTip.Tip="换一个曲名存进曲库" />
+                      ToolTip.Tip="存到你挑的任意位置：写一个标准 MIDI 文件，不进曲库" />
             </StackPanel>
           </Border>
 
@@ -283,11 +283,6 @@
           <Button x:Name="ImportButton" Classes="menubar" Content="导入 MIDI…"
                   Click="OnImportClick"
                   ToolTip.Tip="选一个 .mid 装进这个窗口（也可以直接把文件拖进来）" />
-
-          <!-- 导出：没装曲子时置灰（判据在 RefreshEditState）。这颗等「另存为…」接管它的活之后删掉。 -->
-          <Button x:Name="ExportButton" Classes="menubar" Content="导出"
-                  IsEnabled="False" Click="OnExportClick"
-                  ToolTip.Tip="把这时的谱面写回一个标准 MIDI 文件" />
 
           <Menu x:Name="OperationMenu" Classes="toolbar">
             <!-- 撤销 / 重做：栈空的时候置灰，没曲子可动时整组灰。ToolTip 一个都不留 —— 键位已经印在菜单项右侧（InputGesture）。 -->
