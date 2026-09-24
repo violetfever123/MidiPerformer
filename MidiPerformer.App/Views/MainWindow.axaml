@@ -354,12 +354,19 @@
         <Panel>
           <!-- 可聚焦：速度框回车提交之后焦点要从这里放开，不然接着打字会改到刚提交的框里 -->
           <StackPanel x:Name="LanesHost" Focusable="True" />
+          <!--
+            这一句点名的落点**必须在主窗里够得着**（85 号）：55 号把「导入 MIDI…」搬去了曲库窗口
+            右上角（见上面 :281 那句注释），主窗上没有它 ⇒ 那句不再直呼那颗按钮，改指「歌曲库」——
+            规格 §没装曲子时写着「只有「歌曲库」亮着 —— 它是唯一的入口」，导入那颗按钮就在它
+            开出来的窗口里。判据跟着这句话走：`verify-25` §1 从这句里把「」的名字抠出来，
+            逐个要求它在主窗里是一颗真按钮且亮着；`ToolbarLayoutTests` 有一份同形的静态版。
+          -->
           <TextBlock x:Name="EmptyHint"
                      Margin="24,60"
                      TextAlignment="Center" TextWrapping="Wrap"
                      FontSize="12.5"
                      Foreground="{DynamicResource TokenInkFaint}"
-                     Text="还没有曲子 —— 把 .mid 拖进这个窗口，或按「导入 MIDI…」。" />
+                     Text="还没有曲子 —— 把 .mid 拖进这个窗口，或按「歌曲库」导入。" />
         </Panel>
       </ScrollViewer>
     </Grid>
