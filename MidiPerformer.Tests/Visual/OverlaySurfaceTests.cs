@@ -191,7 +191,7 @@ public class OverlaySurfaceTests
                       ?? e.Attribute("PlaceholderText")?.Value)
             .Where(t => !string.IsNullOrEmpty(t)).Select(t => t!).ToList();
 
-    /// <summary>窗口上按钮的字（<c>Content</c>）。占位文字不算 —— 「先打开一首 MIDI」是下拉框的占位，不是一颗按钮。</summary>
+    /// <summary>窗口上按钮的字（<c>Content</c>）。占位文字不算 —— 「还没拿到曲子」是下拉框的占位，不是一颗按钮。</summary>
     private static List<string> 按钮字(XElement 窗) =>
         窗.Descendants().Where(e => e.Name.LocalName == "Button")
             .Select(e => e.Attribute("Content")?.Value)
@@ -275,6 +275,47 @@ public class OverlaySurfaceTests
             Assert.That(时, Is.LessThan(倒), "倒计时该跟在时序下面");
             Assert.That(倒, Is.LessThan(始), "时序与倒计时成对，一起压在按钮上面");
             Assert.That(始, Is.LessThan(停), "开始演奏在急停上面");
+        });
+    }
+
+    /// <summary>
+    /// 72 号：这一屏过时的那几句文案收干净 —— 演奏轨的占位、还没曲子时的状态行、时序那块提示。
+    ///
+    /// 前两处从前写的是「先打开一首 MIDI」。那句话在 47 号把「曲目」行连同文件选择器一起删掉之后
+    /// 就成了一句<b>办不到的话</b>：这个窗口里没有打开 MIDI 的路，曲子由外面经
+    /// <c>LoadSong</c> 递进来（71 号）。占位说的是「这会儿还没曲子」这个瞬时态；
+    /// 状态行说的是<b>这个窗口自己的行为</b>（按下开始它自己最小化，51 号）——
+    /// 措辞照规格图 <c>docs/spec-界面改版.md</c> 的「演奏器 —— 组装顺序」，不自己发明。
+    ///
+    /// 时序那句照规格图那行（<c>docs/spec-界面改版.md</c> / <c>docs/prototype-演奏器读数.html</c>）：
+    /// 两档 30 / 60，默认第 1 项 = 标准，所以「不确定就留 60」是这一档，不是另一个数。
+    ///
+    /// 文本级守卫：证明的是「文件里写的是这几句」；窗口上真显示成什么样归实机（72 的验收记录）。
+    /// 拦的是「哪天有人把旧那几句抄回来」—— 抄回来不报错，只是用户又看到一句做不到的指引。
+    /// </summary>
+    [Test]
+    public void 演奏器上那几句过时文案不再教用户先打开一首_MIDI()
+    {
+        var 窗 = 演奏器();
+        var 占位 = 窗.Descendants().Select(e => 属性(e, "PlaceholderText"))
+                       .Where(t => !string.IsNullOrEmpty(t)).Select(t => t!).ToList();
+        var 字 = 控件字(窗);
+        string 源 = 读源文件("PerformerWindow.axaml.cs");
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(占位.Any(t => t.Contains("打开 MIDI")), Is.False,
+                "演奏轨的占位还在教用户「先打开一首 MIDI」—— 这一屏没有这条路人走");
+            Assert.That(占位, Does.Contain("还没拿到曲子"),
+                "占位该说的是「还没曲子」这个瞬时态");
+            Assert.That(字, Does.Not.Contain("就绪 · 先打开一首 MIDI"),
+                "还没曲子时那句状态行还是旧写法");
+            Assert.That(字, Does.Contain("就绪 · 按开始之后窗口会自动最小化"),
+                "状态行前半是「就绪」，后半讲的是这个窗口自己的行为（51 号：按开始它自己最小化）");
+            Assert.That(源, Does.Contain("\"就绪 · 按开始之后窗口会自动最小化\""),
+                "XAML 的初始字改了，构造器里那句没跟上 —— 窗口真打开时说的是构造器那句");
+            Assert.That(字, Does.Contain("按你游戏的帧率选 · 选错会漏音，不确定就留 60。"),
+                "时序那块提示与规格图不一致（规格图写的就是这一句）");
         });
     }
 

@@ -167,7 +167,11 @@ public partial class PerformerWindow : Window
         _keyRate = new KeyRateView(KeyRate, KeyRateAverage, KeyRatePeak, KeyRateBars,
                                    KeyRateAxisStart, KeyRateAxisNote, KeyRateAxisEnd);
 
-        SetStatus("就绪 · 先打开一首 MIDI", Status.Idle);
+        // 这一句只在「还没曲子」那一下露面（曲子由外面经 LoadSong 递进来，到了就换 ShowReady 那句）。
+        // 说的是这个窗口自己的行为（按下开始它自己最小化，51 号票），不是一条要用户去做的操作 ——
+        // 从前那句「先打开一首 MIDI」是一句**办不到的话**：这一屏没有打开 MIDI 的路
+        // （「曲目」行连同那颗文件选择器已按界面改版删掉）。
+        SetStatus("就绪 · 按开始之后窗口会自动最小化", Status.Idle);
     }
 
     /// <summary>
