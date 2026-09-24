@@ -94,6 +94,18 @@
     3. **像素 API 只报不判**：`PrintWindow` / `LockBits` / `GetPixel` / `CopyFromScreen`
        在哪些脚本里出现过（硬规矩：像素读回只能进 probe，不能进 verify）。存量那几处不在本票
        范围里，所以这一条**只列清单、不判红** —— 一条恒红的判据等于没有判据。
+    4. **加载烟测：真的点源一次 `uitest-lib.ps1`**（88 号票）。上面三节判的全是「**字在不在**」，
+       这一节问的是另一个问题：「**那些字在不在一个会被求值的位置上**」——
+       `uitest-lib.ps1` 那段 C# 住在 `Add-Type @"…"@`（**双引号** here-string）里，一句含裸 `$`
+       的 C# 注释会被 PowerShell 当变量展开 ⇒ `Add-Type` 抛 ⇒ **整个库在加载期就死**，
+       而上面三节**一路是绿的**（84 号亲手踩、自己总结成「**绿的门 ≠ 加载得过**」；61 / 82 同族）。
+       ⇒ 这一节：`dot-source` 一次，**抛了就 FAIL**；没抛再复核两件事 —— `P40` 类型在不在、
+       库源码里声明的那些函数在不在作用域里。**「库没加载上也算过」是这一节唯一不许有的写法。**
+       ⚠️ 库在**加载期自己会查四条本机前提**（桌面会话 / 实例 / 分辨率 / Debug 构建），
+          前提不满足时它自己就抛 —— 那是**跟加载毫无关系的红**（本批反复治的病：假红源）。
+          所以前提不满足时这一节记 **`skip` + 写明是哪一条**，`skip` **不是绿**（跳过 = 这一格
+          没验，不是验过了），也不碰退出码。代价写在票里：前提判据在这儿**抄了一份**
+          （88 号票选的 (a)；给库加「只加载、不查前提」的开关是 (b)，留作后续）。
 
     ---- 仓库锁 ----
 
@@ -126,7 +138,7 @@
     这一节回答的是「上几趟到底跑完了没有」，是「退出码非零」之外的另一半。
 
 .PARAMETER 只查引用
-    不跑任何脚本、不查实例，只跑上面那三节关门判据，然后按判据出退出码。
+    不跑任何脚本、不查实例，只跑上面那四节关门判据，然后按判据出退出码。
     收口那一轮要单独复核 `tools/uitest/` 能不能脱开 `.scratch/` 独立站着，走这一条。
 
 .PARAMETER 内部跑一条
@@ -496,6 +508,128 @@ function 扫像素API([string]$目录路径) {
     return ,$命中
 }
 
+# =====================================================================
+# 关门判据 ④：加载烟测 —— 「绿的门 ≠ 加载得过」（88 号票）
+# =====================================================================
+# 上面三节扫的都是「字在不在」，而 84 号那次故障坏在「**那些字在不在一个会被求值的位置上**」：
+# 库的 C# 住在 `Add-Type @"…"@`（双引号 here-string）里，C# 注释里一个裸 `$` 被 PowerShell
+# 展开 ⇒ Add-Type 抛 ⇒ 库在加载期就死，而三个静态判据**一路是绿的**。
+# ⇒ 唯一防得住它的办法是**真的点源一次**（不抛 = 加载得过）。
+#
+# ⚠️ 这里判的是「**加载得过**」，不是「库的行为对」—— 后者是那批 verify 的事。
+# ⚠️ 为什么前提要在这儿抄一份（88 号票当场做的取舍，选的是票面那个 (a)）：
+#    库在加载期自己会 `throw` 四条本机前提，其中「桌上有实例」跟加载**毫无关系**；
+#    不把这几条挡在前面，这一格会红在一个别的理由上 —— 那正是本批反复治的**假红源**。
+#    另一条路是给库加「只加载、不查前提」的开关（票面 (b)），代价是库多一个行为分支，留作后续。
+
+function 加载命中([string]$kind, [string]$text, [int]$line = 0) {
+    return [pscustomobject]@{ file = 'uitest-lib.ps1'; line = $line; kind = $kind; text = $text }
+}
+
+function 加载判据行([string]$结果, [string]$说明, $命中 = @()) {
+    return [pscustomobject]@{ 判据 = 'load'; 结果 = $结果; 命中 = @($命中); 说明 = $说明 }
+}
+
+function 试加载库([string]$目录路径) {
+    $库 = Join-Path $目录路径 'uitest-lib.ps1'
+    if (-not (Test-Path -LiteralPath $库 -PathType Leaf)) {
+        # 库缺位由 closure 那一节点名 —— 同一条洞不开两扇门（两处都判红，读的人还要去分辨）。
+        return 加载判据行 'skip' "库不在（$库）—— 这一格没验。库缺位已经在 closure 那一节点名了。"
+    }
+
+    # ---- 前提：库里那四条检查会抛的东西，先在这儿判掉（顺序照库：桌面会话 / 实例 / 分辨率 / exe）----
+    #
+    # ⚠️ 实例那一条**必须写死 `MidiPerformer` 这个名字**，不许用 `$实例名`：库在加载期查的就是
+    #    这个写死的名字。拿 `$实例名` 去查，会在「桌上真有 MidiPerformer、而烟测查的却是别的名字」
+    #    时，把「库一加载就抛」报成过一次 —— 那正是本票要堵的那个洞。
+    $在跑的 = @(Get-Process -Name 'MidiPerformer' -ErrorAction SilentlyContinue)
+    if ($在跑的.Count -gt 0) {
+        $PIDs = ($在跑的 | ForEach-Object { $_.Id }) -join ', '
+        return 加载判据行 'skip' ("桌上有 $($在跑的.Count) 个 MidiPerformer 在跑（PID $PIDs）—— " +
+            '库在**加载期**自己就会抛（它那片前提检查），这会儿点源只会得到一条跟加载无关的红。' +
+            '关掉它们再跑这条烟测。（**这一格不是绿**：库到底加载不加载得上，这一趟没验。）')
+    }
+
+    # 分辨率的读法必须跟库**同一套**：库先把自己设成 PerMonitorV2、再去读 [Screen]::Bounds。
+    # 不设的话，200% 缩放这台机器读出来是 1536x960（虚拟化后的一半），而库读到的是 3072x1920 ——
+    # 那样这一格会**永远**判「屏太小」跳过去，成了一条不响的门（本批最怕的形状）。
+    # ⚠️ 本段 C# 用**单引号** here-string：本票就是为「双引号里一个裸 `$` 把库炸了」来的，
+    #    新写的这一段不许再带同一个风险。（类型名用 RunAllDpi，免得跟库那段 UitestDpi 撞名。）
+    try {
+        if ($null -eq ('RunAllDpi.Ctx' -as [type])) {
+            Add-Type -Namespace RunAllDpi -Name Ctx -MemberDefinition @'
+[System.Runtime.InteropServices.DllImport("user32.dll")]
+public static extern bool SetProcessDpiAwarenessContext(System.IntPtr c);
+'@
+        }
+        # best-effort：已经感知过（或设不动）就照旧往下走 —— 跟库里那一段同一条口径。
+        [void][RunAllDpi.Ctx]::SetProcessDpiAwarenessContext([IntPtr](-4))
+    }
+    catch { }
+
+    try { Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop }
+    catch { return 加载判据行 'skip' "加载不了 System.Windows.Forms（$($_.Exception.Message)）—— 判不了屏幕，这一格没验。" }
+
+    if (-not [System.Windows.Forms.SystemInformation]::UserInteractive) {
+        return 加载判据行 'skip' '没有桌面会话 —— 库在加载期会抛（它的第一条前提），这一格没验。'
+    }
+    $屏 = [System.Windows.Forms.Screen]::PrimaryScreen
+    if ($null -eq $屏) {
+        return 加载判据行 'skip' '取不到主屏 —— 库在加载期会抛（它的第三条前提），这一格没验。'
+    }
+    if ($屏.Bounds.Width -lt 2360 -or $屏.Bounds.Height -lt 1520) {
+        return 加载判据行 'skip' ("主屏只有 $($屏.Bounds.Width)x$($屏.Bounds.Height)（库要 2360x1520）—— " +
+            '库在加载期会抛，这一格没验。**这一格不是绿。**')
+    }
+    $库exe = Join-Path $目录路径 '..\..\MidiPerformer.App\bin\Debug\net8.0\MidiPerformer.exe'
+    if (-not (Test-Path -LiteralPath $库exe)) {
+        return 加载判据行 'skip' "没找到 $库exe（库的第四条前提）—— 库在加载期会抛，这一格没验。**这一格不是绿。**"
+    }
+
+    # ---- 真的点源一次。这一句就是本票的全部 ----
+    $抛出 = ''
+    try { . $库 }
+    catch { $抛出 = (($_ | Out-String) -replace '\s+', ' ').Trim() }
+    if ($抛出 -ne '') {
+        return 加载判据行 'fail' ("点源就抛 —— 库在**加载期**死了：$抛出" +
+            '（静态那三节看不见这一格：它们判的是「字在不在」，而 here-string 里的 `$` 展开、' +
+            '声明期就会炸的东西，坏在「字在的位置不对」。）') @(加载命中 'load-throw' $抛出)
+    }
+
+    $缺 = @()
+    # ① 那段 Add-Type 真的落地了没有（here-string 展开出问题的话，最先消失的就是这个类型）
+    if ($null -eq ([System.Management.Automation.PSTypeName]'P40').Type) {
+        $缺 += 加载命中 'no-type' 'P40'
+    }
+    # ② 库源码里声明的函数，点源之后作用域里得一个不少。
+    #    名字从**源码里读**、不在这儿写死一份清单：库改个函数名不该让这一格假红；
+    #    而「源码里声明了、点源之后却不在」= 库是**半截**加载的（将来有人在 here-string
+    #    之前加函数，这条就是唯一看得见它的判据）。
+    $源码函数 = @()
+    foreach ($行码 in @(读代码行 $库)) {
+        if ($行码 -match '^\s*function\s+([^\s(]+)') { $源码函数 += $Matches[1] }
+    }
+    foreach ($名 in $源码函数) {
+        if ($null -eq (Get-Command -Name $名 -CommandType Function -ErrorAction SilentlyContinue)) {
+            $缺 += 加载命中 'missing-function' $名
+        }
+    }
+    # ③ 库抬头 .EXAMPLE 里点名的两个入口 —— 调用方真正伸手去拿的那两个名字。
+    #    （这两个名字写死是有意的：它们一没，那 6 份点源的脚本全塌，那是**真红**。）
+    foreach ($名 in @('起窗口', '收窗口')) {
+        if ($null -eq (Get-Command -Name $名 -CommandType Function -ErrorAction SilentlyContinue)) {
+            $缺 += 加载命中 'missing-key-function' $名
+        }
+    }
+    if ($缺.Count -gt 0) {
+        $说 = ($缺 | ForEach-Object { "$($_.kind):$($_.text)" }) -join ' ;; '
+        return 加载判据行 'fail' "点源没抛，但东西不齐 —— $说" $缺
+    }
+
+    return 加载判据行 'pass' ("点源成功：P40 在，库源码声明的 $($源码函数.Count) 个函数都在作用域里" +
+        '（抬头点名的 起窗口 / 收窗口 也在）。这一格只证明它**加载**得过，不证明它的断言有效。')
+}
+
 function 列实例 {
     # 只列，不关 —— 本脚本（以及那批 verify）**绝不代用户关窗口**（硬规矩第 1 条）。
     # 前置逗号：这个返回值只走「直接赋值」，别处也不许拿它去 @() -contains（见 §5l 那张表）。
@@ -512,7 +646,7 @@ function 写JSON([string]$路径, $对象) {
 }
 
 # =====================================================================
-# 关门判据（三节）—— 收口票的那一条总检查
+# 关门判据（四节）—— 收口票的那一条总检查
 # =====================================================================
 
 $必须有 = @('uitest-lib.ps1', 'find-note.ps1', 'probe-41-dlg.ps1', 'probe-41\Program.cs', 'probe-41\Probe41.csproj')
@@ -579,6 +713,12 @@ function 出关门判据([string]$目录路径, [string[]]$脚本名们, [string
         }
     }
 
+    # ---- ④ 加载烟测：真的点源一次库（88 号票）----
+    # 它自己就是一整行（含 skip / fail / pass 三种结果），所以直接追加，不再包一层。
+    # ⚠️ 它**必须在最后**：点源库会往本进程里 `Add-Type`（P40 / WinForms）并设 DPI 感知 ——
+    #    前面三节扫的是**磁盘上的文件**，不受影响，但把这一节放最后是「谁污染谁排后面」的常识。
+    $行 += 试加载库 $目录路径
+
     # ---- 清单（E 那条「谁在位」的核对）：数量只报，点名的成员缺位已经算在 closure 里 ----
     $数字 = @($脚本名们 | Where-Object { $_ -like 'verify-*' }).Count
     $非数字 = @($脚本名们 | Where-Object { $_ -notlike 'verify-[0-9]*' -and $_ -like 'verify-*' })
@@ -617,7 +757,8 @@ if ($只查引用) {
     说 '========== 关门判据（只查引用，没跑任何脚本） =========='
     说 "目录：$根目录"
     foreach ($r in $关门) {
-        $牌 = switch ($r.结果) { 'pass' { 'OK  ' } 'fail' { 'FAIL' } default { '--  ' } }
+        # 'skip' 单占一格：它**不是绿**（这一格没验），也不判红（没验的东西谈不上过不过）。
+        $牌 = switch ($r.结果) { 'pass' { 'OK  ' } 'fail' { 'FAIL' } 'skip' { 'SKIP' } default { '--  ' } }
         说 "  $牌 [$($r.判据)] $($r.说明)"
     }
 
@@ -940,7 +1081,7 @@ if ($不判.Count -gt 0) {
 说 ''
 说 '---------------- 关门判据 ----------------'
 foreach ($r in $关门) {
-    $牌 = switch ($r.结果) { 'pass' { 'OK  ' } 'fail' { 'FAIL' } default { '--  ' } }
+    $牌 = switch ($r.结果) { 'pass' { 'OK  ' } 'fail' { 'FAIL' } 'skip' { 'SKIP' } default { '--  ' } }
     说 "  $牌 [$($r.判据)] $($r.说明)"
 }
 
