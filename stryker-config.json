@@ -1,0 +1,69 @@
+{
+  // 变异测试（Stryker.NET）的范围与口径。跑法：在仓库根依次跑
+  //     dotnet tool restore
+  //     dotnet stryker
+  // 工具版本钉在 .config/dotnet-tools.json 里，这份文件只管范围。
+  //
+  // 这里的注释是**允许**的：Stryker 读 json 用的是 System.Text.Json 的
+  // ReadCommentHandling.Skip（FileConfigReader.DeserializeJson），整行或行尾的 // 都能过。
+  //
+  // 键名一个都不能写错：Stryker 会把不认识的键连同「允许的键」清单一起报出来拒收
+  // （FileConfigReader.EnsureCorrectKeys）。下面的键名都取自 4.16.0 的 JsonPropertyName。
+
+  "stryker-config": {
+    // 被测工程 = 纯层 MidiPerformer.Core（TFM 是 net8.0、不是 net8.0-windows，
+    // Avalonia 与 Win32 在编译期就找不到）。**范围就是这一个工程** ——
+    // App 与 Adapters 不在里面，所以报告里不会长出它们的 mutant。
+    // 只写文件名，写路径它不认。
+    "project": "MidiPerformer.Core.csproj",
+
+    // 测试工程。必须点名：MidiPerformer.Tests 引用了 App / Adapters / Core
+    // 以及并排目录里的对拍原版这几个工程，不点名 Stryker 会因为
+    // 「测试工程引用了不止一个工程」而拒绝开工。
+    "test-projects": [ "MidiPerformer.Tests/MidiPerformer.Tests.csproj" ],
+
+    // mutate 的 glob 是**相对被测工程目录**（MidiPerformer.Core\）解析的 ——
+    // Stryker 把每个源文件用 Path.GetRelativePath(sourceProjectDir, file) 转成相对路径，
+    // sourceProjectDir 就是被测工程所在的目录（CsharpProjectComponentsBuilder）。
+    // 所以模式里不会、也**不能**再出现 "MidiPerformer.Core" 那一段：那样一个文件都匹配不到。
+    //
+    // 下一条 include 就是 Stryker 的默认值，写出来只为让「范围」在纸面上看得见；
+    // 真正干活的是下面那条 exclude。这两条合起来的效果由
+    // MidiPerformer.Tests/Tools/StrykerScopeTests.cs 逐字模拟并断言。
+    "mutate": [
+      "**/*.cs",
+
+      // Repertoire\ 下那 6 个逐字移植的源文件排除在变异范围外。
+      // 它们的正确性由「对拍」证明 —— 拿原版 harmonica-auto-player 的代码本体、
+      // 同一批音符喂两边、逐条比事件（MidiPerformer.Tests/Repertoire/ 下的 5 个）。
+      // 在那个语境里，一个「等价但写法不同」的 mutant 是**好事**（说明逐字复刻成功），
+      // 不是漏网的 bug；杀掉它会逼着人为了分数去改产品代码。
+      // 判据是可机械确定的：看这个源文件有没有对拍测试盯着 —— 不靠人记名单。
+      "!**/UseCases/Perform/Repertoire/*.cs"
+    ],
+
+    // 豁免白名单：杀不掉、也不该杀的 mutant 写在这里。
+    // **每一条前面必须有一行 // 说明为什么它杀不掉也不该杀** ——
+    // 禁止的是沉默的漏网，不是豁免本身。有守卫：StrykerScopeTests 会逐条检查
+    // 「这一条的正上方那行非空行是不是注释」。
+    // 现在一条都没有：基线是零，这一票只负责「量得出来」，不负责杀。
+    // 用的时候按 mutator 名写（如 "string" / "logical" / "linq.First"），
+    // 或者用下面的 ignore-methods 按方法名点名。
+    "ignore-mutations": [],
+
+    // 同理：按方法名豁免。格式在这儿，现在也是空的。
+    "ignore-methods": [],
+
+    // progress 是给「这一趟还活着」看的（首次跑要几十分钟）；cleartext 报存活清单；
+    // json / html 是留底的那份报告。产物落在 StrykerOutput\<时间戳>\reports\ ——
+    // 那个目录被 .gitignore 盖住了，不许进仓库。
+    "reporters": [ "progress", "cleartext", "json", "html" ],
+
+    // **不设全局分数闸门。** break=0 意味着分数再低这一趟的退出码也不会非零 ——
+    // 在一个零变异基线的仓库里，「≥80% 否则失败」第一次跑必然是红的，
+    // 然后所有人学会无视它，而一个红着的闸门比没有闸门更坏。
+    // 闸门下沉到工单：本次改动引入的 mutant 全部杀死，除非白名单里有注释说明。
+    // high / low 只影响报告里的颜色，不参与判定。
+    "thresholds": { "high": 80, "low": 60, "break": 0 }
+  }
+}

@@ -31,3 +31,6 @@ __pycache__/
 # 点击脚本的产物（runner 的日志、find-note 的扫描图）
 tools/uitest/logs/
 tools/uitest/shots/
+
+# 变异测试报告（Stryker.NET 的默认输出目录，落在跑它的那个目录下）
+StrykerOutput/
