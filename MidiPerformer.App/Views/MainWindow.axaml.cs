@@ -68,6 +68,14 @@ public partial class MainWindow : Window
     /// <summary>这份工程「动过没有」，跟着文件头走。它是粘的：一旦编辑过就永远是 true，撤销回初始状态、存盘都不清（见 <see cref="ProjectHeader.Edited"/>）。</summary>
     private bool _edited;
 
+    /// <summary>
+    /// 手上有「还没存下去的东西」—— 工具栏上「保存」那一格穿不穿主色看它。
+    /// 和 <see cref="_edited"/> 刻意分开：那个是**粘性**的、写进工程头、给曲库列表那格
+    /// 「改过 / 没动过」用；这一格答的是另一个问题（现在这份和盘上那份对不对得上），
+    /// 所以载入和存盘都要清零。
+    /// </summary>
+    private bool _dirty;
+
     /// <summary>正在拖导航条 —— 这期间卷帘上的播放头红线要藏起来。</summary>
     private bool _draggingNav;
 
@@ -241,6 +249,8 @@ public partial class MainWindow : Window
         _currentName = null;
         _importedFrom = null;
         _edited = false;
+        // 刚装上来的这一份和盘上那份一致到下一次编辑之前
+        _dirty = false;
         _title = title;
 
         // 换曲子一律重建轨控件：轨数碰巧一样时「就地重挂」是拿另一首曲子的轨接着用上一首的控件，
@@ -256,11 +266,10 @@ public partial class MainWindow : Window
         // 走带条跟着新曲子回位，规矩只此一处（RefreshTransport）
         RefreshTransport();
         JumpBox.IsEnabled = true;
-        // 判据是「装上了曲子」而不是「有轨」：速度表和分辨率也值得写出去，哪怕一个音都没有
-        ExportMenuItem.IsEnabled = true;
 
         // 换曲子了：悬停那个音说的是上一份谱面，清掉。清完读数自己回落到选中（多半也是空的）
         ShowHover(null);
+        // 工具栏那几样（含「导出」亮起来）的判据都在 RefreshEditState 一处算
         RefreshEditState();
 
         // 这一趟多半算不出场景（控件刚建出来、宽度还是 0），但位置读数、导航条这些要它；
@@ -474,7 +483,7 @@ public partial class MainWindow : Window
 
     /// <summary>
     /// 「保存」：已经有曲名就写回那一首，还没有（导入时没命名、或者刚从曲库删掉）就先问一个。
-    /// 本体在 <see cref="SaveAsync"/>，菜单项和 <c>Ctrl+S</c> 走的是同一件事。
+    /// 本体在 <see cref="SaveAsync"/>，工具栏上那颗按钮和 <c>Ctrl+S</c> 走的是同一件事。
     /// </summary>
     private async void OnSaveClick(object? sender, RoutedEventArgs e) => await SaveAsync();
 
@@ -559,6 +568,9 @@ public partial class MainWindow : Window
         _currentName = name;
         _title = name;
         SongNameBox.Text = name;
+        // 手上这份和盘上那份又对上了：工具栏上「保存」那一格褪回素的
+        _dirty = false;
+        RefreshEditState();
         ShowNotice($"「{name}」已存进曲库：{library.Directory}");
     }
 
@@ -663,6 +675,8 @@ public partial class MainWindow : Window
         _song = edited;
         // 粘性标记：动过就是动过，撤销回原样、存盘都不清
         _edited = true;
+        // 手上这份和盘上那份从此对不上，工具栏上「保存」那一格穿上主色，存盘或换曲子才褪下来
+        _dirty = true;
         SyncLanes();
 
         // 视口照旧有效：小节刻度不受任何一条编辑命令影响，SetViewStart 还会夹一次，曲子变短也不越界
@@ -685,20 +699,43 @@ public partial class MainWindow : Window
         RefreshView();
     }
 
-    /// <summary>撤销 / 重做、保存 / 另存为、速度框、曲名框这一组。换曲子和每次编辑之后调它。</summary>
+    /// <summary>
+    /// 工具栏那几样跟着「手上有没有曲子、动过没有、存过没有」变的东西，一处算清：
+    /// 撤销 / 重做、操作、演奏、速度框、歌曲名格、存盘组、导出、歌曲库。
+    /// 换曲子、每次编辑、存盘之后都调它。
+    /// </summary>
     private void RefreshEditState()
     {
-        // 亮的是菜单项（这几条命令收进「文件」/「操作」两组菜单了，见 MainWindow.axaml），
-        // 但「没得撤就置灰」这条规矩没变：菜单项置灰一样点不动
+        // 撤销 / 重做：没得撤就置灰。菜单项置灰一样点不动
         UndoMenuItem.IsEnabled = _editor.CanUndo;
         RedoMenuItem.IsEnabled = _editor.CanRedo;
+        // 没曲子可动时「操作」整组灰：「操作」里那些命令动的都是手上这份谱面
+        OperationMenu.IsEnabled = _song is not null;
+
+        // 演奏是「弹手上这一首」，没曲子可弹就灰着 —— 开出一个没东西可弹的窗口比灰着更让人困惑
+        PerformerButton.IsEnabled = _song is not null;
+
         BpmBox.IsEnabled = _song is not null;
+
+        // 判据是「装上了曲子」而不是「有轨」：速度表和分辨率也值得写出去，哪怕一个音都没有
+        ExportButton.IsEnabled = _song is not null;
+
+        // 「歌曲名」那一格整个藏掉，不是置灰：没装曲子时它不是「按不动」，是「这儿现在没有东西」。
+        // 载入曲子之后同一个判断当场把它放回来，不用重启
+        SongNameCell.IsVisible = _song is not null;
         SongNameBox.IsEnabled = _song is not null;
+
         // 没有曲库就存不了（组装点没给），灰着比按了没反应诚实
-        SaveMenuItem.IsEnabled = _song is not null && _library is not null;
-        SaveAsMenuItem.IsEnabled = SaveMenuItem.IsEnabled;
-        // 「歌曲库」的判据只有曲库这一半：没曲库时按下去会开出一个空窗口，灰着比那诚实
+        SaveButton.IsEnabled = _song is not null && _library is not null;
+        SaveAsButton.IsEnabled = SaveButton.IsEnabled;
+
+        // 「歌曲库」的判据只有曲库这一半：没曲库时按下去会开出一个空窗口，灰着比那诚实。
+        // 它也是空状态里唯一亮着的那颗 —— 第一首得从那儿拿进来
         LibraryButton.IsEnabled = _library is not null;
+
+        // 有没存下去的东西时**只有「保存」那一格**穿主色：丢的是「你改了没存」这件事，
+        // 「另存为」没这个意思，组的框和别的入口一个都不动（见 42 号工单）
+        SaveButton.Classes.Set("dirty", _dirty);
     }
 
     private void OnUndoClick(object? sender, RoutedEventArgs e) => Undo();
@@ -1220,8 +1257,9 @@ public partial class MainWindow : Window
             if (e.Key == Key.Z && !shift) { e.Handled = true; Undo(); return; }
             if (e.Key == Key.Y || (e.Key == Key.Z && shift)) { e.Handled = true; Redo(); return; }
 
-            // Ctrl+S = 保存，和「文件」菜单里那一条等价（走同一个 SaveAsync）。
-            // 菜单项右边那个 Ctrl+S 只是显示（InputGesture 不管按键），真按键是这儿接的。
+            // Ctrl+S = 保存，和工具栏上那颗「保存」等价（走同一个 SaveAsync）。
+            // 那颗从「文件」下拉里升上台面之后没地方印键位了（Button 没有 InputGesture），
+            // 所以这一句写进了它的悬浮提示 —— 真按键是这儿接的。
             // 焦点在输入框里时这一条不会生效 —— 上面那句是整段让开的。
             if (e.Key == Key.S && !shift) { e.Handled = true; _ = SaveAsync(); return; }
         }

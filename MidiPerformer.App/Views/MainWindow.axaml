@@ -9,9 +9,12 @@
   <!--
     窗口一：编辑器外壳（docs/wireframe.html 那一块 .toolbar / .lanes / .nav / .readout / .transport）。
 
-    工具栏左边四样：文件 ▾ | 歌曲库 | 操作 ▾ | 演奏。两组菜单一组进出盘（导入 / 保存 / 另存为 /
-    导出）、一组动谱面（撤销 / 重做）；中间两颗按一下直接开一个窗口，长相照抄菜单头。
-    快捷键写在菜单项右边（InputGesture），只负责显示，真按键由本窗口的 OnWindowKeyDown 接。
+    工具栏左边这一排：歌曲库 | [保存 │ 另存为…] | 导入 MIDI… · 导出 | 操作 ▾ | 演奏。
+    存盘那两颗从原来的「文件」下拉里升到台面上、收进一个组容器（见 Border.savegroup 那条）——
+    下拉拆掉之后，剩下的东西各有去处，这一排就是落定后的排法。
+    按一下直接开窗口的入口（歌曲库 / 演奏 / 导入 / 导出）是 Button 而不是菜单项，长相照抄菜单头。
+    快捷键写在菜单项右边（InputGesture），只负责显示，真按键由本窗口的 OnWindowKeyDown 接 ——
+    Ctrl+S 挂在按钮上没地方印，说明放进「保存」那条悬浮提示里。
 
     歌曲库和演奏两个窗口都是代码开出来的，不走 XAML：它们要曲库 / 工厂和取色桥这些构造参数，
     而 XAML 只能调无参构造。见 MainWindow.axaml.cs 的 OnLibraryClick / OnPerformerClick。
@@ -29,7 +32,7 @@
     </Style>
 
     <!--
-      工具栏上那两颗菜单按钮（「文件」/「操作」）。Padding / MinHeight / FontSize 三样都按按钮
+      工具栏上那组「动谱面」的菜单（「操作」）。Padding / MinHeight / FontSize 三样都按按钮
       那头对齐（11,5 + 12.5px），不然会比旁边高出一截，那一行就不平了。
       Menu 壳子只要看不见：它自带底色和边框，留着就会压出一块深一档的方块。
 
@@ -51,9 +54,10 @@
     </Style>
 
     <!--
-      工具栏上那两个「按一下就开一个窗口」的入口（歌曲库 / 演奏）。尺子照抄上面那条
-      `MenuItem.toolbar`：12.5 号字、11,5 的内边距、MinHeight 0；差的只有底色与描边 ——
-      Button 底下压着 Controls.axaml 那条基础样式（底色 TokenSurface、1px 描边），不抹掉会比菜单高。
+      工具栏上那些「按一下就干一件事」的入口（歌曲库 / 保存 / 另存为… / 导入 / 导出 / 演奏）。
+      尺子照抄上面那条 `MenuItem.toolbar`：12.5 号字、11,5 的内边距、MinHeight 0；差的只有
+      底色与描边 —— Button 底下压着 Controls.axaml 那条基础样式（底色 TokenSurface、1px 描边），
+      不抹掉会比菜单高。
 
       要抹两处而不是一处：Fluent 的悬停 / 按下底色画在模板里那个 ContentPresenter 上，
       只设 Button 自己的属性挡不住。Foreground 也要重新钉回 TokenInk，否则悬停时会被换成强调色。
@@ -86,6 +90,67 @@
     </Style>
 
     <Style Selector="Button.menubar:disabled /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Foreground" Value="{DynamicResource TokenInkFaint}" />
+    </Style>
+
+    <!--
+      存盘组：把「保存 / 另存为…」框在一起的容器。两颗都是「往盘上写」，所以贴在一起说得通；
+      「文件」那个下拉拆掉之后，它们从下拉里升到台面上，靠这个框说出「这两颗是一组的」。
+
+      描边用 TokenLineSoft 而不是 TokenLine —— 用后者就跟旁边那几颗独立入口的边一样重，
+      「这是个组」就看不出来了。组里那道竖分隔跟着走同一个令牌：一个组只有一种边框浓度。
+      底色比工具栏那条面板亮一档（TokenSurface 对 TokenSurface2）：组是台面上的一个物件，
+      不是面板上的一句字。
+
+      ClipToBounds：两颗按钮的悬停底色是方的，圆角处不裁会从组容器里冒出去。
+    -->
+    <Style Selector="Border.savegroup">
+      <Setter Property="BorderBrush" Value="{DynamicResource TokenLineSoft}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="Background" Value="{DynamicResource TokenSurface}" />
+      <Setter Property="CornerRadius" Value="{DynamicResource TokenRadiusButton}" />
+      <Setter Property="ClipToBounds" Value="True" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+
+    <!-- 组里那道竖分隔：告诉眼睛「这是两颗」，不是一颗长按钮 -->
+    <Style Selector="Border.savegroup-sep">
+      <Setter Property="Width" Value="1" />
+      <Setter Property="Background" Value="{DynamicResource TokenLineSoft}" />
+    </Style>
+
+    <!-- 圆角归组容器，组里的按钮自己不带圆角（不然悬停底色会在组里画出一个圆角块） -->
+    <Style Selector="Border.savegroup Button.menubar /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="CornerRadius" Value="0" />
+    </Style>
+
+    <!--
+      「有没存的东西」时，「保存」那一格穿主色（填色）。只这一格 ——
+      丢的是「你改了没存」这件事，「另存为」没这个意思，组的框和别的入口一个都不动。
+      三种指针状态一个色：令牌里没有「主色的悬停档」，而这个填色说的是状态、不是「按这儿」，
+      悬停时换一档反而像是在催。
+    -->
+    <Style Selector="Button.menubar.dirty /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource TokenAccent}" />
+      <Setter Property="Foreground" Value="{DynamicResource TokenSurface}" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+
+    <Style Selector="Button.menubar.dirty:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource TokenAccent}" />
+      <Setter Property="Foreground" Value="{DynamicResource TokenSurface}" />
+    </Style>
+
+    <Style Selector="Button.menubar.dirty:pressed /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource TokenAccent}" />
+      <Setter Property="Foreground" Value="{DynamicResource TokenSurface}" />
+    </Style>
+
+    <!--
+      「操作」没曲子可动时整组灰掉。菜单项自己的 Foreground 被上面的 `MenuItem.toolbar`
+      钉成了 TokenInk，不给一条 :disabled 的话它灰不下来 —— 那一条光看是看不出来的。
+    -->
+    <Style Selector="MenuItem.toolbar:disabled">
       <Setter Property="Foreground" Value="{DynamicResource TokenInkFaint}" />
     </Style>
 
@@ -179,41 +244,53 @@
       <StackPanel Spacing="8">
         <Grid ColumnDefinitions="Auto,*">
           <!--
-            工具栏左边这一排四样，平起平坐、间距一样（8px）、长相一样：文件 ▾ | 歌曲库 | 操作 ▾ | 演奏。
-            分组按的是这件事是什么：两组菜单一组进出盘、一组动谱面，新增的编辑动作往「操作」里加。
+            工具栏左边这一排，间距一样（8px）：歌曲库 | [保存 │ 另存为…] | 导入 MIDI… · 导出 |
+            操作 ▾ | 演奏。分组按的是这件事是什么：进出盘的一簇、动谱面的一簇、开窗口的两颗。
+            新增的编辑动作往「操作」里加。
 
-            中间那两颗不是菜单（按一下直接开窗口，没有下拉），所以是 Button 而不是 MenuItem，
-            但长相照抄菜单头（见 Window.Styles 的 `Button.menubar`），不然一排里混着两种字号两种内边距。
+            这一排里除了存盘组，其余都是「按一下就干一件事、没有下拉」的入口，所以是 Button
+            而不是 MenuItem，长相照抄菜单头（见 Window.Styles 的 `Button.menubar`），
+            不然一排里混着两种字号两种内边距。
+
+            「导入 MIDI…」和「导出」是**还没搬走的两颗**，不是这一排的常住户：
+            导入要去曲库窗口的右上角，导出要被「另存为…」吸收掉。两件事各有各的工单，
+            在这之前撤掉哪一颗都是真的丢一条路径 —— 前者是整条入库的路，后者是存到任意位置的路。
+            两颗是从原来那个「文件」下拉里原样提上台面的，**次序照旧**（导入在前）。
           -->
           <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8">
-          <Menu Classes="toolbar">
-            <MenuItem Header="文件" Classes="toolbar">
-              <!-- 导入排第一 -->
-              <MenuItem x:Name="ImportMenuItem" Header="导入 MIDI…"
-                        Click="OnImportClick"
-                        ToolTip.Tip="选一个 .mid 装进这个窗口（也可以直接把文件拖进来）" />
-              <!-- 保存 / 另存为：存进曲库（.mproj）。没装曲子时置灰，在 RefreshEditState 里开 -->
-              <MenuItem x:Name="SaveMenuItem" Header="保存" IsEnabled="False"
-                        InputGesture="Ctrl+S"
-                        Click="OnSaveClick"
-                        ToolTip.Tip="存回曲库（名字一样就是覆盖这一首）" />
-              <MenuItem x:Name="SaveAsMenuItem" Header="另存为…" IsEnabled="False"
-                        Click="OnSaveAsClick"
-                        ToolTip.Tip="换一个曲名存进曲库" />
-              <!-- 导出：没装曲子时置灰，装了才亮（在 LoadSong 里开） -->
-              <MenuItem x:Name="ExportMenuItem" Header="导出" IsEnabled="False"
-                        Click="OnExportClick"
-                        ToolTip.Tip="把这时的谱面写回一个标准 MIDI 文件" />
-            </MenuItem>
-          </Menu>
-
           <!-- 歌曲库：按一下开一个窗口（SongLibraryWindow），挑一首打开、或者把不要的删掉。没配曲库时置灰。 -->
           <Button x:Name="LibraryButton" Classes="menubar" Content="歌曲库"
                   IsEnabled="False" Click="OnLibraryClick"
                   ToolTip.Tip="打开曲库窗口：双击一首打开，或者按右边的 × 把它删掉" />
 
-          <Menu Classes="toolbar">
-            <!-- 撤销 / 重做：栈空的时候置灰。ToolTip 一个都不留 —— 键位已经印在菜单项右侧（InputGesture）。 -->
+          <!--
+            存盘组：保存 / 另存为…，中间一道竖分隔。没装曲子、或者没配曲库时两颗一起置灰
+            （判据在 RefreshEditState 一处算）。「有没存的东西」时**只有「保存」**穿主色。
+          -->
+          <Border x:Name="SaveGroup" Classes="savegroup">
+            <StackPanel Orientation="Horizontal">
+              <Button x:Name="SaveButton" Classes="menubar" Content="保存"
+                      IsEnabled="False" Click="OnSaveClick"
+                      ToolTip.Tip="存回曲库（名字一样就是覆盖这一首）（Ctrl+S 同效）" />
+              <Border Classes="savegroup-sep" />
+              <Button x:Name="SaveAsButton" Classes="menubar" Content="另存为…"
+                      IsEnabled="False" Click="OnSaveAsClick"
+                      ToolTip.Tip="换一个曲名存进曲库" />
+            </StackPanel>
+          </Border>
+
+          <!-- 导入 MIDI…：装上曲子之后要命名的那一步归 ImportFile。这颗等曲库窗口右上角那颗建起来之后撤。 -->
+          <Button x:Name="ImportButton" Classes="menubar" Content="导入 MIDI…"
+                  Click="OnImportClick"
+                  ToolTip.Tip="选一个 .mid 装进这个窗口（也可以直接把文件拖进来）" />
+
+          <!-- 导出：没装曲子时置灰（判据在 RefreshEditState）。这颗等「另存为…」接管它的活之后删掉。 -->
+          <Button x:Name="ExportButton" Classes="menubar" Content="导出"
+                  IsEnabled="False" Click="OnExportClick"
+                  ToolTip.Tip="把这时的谱面写回一个标准 MIDI 文件" />
+
+          <Menu x:Name="OperationMenu" Classes="toolbar">
+            <!-- 撤销 / 重做：栈空的时候置灰，没曲子可动时整组灰。ToolTip 一个都不留 —— 键位已经印在菜单项右侧（InputGesture）。 -->
             <!-- Margin 不用写：外面的 StackPanel 用 Spacing 统一给间距 -->
             <MenuItem Header="操作" Classes="toolbar">
               <MenuItem x:Name="UndoMenuItem" Header="撤销" IsEnabled="False"
@@ -225,14 +302,20 @@
             </MenuItem>
           </Menu>
 
-          <!-- 演奏：和「歌曲库」一样的素按钮，紧挨着「操作」右边。x:Name 叫 `PerformerButton` —— 有测试按这个名字找它。 -->
+          <!-- 演奏：和「歌曲库」一样的素按钮，紧挨着「操作」右边。没曲子可弹时置灰（判据在 RefreshEditState）。 -->
+          <!-- x:Name 叫 `PerformerButton` —— 有测试按这个名字找它。 -->
           <Button x:Name="PerformerButton" Classes="menubar" Content="演奏"
                   Click="OnPerformerClick"
                   ToolTip.Tip="另开一个窗口，把选中的轨弹到别的程序里去" />
           </StackPanel>
 
           <!-- 6 而不是 14：外面那个 StackPanel 自己给了 8px 间距，加起来还是原来那 14 -->
-          <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" Margin="6,0,0,0">
+          <!--
+            歌曲名这一格没装曲子时**整个藏掉**，不是置灰：没装曲子时它不是「按不动」，
+            是「这儿现在没有东西」。判据在 RefreshEditState 一处算，载入曲子之后当场回来。
+          -->
+          <StackPanel Grid.Column="1" x:Name="SongNameCell"
+                      Orientation="Horizontal" Spacing="6" Margin="6,0,0,0">
             <TextBlock Classes="label" Text="歌曲名" />
             <!--
               名字框就是曲名：改名 = 改曲库里的文件名。还没进曲库的曲子回车就顺势存进去问个名字，
@@ -274,7 +357,7 @@
                      TextAlignment="Center" TextWrapping="Wrap"
                      FontSize="12.5"
                      Foreground="{DynamicResource TokenInkFaint}"
-                     Text="还没有曲子 —— 把 .mid 拖进这个窗口，或从「文件」菜单导入。" />
+                     Text="还没有曲子 —— 把 .mid 拖进这个窗口，或按「导入 MIDI…」。" />
         </Panel>
       </ScrollViewer>
     </Grid>
