@@ -64,6 +64,15 @@ public partial class PerformerWindow : Window
     private readonly DispatcherTimer _progressTimer;
     private int _shownCountdown = -1;
 
+    /// <summary>
+    /// 音域读数那块（38 根细条）。窗口只喂数据 —— 窗口怎么切、哪几格亮、读数行写什么字
+    /// 全在 <see cref="PitchRangeReadout"/> 里（纯函数，另有测试盯着）。
+    /// </summary>
+    private readonly PitchRangeView _range;
+
+    /// <summary>上一次画到条子上的那个音。<see cref="OnProgressTick"/> 100ms 一次，同一个音不必重画。</summary>
+    private string _rangeNote = "";
+
     private Song? _song;
     private bool _running;
 
@@ -89,7 +98,11 @@ public partial class PerformerWindow : Window
         TimingCombo.SelectedIndex = 1;              // 标准档（InputTiming.FromIndex(1)）
         CountdownCombo.ItemsSource = CountdownNames;
         CountdownCombo.SelectedIndex = 1;           // 5 秒
-        TrackCombo.SelectionChanged += (_, _) => ShowReady();
+        TrackCombo.SelectionChanged += (_, _) =>
+        {
+            ShowReady();
+            RefreshRange();      // 换一条轨，条子跟着换（亮的那片跟着这首曲子的音域走）
+        };
         _hotkeys.Panic += OnPanicHotkey;
 
         // 判定要的那一段（倒计时 / 演奏中）由这里现问现答：钩子那边不缓存阶段，
@@ -102,6 +115,12 @@ public partial class PerformerWindow : Window
 
         _progressTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(ProgressIntervalMs) };
         _progressTimer.Tick += OnProgressTick;
+
+        // 读数那块在这儿认领：控件是 XAML 摆好的，这里只把「哪几个控件拼成一块读数」告诉它。
+        // 数目对不上（少写一根细条、读数行少一个槽）它当场抛 —— 那种毛病画出来只是「有点不对」，
+        // 不抛就一直没人发现。
+        _range = new PitchRangeView(RangeBar, RangeKeys, RangeSummary, RangeAlert, RangeAlertTitle, RangeAlertSub);
+        RefreshRange();                             // 还没曲子：38 根全暗、读数行不出现
 
         SetStatus("就绪 · 先打开一首 MIDI", Status.Idle);
     }
@@ -184,6 +203,10 @@ public partial class PerformerWindow : Window
             TrackCombo.SelectedIndex = -1;
             SetStatus($"就绪 · {song.Tracks.Count} 条轨里一条都弹不了，去编辑器里处理一下", Status.Idle);
         }
+
+        // 两条路都要走一遍：换上新曲子（或换上一首一条可弹的都没有的）之后，
+        // 条子上不该还留着上一首的亮片
+        RefreshRange();
     }
 
     /// <summary>下拉框里的一行：序号 + 轨名 + 音数。</summary>
@@ -193,6 +216,32 @@ public partial class PerformerWindow : Window
     /// </remarks>
     private static string Describe(PlayableTrack r)
         => $"{r.SongTrackIndex + 1:D2} {r.Track.Name} · {r.Track.NoteCount} 个音";
+
+    // ==================== 音域读数（38 根细条） ====================
+
+    /// <summary>
+    /// 把当前这条轨的音域画到那 38 格上。
+    ///
+    /// 喂进去的是**原谱**音高加这条轨的移调 —— 和执行时 <c>StartPerformance</c> 递给
+    /// <c>NoteMapper.Map</c> 的是同一对；基准八度也不在这儿另算（<c>NoteMapper.AutoBaseOctave</c>，
+    /// 两个真相源迟早会对不上）。所以条子上亮的那几格，就是真按下去的那几格。
+    ///
+    /// 「正在响的那个音」从事件表那串字（<c>NoteMapper.Describe</c>）反解出来：
+    /// 派发线程递到界面的只有那串字，音高是它带过来的唯一一样东西。
+    /// </summary>
+    private void RefreshRange()
+    {
+        _rangeNote = _currentNote;
+
+        // 和 OnStart / ShowReady 同一个下标含义：这张表里的第几条，不是原曲里的第几条
+        int index = TrackCombo.SelectedIndex;
+        var track = index >= 0 && index < _playable.Count ? _playable[index].Track : null;
+
+        _range.Show(
+            track?.Notes.Select(n => n.Pitch).ToList(),
+            track?.Transpose ?? 0,
+            PitchRangeReadout.PitchOfLabel(_currentNote));
+    }
 
     // ==================== 开始 / 急停 ====================
 
@@ -308,6 +357,10 @@ public partial class PerformerWindow : Window
             _progressTimer.Stop();
             SetRunning(false);
 
+            // 细边收掉：没在响了，条子上不该还留着一根套边的
+            _currentNote = "";
+            RefreshRange();
+
             // 出错原文由用例层转交，中文措辞在界面这一层
             SetStatus(
                 _performance.Error is { } error ? $"演奏中断：{error}" : "已停止 · 已松开所有按键",
@@ -340,6 +393,10 @@ public partial class PerformerWindow : Window
         }
 
         overlay.ShowPlaying(_currentNote, _performance.MusicNow, _performance.TotalSeconds);
+
+        // 正在响的那一根：换音了才重画。100ms 一次，同一个音不必把那 38 格重算一遍
+        // （而且细边本来也不会动）。
+        if (_currentNote != _rangeNote) RefreshRange();
 
         if (_currentNote.Length > 0)
             SetStatus($"演奏中 · {_currentNote}", Status.Running);

@@ -164,6 +164,94 @@
       <Setter Property="Foreground" Value="{DynamicResource TokenInk}" />
     </Style>
 
+    <!-- ==================== 音域读数（38 根细条） ==================== -->
+    <!--
+      一根细条 = 一个半音。底色是「这格没用到」，亮起来是「这首歌用到了」——
+      所以条子的根数本身就是「半音也看得见」这条要求的答案。
+
+      **全部同高（24px），这是硬要求**：病根是嵌套布局默认的 stretch ——
+      里面只要有一根比别人高，它所在的**那一段整体**会被撑起来，那一段看着就比别的段高一截。
+      所以段容器一律显式 Height=24 + VerticalAlignment=Bottom，细条也一律 Bottom，
+      而状态**只换底色 / 不透明度 / 描边，一根都不用高度分档**。
+    -->
+    <Style Selector="Border.s38">
+      <Setter Property="Height" Value="24" />
+      <Setter Property="VerticalAlignment" Value="Bottom" />
+      <Setter Property="Background" Value="{DynamicResource TokenSurface3}" />
+      <Setter Property="CornerRadius" Value="2" />
+      <!--
+        右边那道 2px 的缝用外边距做（原型里是 border-right + background-clip:padding-box）：
+        这样每根的布局盒子宽度正好是 1 个单位，四段的 12:12:12:2 才真的等于 12:12:12:2。
+        段容器上**不许加 Spacing**（等于 CSS 的 gap）—— 12 根的那段缝多，每根会偏窄一点点。
+      -->
+      <Setter Property="Margin" Value="0,0,2,0" />
+    </Style>
+
+    <!-- 升号音（黑键）只降不透明度：一根细条只剩 8px 的肉，再换底色或描边就糊成一团 -->
+    <Style Selector="Border.s38.sharp">
+      <Setter Property="Opacity" Value="0.55" />
+    </Style>
+
+    <!-- 亮着 = 这首歌用到的音。排在 .sharp 之后：升号音又亮又黑键时，亮的那一档说了算 -->
+    <Style Selector="Border.s38.lit">
+      <Setter Property="Background" Value="{DynamicResource TokenAccent}" />
+      <Setter Property="Opacity" Value="1" />
+    </Style>
+
+    <!--
+      正在响的那一根：**跟别人一样高**，只在同一高度上套一圈细边。
+      原型那边这一圈是 box-shadow 画的（1.5px 的 TokenInk，不带模糊）。
+      Avalonia 的 BoxShadow 只吃字面色、接不了令牌，所以改用同一个盒子里的内描边画这一圈 TokenInk。
+      内描边（不是外描边）才不改盒子尺寸 —— 改一点点宽度，四段就不等宽了。
+    -->
+    <Style Selector="Border.s38.now">
+      <Setter Property="BorderThickness" Value="1.5" />
+      <Setter Property="BorderBrush" Value="{DynamicResource TokenInk}" />
+    </Style>
+
+    <!--
+      越界：亮着的一律变红。灰的那些保持灰 ——
+      红的是「这首歌现在弹不出来」这个状态，不是「所有音都错了」，把没用到的也涂红只会淹掉信号。
+      排在 .lit 之后：同优先级的 setter 谁后写谁赢。
+    -->
+    <Style Selector="Grid.bad Border.s38.lit">
+      <Setter Property="Background" Value="{DynamicResource TokenStop}" />
+    </Style>
+
+    <!-- 段头那四个音名（C3 / C4 / C5 / C6）用等宽字：它们要对齐各段左端 -->
+    <Style Selector="TextBlock.k38">
+      <Setter Property="FontFamily" Value="{DynamicResource TokenFontMono}" />
+      <Setter Property="FontSize" Value="9.5" />
+      <Setter Property="Foreground" Value="{DynamicResource TokenInk}" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+
+    <!-- 常态读数行。加粗的那几段是强调（用到的音数 / 平移量 / 正在响的音），见 PitchRangeReadout.SummarySlots -->
+    <Style Selector="TextBlock.sum38">
+      <Setter Property="Margin" Value="0,7,0,0" />
+      <Setter Property="FontSize" Value="10.5" />
+      <Setter Property="Foreground" Value="{DynamicResource TokenInkFaint}" />
+      <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
+
+    <!-- 越界那一声：居中、红、大一档。副行退回去当陪衬 -->
+    <Style Selector="TextBlock.alert38">
+      <Setter Property="FontSize" Value="12.5" />
+      <Setter Property="FontWeight" Value="Bold" />
+      <Setter Property="Foreground" Value="{DynamicResource TokenStop}" />
+      <Setter Property="HorizontalAlignment" Value="Center" />
+      <Setter Property="TextAlignment" Value="Center" />
+      <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
+    <Style Selector="TextBlock.alert-sub38">
+      <Setter Property="FontSize" Value="10.5" />
+      <Setter Property="FontWeight" Value="Normal" />
+      <Setter Property="Foreground" Value="{DynamicResource TokenInkFaint}" />
+      <Setter Property="HorizontalAlignment" Value="Center" />
+      <Setter Property="TextAlignment" Value="Center" />
+      <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
+
   </Window.Styles>
 
   <StackPanel Margin="14" Spacing="11">
@@ -196,6 +284,109 @@
                 HorizontalAlignment="Left" Click="OnGoEditor" />
       </StackPanel>
     </Border>
+
+    <!-- ============ 音域读数（38 根细条） ============ -->
+    <!--
+      这一块横跨整行、不缩进 84px：原型里 .p38 就是 .pwin 的直接子元素，和 .prow 平级。
+      位置在「微调」下面、中间不插任何东西（这两块是一个东西的两半：挪半音，条子整片跟着挪一根）。
+      本批还没有微调那一行，所以它现在直接压在「时序」上面 —— 微调落地时插在它上面即可。
+
+      四段 = 手上四段：前三段各 12 个半音（低八度 / 基准八度 / 高八度），
+      尾巴两个是「右键 + 逗号」（B+2 的 do 和 #do）—— 12:12:12:2 这个比例是格子的权重给的，
+      不是拿眼睛配的。中间那三个 8px 是**独立空列**，不是 Spacing：Spacing 会让 12 根的那段
+      每根偏窄一点点，四段就不一样宽了。
+
+      条子上的状态全在 PitchRangeView.Show 里按算法刷（哪些亮、哪根套边、越界变红），
+      这里只摆骨架：38 根全暗、段头写 C3/C4/C5/C6、读数行不出现（还没曲子，读数是这首歌的量）。
+    -->
+    <StackPanel x:Name="PitchRange" Margin="0,3,0,0">
+
+      <!-- 38 根细条。段容器的格子定义与下面那行音名**必须一模一样**，音名才落在各段左端 -->
+      <Grid x:Name="RangeBar" ColumnDefinitions="12*,8,12*,8,12*,8,2*" Height="24">
+
+        <Grid Grid.Column="0" ColumnDefinitions="*,*,*,*,*,*,*,*,*,*,*,*"
+              Height="24" VerticalAlignment="Bottom">
+          <Border Grid.Column="0" Classes="s38" />
+          <Border Grid.Column="1" Classes="s38" />
+          <Border Grid.Column="2" Classes="s38" />
+          <Border Grid.Column="3" Classes="s38" />
+          <Border Grid.Column="4" Classes="s38" />
+          <Border Grid.Column="5" Classes="s38" />
+          <Border Grid.Column="6" Classes="s38" />
+          <Border Grid.Column="7" Classes="s38" />
+          <Border Grid.Column="8" Classes="s38" />
+          <Border Grid.Column="9" Classes="s38" />
+          <Border Grid.Column="10" Classes="s38" />
+          <Border Grid.Column="11" Classes="s38" />
+        </Grid>
+
+        <Grid Grid.Column="2" ColumnDefinitions="*,*,*,*,*,*,*,*,*,*,*,*"
+              Height="24" VerticalAlignment="Bottom">
+          <Border Grid.Column="0" Classes="s38" />
+          <Border Grid.Column="1" Classes="s38" />
+          <Border Grid.Column="2" Classes="s38" />
+          <Border Grid.Column="3" Classes="s38" />
+          <Border Grid.Column="4" Classes="s38" />
+          <Border Grid.Column="5" Classes="s38" />
+          <Border Grid.Column="6" Classes="s38" />
+          <Border Grid.Column="7" Classes="s38" />
+          <Border Grid.Column="8" Classes="s38" />
+          <Border Grid.Column="9" Classes="s38" />
+          <Border Grid.Column="10" Classes="s38" />
+          <Border Grid.Column="11" Classes="s38" />
+        </Grid>
+
+        <Grid Grid.Column="4" ColumnDefinitions="*,*,*,*,*,*,*,*,*,*,*,*"
+              Height="24" VerticalAlignment="Bottom">
+          <Border Grid.Column="0" Classes="s38" />
+          <Border Grid.Column="1" Classes="s38" />
+          <Border Grid.Column="2" Classes="s38" />
+          <Border Grid.Column="3" Classes="s38" />
+          <Border Grid.Column="4" Classes="s38" />
+          <Border Grid.Column="5" Classes="s38" />
+          <Border Grid.Column="6" Classes="s38" />
+          <Border Grid.Column="7" Classes="s38" />
+          <Border Grid.Column="8" Classes="s38" />
+          <Border Grid.Column="9" Classes="s38" />
+          <Border Grid.Column="10" Classes="s38" />
+          <Border Grid.Column="11" Classes="s38" />
+        </Grid>
+
+        <!-- 尾巴两个音：只有两根细条宽，音名写不下，所以下面那行的字从右端往左长 -->
+        <Grid Grid.Column="6" ColumnDefinitions="*,*" Height="24" VerticalAlignment="Bottom">
+          <Border Grid.Column="0" Classes="s38" />
+          <Border Grid.Column="1" Classes="s38" />
+        </Grid>
+
+      </Grid>
+
+      <!-- 段头那行：只写段头那个音名，手位（按住左键 / 不按 / 右键 / 右键+逗号）不在界面上重复 -->
+      <Grid x:Name="RangeKeys" ColumnDefinitions="12*,8,12*,8,12*,8,2*" Margin="0,5,0,0">
+        <TextBlock Grid.Column="0" x:Name="RangeKey0" Classes="k38" Text="C3" />
+        <TextBlock Grid.Column="2" x:Name="RangeKey1" Classes="k38" Text="C4" />
+        <TextBlock Grid.Column="4" x:Name="RangeKey2" Classes="k38" Text="C5" />
+        <TextBlock Grid.Column="6" x:Name="RangeKey3" Classes="k38" Text="C6"
+                   HorizontalAlignment="Right" />
+      </Grid>
+
+      <!--
+        常态读数行：十个槽一字排开，槽 1 / 4 / 8 是强调段（加粗 + 强调色）。
+        槽的位置是**契约**：PitchRangeView 按顺序把这十个写进去，PitchRangeReadout.SummarySlots
+        按同样的顺序产出，缺一个就在构造函数里抛。所以这十个 <Run> 必须**挨着写、中间不留空白** ——
+        换行留白会多出几个只有空格的 Run，槽就对不上了。它们的 Text 一开始都是空的（等于不出现）。
+      -->
+      <TextBlock x:Name="RangeSummary" Classes="sum38" IsVisible="False"><Run Text="" /><Run Text="" Foreground="{DynamicResource TokenAccent}" FontWeight="SemiBold" /><Run Text="" /><Run Text="" /><Run Text="" Foreground="{DynamicResource TokenAccent}" FontWeight="SemiBold" /><Run Text="" /><Run Text="" /><Run Text="" /><Run Text="" Foreground="{DynamicResource TokenAccent}" FontWeight="SemiBold" /><Run Text="" /></TextBlock>
+
+      <!--
+        越界那一声：常态读数行**换掉**成这一组（互斥，不是并列）。两行字都由代码写
+        （PitchRangeReadout.AlertTitle / AlertSub）—— 这儿不写样例，免得多出一个真相源。
+      -->
+      <StackPanel x:Name="RangeAlert" IsVisible="False" Margin="0,8,0,0" Spacing="3">
+        <TextBlock x:Name="RangeAlertTitle" Classes="alert38" Text="" />
+        <TextBlock x:Name="RangeAlertSub" Classes="alert-sub38" Text="" />
+      </StackPanel>
+
+    </StackPanel>
 
     <!-- ============ 时序档位 ============ -->
     <Grid ColumnDefinitions="74,*" ColumnSpacing="10">
